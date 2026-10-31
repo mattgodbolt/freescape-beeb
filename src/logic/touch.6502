@@ -43,80 +43,75 @@ Z_MOVES = &20 : Z_UP = &10
 ZA_AUTO1 tc
 .touch
 {
-    ZA_AUTO1 tf                                 ; the face's cell, for a crossing on one axis
     STZ HitRemembered
-    LDA tc : BEQ remembered                     ; crossing nothing, nothing's entered
-    CMP #X_MOVES OR X_UP : BEQ x_up
-    CMP #X_MOVES : BEQ x_down
-    CMP #Z_MOVES OR Z_UP : BEQ z_up
-    CMP #Z_MOVES : BEQ z_down
-    CMP #Y_MOVES : BEQ y_down
-    CMP #Y_MOVES OR Y_UP : BEQ y_up
+    LDA ix_dirty : BEQ linked
+    JSR link_faces                              ; (an area has loaded)
+.linked
+    LDY tc : BEQ remembered                     ; crossing nothing, nothing's entered
+    CPY #X_MOVES OR X_UP : BEQ x_up
+    CPY #X_MOVES : BEQ x_down
+    CPY #Z_MOVES OR Z_UP : BEQ z_up
+    CPY #Z_MOVES : BEQ z_down
+    CPY #Y_MOVES : BEQ y_down
+    CPY #Y_MOVES OR Y_UP : BEQ y_up
     JMP any
 .x_up
-    LDX CellX : INX : STX tf
+    LDY CellX : INY
+    LDX face_xo,Y
     JMP scan_xo
 .x_down
-    LDA CellX : STA tf
+    LDY CellX
+    LDX face_xe,Y
     JMP scan_xe
 .z_up
-    LDX CellZ : INX : STX tf
+    LDY CellZ : INY
+    LDX face_zo,Y
     JMP scan_zo
 .z_down
-    LDA CellZ : STA tf
+    LDY CellZ
+    LDX face_ze,Y
     JMP scan_ze
 .y_up
-    LDX CellY : INX : STX tf
+    LDY CellY : INY
+    LDX face_yo,Y
     JMP scan_yo
 .y_down
-    LDA CellY : STA tf
+    LDY CellY
+    LDX face_ye,Y
     JMP scan_ye
 .remembered
     LDA HitRemembered : CMP #1                  ; C set for any id but 0
     RTS
 
-    \ FACE_SCAN faces, w1, w2: the objects whose face the crossing is (the
-    \ array faces holds tf there), and which hold the current cell on the
-    \ other two axes (w1, w2), in the original's order. tf goes into the
-    \ compares, and after the last object, where it stops the loop.
-MACRO FACE_SCAN faces, w1, w2
-    LDA tf : STA c1+1 : STA c2+1
-    LDX ix_n : STA faces,X                      ; (the stop)
-    LDX #0
+    \ FACE_LIST next, w1, w2: from object X, and on along the list next of
+    \ the objects with the same face, those which hold the current cell on
+    \ the other two axes (w1, w2), in the original's order, to the list's
+    \ end (X's bit 7).
+MACRO FACE_LIST next, w1, w2
 .object
-    LDA faces,X
-.c1
-    CMP #0 : BEQ face
-    INX
-    LDA faces,X
-.c2
-    CMP #0 : BEQ face
-    INX
-    BRA object
-.face
-    CPX ix_n : BEQ done
-    JSR w1 : BNE next
-    JSR w2 : BNE next
-    JSR far_answer : BCC next
+    TXA : BMI done
+    JSR w1 : BNE skip
+    JSR w2 : BNE skip
+    JSR far_answer : BCC skip
     RTS
-.next
-    INX
+.skip
+    LDA next,X : TAX
     BRA object
 .done
     JMP remembered
 ENDMACRO
 .scan_xo
-    FACE_SCAN ix_xo, within_y, within_z
+    FACE_LIST next_xo, within_y, within_z
 .scan_xe
-    FACE_SCAN ix_xe, within_y, within_z
+    FACE_LIST next_xe, within_y, within_z
 .scan_zo
-    FACE_SCAN ix_zo, within_x, within_y
+    FACE_LIST next_zo, within_x, within_y
 .scan_ze
-    FACE_SCAN ix_ze, within_x, within_y
+    FACE_LIST next_ze, within_x, within_y
 .scan_yo
-    FACE_SCAN ix_yo, within_x, within_z
+    FACE_LIST next_yo, within_x, within_z
 .scan_ye
-    FACE_SCAN ix_ye, within_x, within_z
+    FACE_LIST next_ye, within_x, within_z
 
     \ Any other crossing: each object as the original tests it ($A5CE,
     \ $A64E, $A6CE): through a face on one axis, holding the other two or
@@ -281,6 +276,39 @@ ENDMACRO
 .face_z
     FACE Z_MOVES, Z_UP, ix_zo, ix_ze, CellZ
 }
+
+\ link_faces: the lists of the objects by face, from the index: for each of
+\ the six face arrays (ix_xo, ix_xe and the rest), face_xo and the rest
+\ give, by cell, the first object whose face it is, and next_xo and the
+\ rest the next one, in the index's order; &FF ends a list. Built as
+\ touch first needs them after an area loads (ix_dirty).
+.link_faces
+{
+    STZ ix_dirty
+    LDA #&FF : LDX #0
+.clear
+    STA face_xo,X : STA face_xe,X : STA face_yo,X
+    STA face_ye,X : STA face_zo,X : STA face_ze,X
+    INX : BNE clear
+    LDX ix_n                                    ; the last object first, so the lists run in order
+.object
+    DEX : BMI done
+MACRO LINK faces, head, next
+    LDY faces,X
+    LDA head,Y : STA next,X
+    TXA : STA head,Y
+ENDMACRO
+    LINK ix_xo, face_xo, next_xo
+    LINK ix_xe, face_xe, next_xe
+    LINK ix_yo, face_yo, next_yo
+    LINK ix_ye, face_ye, next_ye
+    LINK ix_zo, face_zo, next_zo
+    LINK ix_ze, face_ze, next_ze
+    BRA object
+.done
+    RTS
+}
+ASSERT IX_MAX <= 128                            ; (bit 7 ends a list)
 
 \ --- $BCCB: keeping clear of faces -----------------------------------------
 

@@ -79,22 +79,39 @@ ZA_AUTO2 fa
 
 \ lookup ($A8BA): lk = the object with id FoundId: for A = 0, among the
 \ globals, then the area's objects; else among area A's. C set if found.
+\ The globals and the area's are the index's (src/logic/index.6502), with
+\ their ids: the area's from 0, then the globals', and FoundId put after
+\ the last stops each scan.
 ZA_AUTO2 lk
 .lookup
 {
     ZA_AUTO1 n
     CMP #0 : BNE other
-    LDA #LO(Globals) : STA lk
-    LDA #HI(Globals) : STA lk+1
-    LDA NGlobals : STA n                        ; (0 is 256)
+    LDA FoundId
+    LDX ix_n : STA ix_id,X                      ; (the stop)
+    LDX AreaObjects
 .global
-    JSR is_it : BEQ found
-    JSR next_lk
-    DEC n : BNE global
-    LDA AreaObjPtr : STA lk
-    LDA AreaObjPtr+1 : STA lk+1
-    LDA AreaObjects
-    BRA count
+    CMP ix_id,X : BEQ global_is
+    INX
+    CMP ix_id,X : BEQ global_is
+    INX
+    BRA global
+.global_is
+    CPX ix_n : BNE indexed
+    LDX #0                                      ; not a global: the area's
+.area
+    CMP ix_id,X : BEQ area_is
+    INX
+    CMP ix_id,X : BEQ area_is
+    INX
+    BRA area
+.area_is
+    CPX AreaObjects : BCS none
+.indexed
+    LDA ix_pl,X : STA lk
+    LDA ix_ph,X : STA lk+1
+    SEC
+    RTS
 .other
     JSR find_area : BCC none
     LDA fa : CLC : ADC #&19 : STA lk

@@ -140,9 +140,29 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     STZ n+1
     BRA divided
 .long
+    \ A dividend whose top 16 bits are below the divisor (the rest of the
+    \ walk's, nearly): those are the remainder so far, and the low 16 bits
+    \ are the quotient's. (|cD| <= &8000, so the remainder doubled and a bit
+    \ fits 16 bits.)
+    LDA n+3 : BNE general
+    LDA cD+1 : BNE word
+    LDA n+2 : CMP cD : BCS general
+.word
+    LDA n+2 : STA rem : STZ rem+1
+    LDY #16
+.d16
+    ASL n : ROL n+1
+    ROL rem : ROL rem+1
+    LDA rem : SEC : SBC cD : TAX
+    LDA rem+1 : SBC cD+1 : BCC d16_next
+    STA rem+1 : STX rem
+    INC n
+.d16_next
+    DEY : BNE d16
+    BRA divided
+.general
     \ n / cD, restoring, from the dividend's first non-zero byte: the
-    \ quotient in n, the remainder in rem. (|cD| <= &8000, so the remainder
-    \ doubled and a bit fits 16 bits.)
+    \ quotient in n, the remainder in rem.
     STZ rem : STZ rem+1
     LDY #32
 .skip

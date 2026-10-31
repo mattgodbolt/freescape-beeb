@@ -1,16 +1,16 @@
 \ ***************************************************************************
 \ FREESCAPE for the BBC Master - the index of the area's objects
-\ (src/logic/touch.6502 scans it)
+\ (src/logic/touch.6502 and lookup scan it)
 \
 \ The original scans the area's records and the globals' for every
-\ crossing ($A597). Their cells and sizes change only as an area loads
-\ (the rig's parts move then), so the logic keeps them in an index in main
-\ RAM (ix_*, src/logic/vars.6502), built from the records in the
-\ original's order as the area loads: each object's first cell and end
-\ (first plus size, AND 255) on each axis, and its record. Its flags, type
-\ and id, which the FCL changes or the answer needs, are read from the
-\ record itself (answer), as the original reads them. In LOGIC_BANK, with
-\ the records.
+\ crossing ($A597), and for an object by id ($A8BA). Their cells, sizes and
+\ ids change only as an area loads (the rig's parts move then), so the
+\ logic keeps them in an index in main RAM (ix_*, src/logic/vars.6502),
+\ built from the records in the original's order as the area loads: each
+\ object's first cell and end (first plus size, AND 255) on each axis, its
+\ id, and its record. Its flags and type, which the FCL changes or the
+\ answer needs, are read from the record itself (answer), as the original
+\ reads them. In LOGIC_BANK, with the records.
 \ ***************************************************************************
 
 \ index_objects: the index, from the area's records (AreaObjPtr,
@@ -32,6 +32,7 @@
     LDA #HI(Globals) : STA p+1
     JSR records
     STX ix_n
+    LDA #1 : STA ix_dirty                       ; (touch's lists to build again)
     RTS
 .records
     LDA p : STA ix_pl,X
@@ -42,6 +43,7 @@
     LDY #5 : CLC : ADC (p),Y : STA ix_ye,X
     LDY #3 : LDA (p),Y : STA ix_zo,X
     LDY #6 : CLC : ADC (p),Y : STA ix_ze,X
+    LDY #7 : LDA (p),Y : STA ix_id,X
     LDY #8 : LDA (p),Y
     CLC : ADC p : STA p
     BCC same

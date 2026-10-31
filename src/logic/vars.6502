@@ -76,15 +76,17 @@ SECTION LogicWork, org = LOGIC_WORK, guard = LOGIC_WORK_END, filename = "LOGICW"
     \ the original's order, which src/logic/touch.6502 scans (built from
     \ the records by index_objects as an area loads, and by logic_init).
     \ For object i: its first cell and its end (first plus size, AND 255)
-    \ on each axis, and its record's address.
+    \ on each axis, its id, and its record's address.
 IX_MAX = 48
 .ix_n           SKIP 1                  ; the objects indexed
+.ix_dirty       EQUB 1                  ; non-zero: indexed afresh, and touch's lists by face are to build
 .ix_xo          SKIP IX_MAX
 .ix_xe          SKIP IX_MAX
 .ix_yo          SKIP IX_MAX
 .ix_ye          SKIP IX_MAX
 .ix_zo          SKIP IX_MAX
 .ix_ze          SKIP IX_MAX
+.ix_id          SKIP IX_MAX
 .ix_pl          SKIP IX_MAX
 .ix_ph          SKIP IX_MAX
 ENDSECTION

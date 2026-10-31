@@ -177,6 +177,7 @@ ZA_AUTO1 mc                                     ; the axes the move crosses, as 
     LDA mc : BNE walk
     JMP margin
 .walk
+    STZ next_crossing.known : STZ next_crossing.known+1 : STZ next_crossing.known+2
     \ the deltas
     LDA TargetX : SEC : SBC PlayerX : STA MoveScratch+9
     LDA TargetX+1 : SBC PlayerX+1 : STA MoveScratch+10
@@ -317,6 +318,7 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
     JMP z_first
 .x_first
     LDA mc : AND #X_MOVES OR X_UP : STA b
+    LDX #0 : LDA CellX : JSR recall : BCS x_known
     LDA mc : AND #X_UP : CMP #X_UP              ; (C: going up)
     LDA CellX : JSR boundary
     STA MoveScratch+3 : STX MoveScratch+4
@@ -328,6 +330,8 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
     LDX #13 : LDY #9 : JSR coord_at             ; z
     LDA cres : STA MoveScratch+7
     LDA cres+1 : STA MoveScratch+8
+    LDX #0 : JSR keep
+.x_known
     LDA mc : AND #Z_MOVES : BEQ x_y
     LDX #7 : LDA CellZ : LDY #Z_UP : JSR boundary_with
     CMP #1 : BCC x_y : BNE z_first              ; (2: z crosses first)
@@ -343,9 +347,13 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
     RTS
     \ $A07E: z, if z has a crossing left.
 .z_first
-    LDA mc : AND #Z_MOVES OR Z_UP : BEQ y_only
-    LDA MoveScratch+2 : CMP CellZ : BEQ y_only
+    LDA mc : AND #Z_MOVES OR Z_UP : BEQ to_y
+    LDA MoveScratch+2 : CMP CellZ : BNE z_on
+.to_y
+    JMP y_only
+.z_on
     LDA mc : AND #Z_MOVES OR Z_UP : STA b
+    LDX #2 : LDA CellZ : JSR recall : BCS z_known
     LDA mc : AND #Z_UP : CMP #Z_UP
     LDA CellZ : JSR boundary
     STA MoveScratch+7 : STX MoveScratch+8
@@ -357,15 +365,19 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
     LDX #11 : LDY #13 : JSR coord_at            ; y
     LDA cres : STA MoveScratch+5
     LDA cres+1 : STA MoveScratch+6
+    LDX #2 : JSR keep
+.z_known
     LDA mc : AND #Y_MOVES : BEQ done
     LDX #5 : LDA CellY : LDY #Y_UP : JSR boundary_with
-    CMP #1 : BCC done : BNE y_only
-    LDA MoveScratch+1 : CMP CellY : BEQ done    ; (decision 18)
+    CMP #1 : BCC z_done : BNE to_y
+    LDA MoveScratch+1 : CMP CellY : BEQ z_done  ; (decision 18)
     LDA mc : AND #Y_MOVES OR Y_UP : TSB b
+.z_done
     RTS
     \ $A107: y.
 .y_only
     LDA mc : AND #Y_MOVES OR Y_UP : STA b
+    LDX #1 : LDA CellY : JSR recall : BCS y_known
     LDA mc : AND #Y_UP : CMP #Y_UP
     LDA CellY : JSR boundary
     STA MoveScratch+5 : STX MoveScratch+6
@@ -377,7 +389,44 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
     LDX #13 : LDY #11 : JSR coord_at            ; z
     LDA cres : STA MoveScratch+7
     LDA cres+1 : STA MoveScratch+8
+    LDX #1 : JMP keep
+.y_known
     RTS
+
+    \ An axis's next crossing point depends on nothing that changes in the
+    \ walk but its cell, so each axis's (0 x, 1 y, 2 z) is kept, with the
+    \ cell it was for, until the cell moves on (known: the walk has one).
+    \ recall: C set and the point of axis X's crossing from cell A into
+    \ MoveScratch+3 if it's kept; else C clear, and A noted as the cell.
+.recall
+{
+    LDY known,X : BEQ unknown
+    CMP cell,X : BNE unknown
+    LDY offset,X
+    FOR i = 0..5
+        LDA point + i,Y : STA MoveScratch + 3 + i
+    NEXT
+    SEC
+    RTS
+.unknown
+    STA cell,X
+    CLC
+    RTS
+}
+    \ keep: the point in MoveScratch+3 kept as axis X's.
+.keep
+{
+    LDY offset,X
+    FOR i = 0..5
+        LDA MoveScratch + 3 + i : STA point + i,Y
+    NEXT
+    LDA #1 : STA known,X
+    RTS
+}
+.known  SKIP 3                                  ; non-zero: the axis's point is kept ...
+.cell   SKIP 3                                  ; ... for this cell
+.point  SKIP 3 * 6                              ; x, y and z at its crossing
+.offset EQUB 0, 6, 12
 
     \ boundary: A (low), X (high) = the boundary of cell A: the next cell's
     \ first unit if C is set (going up), else this cell's.
