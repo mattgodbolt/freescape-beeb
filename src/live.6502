@@ -51,8 +51,7 @@ ENDIF
 \   BANK_RASTER        the rasteriser's code, row runs and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
 \   the maths' tables (copied in at start from where !BOOT loaded them, at
-\   HAZEL_LOAD), the transform's cache (ObjCache) and the pipeline's work
-\   (ObjWork, the camera with it)
+\   HAZEL_LOAD) and the pipeline's work (ObjWork, the camera with it)
 \ Main RAM, below &3000 (which ACCCON's X switches):
 \   &0E00 on: this code (LIVE), area_enter's (AreaCode: it pages the
 \   records' banks, so it can't be in one), the pipeline's tables
@@ -60,6 +59,9 @@ ENDIF
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
 \   array for array, so no copy goes between them
+\ Main RAM's &3000 on, below the screen: the transform's cache (ObjCache),
+\   which only objects_frame reads and writes, so live_loop clears ACCCON's
+\   X before it (frame_begin sets X for the buffer drawn, after)
 \
 \ A routine in a bank is called with its bank paged (PAGE); area_enter puts
 \ back the bank in ROMSEL_COPY, so PAGE keeps that too.
@@ -80,15 +82,17 @@ MACRO PAGE bank
     LDA #bank : STA ROMSEL_COPY : STA romsel
 ENDMACRO
 
-\ HAZEL: the maths' tables, then the cache and the work.
+\ HAZEL: the maths' tables, then the work.
 HAZEL_LOAD  = &4000             ; where !BOOT loads the tables (the screen, cleared after)
 SECTION Hazel, org = &C000, load = &FFFF0000 OR HAZEL_LOAD, filename = "HAZEL"
 INCLUDE "../build/maths/tables.6502"
 .hazel_tables_end
 ENDSECTION
-SECTION ObjCache, org = hazel_tables_end, guard = &E000, virtual = TRUE
+SECTION ObjWork, org = hazel_tables_end, guard = &E000, virtual = TRUE
 ENDSECTION
-SECTION ObjWork, org = obj_cache_end, guard = &E000, virtual = TRUE
+\ The cache: main RAM's &3000 on, with ACCCON's X clear.
+OBJ_CACHE_ORG = &3000
+SECTION ObjCache, org = OBJ_CACHE_ORG, guard = SCREEN, virtual = TRUE
 ENDSECTION
 ASSERT HAZEL_LOAD + (hazel_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
@@ -96,6 +100,21 @@ ASSERT HAZEL_LOAD + (hazel_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 SECTION ObjCode, org = &8000, guard = &C000, filename = "OCODE", cmos = TRUE
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
+\ live_shared: never called. It reaches the projection's shared-coordinate
+\ entries as a caller would (mk/objects.mk's check_shared), since no stage
+\ calls them yet, so that baron places their zero page.
+.live_shared
+    ZA_ENTRY
+    JSR shared_in : JSR project
+    JSR shared_in : JSR project_z
+    JSR shared_in : JSR project_y
+    RTS
+.shared_in
+    ZA_DISCARD proj_v
+    FOR i = 0..8
+        STZ proj_v + i
+    NEXT
+    RTS
 ENDSECTION
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
@@ -256,6 +275,7 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
     DEX : BPL camera
     JSR clock : LDX #T_FRONT : JSR clock_from
     PAGE BANK_OBJ
+    LDA #ACCCON_X : TRB acccon                  ; (main RAM's &3000 on: the cache)
     JSR objects_frame
 .live_front_done                                ; (tools/livecheck.mjs times objects_frame to here)
     JSR clock : LDX #T_FRONT : JSR clock_to
@@ -277,7 +297,7 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 .named
     JSR text_catch_up
     JSR frame_end
-    BRA live_loop
+    JMP live_loop
 
 INCLUDE "screen.6502"
 INCLUDE "irq.6502"
@@ -346,7 +366,8 @@ ASSERT LO(hazel_tables_end) = 0
     CPX #REGIONS : BNE region
     RTS
 .regions
-    EQUW obj_cache_start, obj_work_end
+    EQUW hazel_tables_end, obj_work_end
+    EQUW OBJ_CACHE_ORG, obj_cache_end           ; (with ACCCON's X clear)
     EQUW obj_area_start, obj_area_end
     EQUW RASTER_IN_ORG, raster_in_end
 REGIONS = P% - regions
@@ -1019,10 +1040,9 @@ ENDSECTION
 SECTION Work
 .work_end
 ENDSECTION
-obj_cache_start = hazel_tables_end
 obj_area_start = obj_const_end
 ASSERT obj_work_end <= &E000 AND raster_state_end <= &C000 AND text_ram_end <= &C000
 ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat
-ASSERT obj_cache_start < obj_work_end
+ASSERT obj_cache_end <= SCREEN
 \ Read in the frame: never in &3000-&7FFF, which ACCCON's X switches.
 ASSERT obj_area_end <= &3000 AND raster_in_end <= &3000
