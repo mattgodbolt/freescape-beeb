@@ -225,12 +225,17 @@ come with it, to see where the cycles go.
 
 - Zero page: baron's allocator (`ZA_AUTO`), with long-lived state in fixed
   locations.
+- `&0800-&0CFF`: the player logic's variables, `LogicWork`
+  (`docs/research/logic6502.md`).
 - `&0E00-&2FFF`: the engine's main code.
 - `&3000-&3FFF`: per-buffer data only (section 4, stage 10).
 - `&4000-&7FFF`: the screen, 16K in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
   table) and the row-run code.
-- Sideways RAM banks 4-7: the area records, more code.
+- Sideways RAM banks 4-7: the area records, more code. The player logic
+  has two: `LOGIC_BANK`, Driller's database in the original's layout and
+  the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
+  with room to share.
 
 The tracks size these as they go, and `make memory` reports what each
 region holds.
