@@ -1,0 +1,201 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the transform's products (docs/engine.md,
+\ stage 3; tools/model/maths.py's mul and dot3, which these match exactly)
+\
+\ A signed 16-bit coordinate by a signed byte (a matrix coefficient, 1.0 =
+\ 64), to 24 bits, by quarter squares: a * b = f(a + b) - f(a - b), f(n) =
+\ n * n DIV 4, read from sq (f(j)) and ng (f(j - 255)), indexed by the
+\ coordinate's byte with |m| in the instruction. The same coefficient
+\ multiplies many vertices, so mul_set and dot_set patch it into the code
+\ once: |m| into the operands' low bytes (the tables are page-aligned) and
+\ m's sign into the instructions that add the product in.
+\
+\ The coordinate's low byte is unsigned; its high byte is read raw, so a
+\ negative coordinate's product is 65536 |m| too big, which comes off the
+\ top byte. Everything's exact, so the result is the product.
+\
+\ Needs: build/maths/consts.6502 first, and build/maths/tables.6502 placed
+\ somewhere the code can read: HAZEL in the engine, which the caller pages
+\ in (ACCCON's Y). The code patches itself, so it lives in RAM.
+\ ***************************************************************************
+
+\ The arguments and results (baron's, by liveness): the caller writes them
+\ and calls.
+ZA_AUTO 2, mv0              ; mul's coordinate; dot3's first
+ZA_AUTO 2, mv1              ; dot3's second
+ZA_AUTO 2, mv2              ; dot3's third
+ZA_AUTO 3, macc             ; the 24-bit result, two's complement
+ZA_AUTO 3, mrow             ; dot_set's three coefficients
+ZA_AUTO 3, mt               ; a term, before it goes into macc
+
+ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
+
+OP_CLC = &18
+OP_SEC = &38
+OP_ADC_ZP = &65
+OP_SBC_ZP = &E5
+
+\ mul_set: A, a signed byte, is the coefficient mul multiplies by.
+\ Clobbers A, X.
+.mul_set
+{
+    TAX
+    BPL pos
+    EOR #&FF : INC A                    ; |m|, 128 for -128
+.pos
+    STA mul.a1+1 : STA mul.a3+1 : STA mul.a5+1 : STA mul.a7+1
+    STA mul.a9+1
+    EOR #&FF
+    STA mul.a2+1 : STA mul.a4+1 : STA mul.a6+1 : STA mul.a8+1
+    \ a negative coefficient falls into the negation; a positive one skips it
+    LDA #0
+    CPX #&80 : BCS neg
+    LDA #mul.done - mul.neg
+.neg
+    STA mul.sg+1
+    RTS
+}
+
+\ mul: macc = mv0 * m (mul_set's m), 24 bits. Clobbers A, X, Y.
+.mul
+{
+    LDX mv0 : LDY mv0+1
+    SEC
+.a1 LDA sq_lo,Y                         ; |m| H, H mv0's high byte raw
+.a2 SBC ng_lo,Y
+    STA macc+1
+.a3 LDA sq_hi,Y
+.a4 SBC ng_hi,Y
+    STA macc+2
+.a5 LDA sq_lo,X                         ; |m| L, L its low byte
+.a6 SBC ng_lo,X
+    STA macc
+.a7 LDA sq_hi,X
+.a8 SBC ng_hi,X                         ; (a product is >= 0: C = 1 after)
+    CLC : ADC macc+1 : STA macc+1
+    BCC carried
+    INC macc+2
+.carried
+    TYA : BPL positive                  ; mv0 < 0: 65536 |m| less
+    LDA macc+2 : SEC
+.a9 SBC #0
+    STA macc+2
+.positive
+.sg BRA done                            ; patched: on to neg when m < 0
+    ZA_CANJUMP done, neg
+.neg
+    SEC
+    LDA #0 : SBC macc : STA macc
+    LDA #0 : SBC macc+1 : STA macc+1
+    LDA #0 : SBC macc+2 : STA macc+2
+.done
+    RTS
+}
+
+\ DOT_TERM v, at: macc +/- v * |m| (dot_set's), v a signed 16-bit
+\ coordinate in zero page; "at" is the term's first byte, which DT_*
+\ (dot_set's offsets) are counted from.
+DT_A1 = 6
+DT_A2 = 9
+DT_A3 = 14
+DT_A4 = 17
+DT_A5 = 22
+DT_A6 = 25
+DT_A7 = 30
+DT_A8 = 33
+DT_A9 = 51
+DT_OP = 54
+DT_O1 = 57
+DT_O2 = 63
+DT_O3 = 69
+DT_SIZE = 73
+MACRO DOT_TERM v, at
+    LDX v : LDY v+1
+    SEC
+.a1 LDA sq_lo,Y                         ; |m| H
+.a2 SBC ng_lo,Y
+    STA mt+1
+.a3 LDA sq_hi,Y
+.a4 SBC ng_hi,Y
+    STA mt+2
+.a5 LDA sq_lo,X                         ; |m| L
+.a6 SBC ng_lo,X
+    STA mt
+.a7 LDA sq_hi,X
+.a8 SBC ng_hi,X
+    CLC : ADC mt+1 : STA mt+1
+    BCC carried
+    INC mt+2
+.carried
+    TYA : BPL positive                  ; v < 0: 65536 |m| less
+    LDA mt+2 : SEC
+.a9 SBC #0
+    STA mt+2
+.positive
+.op CLC                                 ; patched: SEC, and SBC, when m < 0
+    LDA macc
+.o1 ADC mt
+    STA macc
+    LDA macc+1
+.o2 ADC mt+1
+    STA macc+1
+    LDA macc+2
+.o3 ADC mt+2
+    STA macc+2
+.fin
+    ASSERT a1+1 - at = DT_A1 AND a2+1 - at = DT_A2 AND a3+1 - at = DT_A3
+    ASSERT a4+1 - at = DT_A4 AND a5+1 - at = DT_A5 AND a6+1 - at = DT_A6
+    ASSERT a7+1 - at = DT_A7 AND a8+1 - at = DT_A8 AND a9+1 - at = DT_A9
+    ASSERT op - at = DT_OP AND o1 - at = DT_O1 AND o2 - at = DT_O2
+    ASSERT o3 - at = DT_O3 AND fin - at = DT_SIZE
+ENDMACRO
+
+\ dot_set: mrow's three signed bytes are the coefficients dot3 uses.
+\ Clobbers A, X, Y.
+.dot_set
+{
+    LDY #0                              ; the term's offset from dot3_t0
+    LDX #0                              ; the coefficient
+.term
+    LDA mrow,X : ZA_INDEXEDBY 0..2
+    PHX
+    TAX
+    BPL pos
+    EOR #&FF : INC A
+.pos
+    STA dot3_t0+DT_A1,Y : STA dot3_t0+DT_A3,Y
+    STA dot3_t0+DT_A5,Y : STA dot3_t0+DT_A7,Y
+    STA dot3_t0+DT_A9,Y
+    EOR #&FF
+    STA dot3_t0+DT_A2,Y : STA dot3_t0+DT_A4,Y
+    STA dot3_t0+DT_A6,Y : STA dot3_t0+DT_A8,Y
+    \ add, or subtract when m < 0
+    LDA #OP_CLC : STA dot3_t0+DT_OP,Y
+    LDA #OP_ADC_ZP
+    CPX #&80 : BCC add
+    LDA #OP_SEC : STA dot3_t0+DT_OP,Y
+    LDA #OP_SBC_ZP
+.add
+    STA dot3_t0+DT_O1,Y : STA dot3_t0+DT_O2,Y : STA dot3_t0+DT_O3,Y
+    TYA : CLC : ADC #DT_SIZE : TAY
+    PLX
+    INX : CPX #3 : BNE term
+    RTS
+}
+
+\ dot3: macc = mrow . (mv0, mv1, mv2), dot_set's row, 24 bits. Clobbers
+\ A, X, Y.
+.dot3
+{
+    STZ macc : STZ macc+1 : STZ macc+2
+}
+.dot3_t0
+    DOT_TERM mv0, dot3_t0
+.dot3_t1
+    DOT_TERM mv1, dot3_t1
+.dot3_t2
+    DOT_TERM mv2, dot3_t2
+    RTS
+ASSERT dot3_t1 - dot3_t0 = DT_SIZE AND dot3_t2 - dot3_t1 = DT_SIZE
+
+.maths_end
