@@ -25,8 +25,12 @@
 \
 \ Entry points:
 \   raster_init     once, before the first frame
+\   raster_forget   when something else has drawn on the screens: neither
+\                   is known to hold any background line (raster_background)
 \   raster_frame    the frame in rs_* (below) into the screen ACCCON's X
 \                   selects, with HAZEL paged if the sections are there
+\ Each clobbers A, X and Y, and writes nothing but its own sections, its
+\ zero page and the view. docs/research/raster.md has the design.
 \ ***************************************************************************
 
 RS_FACES    = 128                   ; faces in one frame, at most
