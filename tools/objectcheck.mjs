@@ -172,18 +172,29 @@ m.tm.processor.debugInstruction.add((pc) => {
     current = stack.length ? stack[stack.length - 1].stage : "frame";
     const w = watches.get(pc);
     if (w) w();
+    const k = callees.get(pc);
+    if (k) calls[k] = (calls[k] || 0) + 1;
     return false;
 });
 
+// The calls a frame makes of the arithmetic's routines, for the cost model
+// (docs/research/objects.md): each counted as its first instruction runs.
+const CALLEES = ["rdiv", "umul32", "oc_exact", "near_point", "guard_point", "clip_cut", "project",
+                 "smul16", "fill_point", "fill_edge", "transform_fill"];
+const callees = new Map();
+for (const c of CALLEES) if (has(c)) callees.set(S(c), c);
+let calls = {};
+
 async function counted(entry) {
     tally = {};
+    calls = {};
     stack.length = 0;
     lastPc = -1;
     const r = await m.call(entry, { secs: 30 });
     if (lastPc >= 0) tally[current] = (tally[current] || 0) + (m.tm.elapsedCycles - lastCycles);
     const t = tally;
     tally = null;
-    return { total: r.total, stages: t };
+    return { total: r.total, stages: t, calls };
 }
 
 // --- Stage 1: the matrices.
@@ -236,7 +247,7 @@ for (const view of views) {
         });
     }
     badWrites.length = 0;
-    const { total, stages } = await counted(S(full ? "check_frame" : "check_pass"));
+    const { total, stages, calls: made } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
 
@@ -308,7 +319,7 @@ for (const view of views) {
             fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
     }
     if (verbose) console.log(name, total, JSON.stringify(stages));
-    results.push({ name, total, stages, entrance: /^a\d+-e\d+$/.test(name) });
+    results.push({ name, total, stages, calls: made, entrance: /^a\d+-e\d+$/.test(name) });
 }
 
 // --- The cycles.
@@ -327,6 +338,10 @@ const report = (label, rows) => {
     };
     for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0));
     line("total", rows.map((r) => r.total));
+    if (rows[0].calls) {
+        console.log(`  calls a view, median / max:`);
+        for (const c of CALLEES) line(` ${c}`, rows.map((r) => (r.calls && r.calls[c]) || 0));
+    }
 };
 report("entrance views, each a turn (the cache refilled)", results.filter((r) => r.entrance));
 report("their walks, each a step (the cache kept)", results.filter((r) => /-w\d+$/.test(r.name)));
