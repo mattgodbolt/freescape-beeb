@@ -279,6 +279,10 @@ ASSERT CULL_K > 0 AND CULL_K < 128
 .objects_frame
     ZA_ENTRY
     JSR matrix_update
+    IF DEFINED(OBJ_NOCACHE)
+        \ (the measurement's variant: no cache, every object filled afresh)
+        JSR cache_reset
+    ENDIF
     JSR transform_setup
     JSR camera_setup
     JSR object_pass

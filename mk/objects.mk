@@ -114,3 +114,19 @@ $(OBJ_DIR)/OCODE $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(A
 
 $(OBJ_CASES): tools/objectcases.py $(AREAS_JSON) $(DATA_JSON) $(OBJ_MODEL) $(COLOUR_MODEL)
 	$(PYTHON) -I tools/objectcases.py $(DATA_JSON) $(AREAS_JSON) $@
+
+# make objects-nocache: the same check with the transform's cache off (every
+# object's corner and edges made afresh every frame), to measure what the
+# cache saves on the entrance views (each a turn) and their walks (each a
+# step). Not one of make check's.
+OBJ_NC_DIR = build/objects-nocache
+
+.PHONY: objects-nocache
+objects-nocache: $(OBJ_NC_DIR)/OCODE $(OBJ_CASES)
+	cp $(OBJ_CASES) $(OBJ_NC_DIR)/cases.json
+	node tools/objectcheck.mjs $(OBJ_NC_DIR) --entrance
+
+$(OBJ_NC_DIR)/OCODE &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) src/maths.6502 src/project.6502 $(MATHS_GEN)
+	@mkdir -p $(@D)
+	cp $(OBJ_DIR)/check.6502 $(OBJ_NC_DIR)/check.6502
+	$(ASM) --warn 2 -D OBJ_NOCACHE=TRUE -p $(OBJ_NC_DIR) --symbols $(OBJ_NC_DIR)/symbols.json $(OBJ_NC_DIR)/check.6502

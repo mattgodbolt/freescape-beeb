@@ -285,17 +285,23 @@ def build(db):
 
 
 def outcode_shifts(a, b):
-    """For the side test A p > B z with z >= ZNEAR: SLO, the least s with
-    A <= B 2^s, so p < z >> s means inside; and SHI = SLO - 1, so p >=
-    z >> SHI means outside, which needs ZNEAR (A - B 2^SHI) >= A 2^SHI to
-    hold however z >> SHI rounds down."""
-    slo = 0
-    while a > b << slo:
-        slo += 1
-    shi = slo - 1
-    assert shi >= 0, "a side's ratio needs a quick test of its own"
-    assert view.ZNEAR * (a - (b << shi)) >= a << shi
-    return slo, shi
+    """For the side test A p > B z with z >= ZNEAR, src/clip.6502's
+    oc_side compares p with w = z >> SHI and fractions of it, each rounded
+    down, before it multiplies: p >= w is outside, p < w/2 inside, p < 5w/8
+    (w/2 + w/8) inside and p >= 6w/8 (that plus w/8) outside. SHI is the
+    least shift with the ratio B 2^SHI / A in [5/8, 6/8); these assert that
+    each test holds however its shifts round down, for every z >= ZNEAR."""
+    shi = 0
+    while 5 * a > 8 * (b << shi):
+        shi += 1
+    w = 8 << shi                    # z per unit of the eighths
+    assert 5 * a <= 8 * (b << shi) < 6 * a, "the side's ratio isn't in [5/8, 6/8)"
+    # p >= w: w >= z / 2^shi - 1, so A p > B z if z (A - B 2^shi) > A 2^shi
+    assert view.ZNEAR * (a - (b << shi)) > a << shi
+    # p >= w/2 + 2 (w/2 >> 2), at least 6 z / w - 3: A p > B z if
+    # z (6 A - B w) > 3 A w
+    assert view.ZNEAR * (6 * a - b * w) > 3 * a * w
+    return shi + 1, shi
 
 
 def packed(rec):

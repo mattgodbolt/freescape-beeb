@@ -44,7 +44,10 @@ const sections = {};
 for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
     for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
 const cases = JSON.parse(fs.readFileSync(`${dir}/cases.json`, "utf8"));
-const views = cases.views.filter((v) => !only || v.name.includes(only));
+const entranceOnly = args.includes("--entrance");
+const views = cases.views.filter(
+    (v) => (!only || v.name.includes(only)) && (!entranceOnly || /^a\d+-e\d+(-w\d+)?$/.test(v.name)),
+);
 
 const m = await headless({ symbols: symFile });
 const S = (name) => m.sym(name);
@@ -105,9 +108,12 @@ const STAGES = [
     ["transform_setup", "transform"],
     ["transform_object", "transform"],
     ["near_clip", "near"],
+    ["guard_clip", "guard"],
     ["project", "project"],
     ["outcode", "outcode"],
     ["clip2d", "clip2d"],
+    ["dedupe", "clip2d"],
+    ["area_nonzero", "area"],
     ["draw_object", "faces"],
     ["sort_objects", "sort"],
     ["emit_faces", "emit"],
@@ -322,7 +328,8 @@ const report = (label, rows) => {
     for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0));
     line("total", rows.map((r) => r.total));
 };
-report("entrance views", results.filter((r) => r.entrance));
+report("entrance views, each a turn (the cache refilled)", results.filter((r) => r.entrance));
+report("their walks, each a step (the cache kept)", results.filter((r) => /-w\d+$/.test(r.name)));
 report("all views", results);
 console.log(
     `checked ${counts.views} views: ${counts.cands} candidates, ${counts.verts} vertices, ` +

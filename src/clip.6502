@@ -155,46 +155,49 @@ SECTION ObjCode
     RTS
 }
 
-\ umul32: udiv.uu (8 bytes) = ma (4 bytes) * mb (4 bytes), unsigned; a
-\ zero byte of either costs nothing.
+\ umul32: udiv.uu (8 bytes) = ma (4 bytes) * mb (4 bytes), unsigned, a
+\ column at a time: each of mb's bytes patched into cprod's quarter-square
+\ reads once, for every byte of ma; a zero byte of either costs nothing.
 .umul32
 {
     ZA_AUTO 4, ma
     ZA_AUTO 4, mb
-    ZA_AUTO1 i, j
-    LDX #7
-.clear
-    STZ udiv.uu,X : ZA_INDEXEDBY 0..7
-    DEX : BPL clear
-    LDA #3 : STA i
-.row
-    LDX i
-    LDA ma,X : ZA_INDEXEDBY 0..3
-    BEQ next_row
-    LDA #3 : STA j
-.col
-    LDX j
-    LDY mb,X : ZA_INDEXEDBY 0..3
-    BEQ next_col
-    LDX i
-    LDA ma,X : ZA_INDEXEDBY 0..3
-    JSR umul8
-    LDA i : CLC : ADC j : TAX           ; the product's place
-    LDA udiv.uu,X : ZA_INDEXEDBY 0..6
-    CLC : ADC umul8.up
-    STA udiv.uu,X : ZA_INDEXEDBY 0..6
-    LDA udiv.uu+1,X : ZA_INDEXEDBY 0..6
-    ADC umul8.up+1
-    STA udiv.uu+1,X : ZA_INDEXEDBY 0..6
-    BCC next_col
-.carry
-    INX
-    INC udiv.uu+1,X : ZA_INDEXEDBY 1..6     ; (the product's bytes can't carry out of uu)
-    BEQ carry
-.next_col
-    DEC j : BPL col
-.next_row
-    DEC i : BPL row
+    ZA_AUTO1 lo
+    FOR k = 0..7
+        STZ udiv.uu + k
+    NEXT
+    FOR j = 0..3
+        LDA mb + j : BNE column
+        JMP next
+    .column
+        STA sl+1 : STA sh+1
+        EOR #&FF
+        STA nl+1 : STA nh+1
+        FOR i = 0..3
+            LDX ma + i : BEQ skip
+            JSR cprod
+            TAY
+            LDA udiv.uu + i + j : CLC : ADC lo : STA udiv.uu + i + j
+            TYA : ADC udiv.uu + i + j + 1 : STA udiv.uu + i + j + 1
+            IF i + j + 2 <= 7
+                BCC skip
+                FOR k = i + j + 2..7
+                    INC udiv.uu + k : BNE skip
+                NEXT
+            ENDIF
+        .skip
+        NEXT
+    .next
+    NEXT
+    RTS
+\ cprod: A (high) and lo = X times the patched byte
+.cprod
+    SEC
+.sl LDA sq_lo,X
+.nl SBC ng_lo,X
+    STA lo
+.sh LDA sq_hi,X
+.nh SBC ng_hi,X
     RTS
 }
 
@@ -209,12 +212,12 @@ SECTION ObjCode
     \ While the quotient fits a byte fewer ((uu >> 24) < uv), the dividend
     \ moves up a byte and the division takes eight steps fewer.
 .shrink
-    LDA uu+7 : BNE step
+    LDA uu+7 : BNE divide
     LDA uu+3 : CMP uv
     LDA uu+4 : SBC uv+1
     LDA uu+5 : SBC uv+2
     LDA uu+6 : SBC uv+3
-    BCS step
+    BCS divide
     LDA uu+6 : STA uu+7
     LDA uu+5 : STA uu+6
     LDA uu+4 : STA uu+5
@@ -226,6 +229,40 @@ SECTION ObjCode
     LDA count : SEC : SBC #8 : STA count
     BNE shrink
     RTS                             ; (the quotient is zero)
+.divide
+    \ The remainder stays below uv: when uv is two bytes or three, so is
+    \ the remainder's register.
+    LDA uv+3 : BNE step
+    LDA uv+2 : BNE mid
+.narrow
+    ASL uu+0 : ROL uu+1 : ROL uu+2 : ROL uu+3 : ROL uu+4 : ROL uu+5
+    BCS narrow_take                 ; (past 16 bits: at least uv)
+    LDA uu+4 : CMP uv
+    LDA uu+5 : SBC uv+1
+    BCC narrow_next
+.narrow_take
+    LDA uu+4 : SBC uv : STA uu+4    ; (C set either way)
+    LDA uu+5 : SBC uv+1 : STA uu+5
+    INC uu+0
+.narrow_next
+    DEC count : BNE narrow
+    RTS
+.mid
+    ASL uu+0 : ROL uu+1 : ROL uu+2 : ROL uu+3
+    ROL uu+4 : ROL uu+5 : ROL uu+6
+    BCS mid_take
+    LDA uu+4 : CMP uv
+    LDA uu+5 : SBC uv+1
+    LDA uu+6 : SBC uv+2
+    BCC mid_next
+.mid_take
+    LDA uu+4 : SBC uv : STA uu+4
+    LDA uu+5 : SBC uv+1 : STA uu+5
+    LDA uu+6 : SBC uv+2 : STA uu+6
+    INC uu+0
+.mid_next
+    DEC count : BNE mid
+    RTS
 .step
     ASL uu+0 : ROL uu+1 : ROL uu+2 : ROL uu+3
     ROL uu+4 : ROL uu+5 : ROL uu+6 : ROL uu+7
@@ -325,60 +362,100 @@ SECTION ObjCode
 \ ===========================================================================
 \ The side planes: outcode, the model's, for a vertex at or beyond ZNEAR.
 
-\ OC_SIDE a, b, slo, shi: C set if a op > b oz (outcode's op and oz,
-\ unsigned 24-bit), by oc_side.
-MACRO OC_SIDE a, b, slo, shi
+\ OC_SIDE a, b, shi, gs: C set if a op > b oz (outcode's op and oz,
+\ unsigned 24-bit), by oc_side; and if so, code's OC_GUARD set if op >
+\ oz << gs, outside the guard band too
+MACRO OC_SIDE a, b, shi, gs
     LDA #LO(a) : STA oc_exact.ka
     LDA #HI(a) : STA oc_exact.ka+1
     LDA #LO(b) : STA oc_exact.kb
     LDA #HI(b) : STA oc_exact.kb+1
-    LDA #shi : STA oc_side.shi
-    LDA #slo - shi : STA oc_side.more
+    LDX #shi
     JSR oc_side
+    BCC inside
+    LDX #gs
+    JSR oc_guard
+    SEC
+.inside
 ENDMACRO
-ASSERT OC_L_SLO > OC_L_SHI AND OC_R_SLO > OC_R_SHI
-ASSERT OC_T_SLO > OC_T_SHI AND OC_B_SLO > OC_B_SHI
+ASSERT OC_L_SLO = OC_L_SHI + 1 AND OC_R_SLO = OC_R_SHI + 1
+ASSERT OC_T_SLO = OC_T_SHI + 1 AND OC_B_SLO = OC_B_SHI + 1
+OC_GUARD = &80                      ; outcode's: outside the guard band (not a plane's bit)
 
-\ oc_side: C set if ka op > kb oz (oc_exact's). It isn't if op < oz >>
-\ (shi + more), and is if op >= oz >> shi (tools/mkareas.py's
-\ outcode_shifts); between, the products decide.
+\ OC_CMP t: C set if outcode.op >= t (3 bytes)
+MACRO OC_CMP t
+    LDA outcode.op+0 : CMP t+0
+    LDA outcode.op+1 : SBC t+1
+    LDA outcode.op+2 : SBC t+2
+ENDMACRO
+
+\ oc_side: C set if ka op > kb oz (oc_exact's), w = oz >> X: outside from w
+\ on, inside below w/2 and below 5w/8, outside from 6w/8, each rounded down
+\ (tools/mkareas.py's outcode_shifts); between, the products decide.
 .oc_side
 {
-    ZA_AUTO1 shi, more
-    LDA outcode.oz+2 : STA outcode.ot+2
-    LDA outcode.oz+1 : STA outcode.ot+1
-    LDA outcode.oz+0 : STA outcode.ot+0
-    LDX shi : BEQ compare_hi
-.shift_hi
-    LSR outcode.ot+2 : ROR outcode.ot+1 : ROR outcode.ot+0
-    DEX : BNE shift_hi
-.compare_hi
-    LDA outcode.op+0 : CMP outcode.ot+0
-    LDA outcode.op+1 : SBC outcode.ot+1
-    LDA outcode.op+2 : SBC outcode.ot+2
-    BCS done                        ; (C set: outside)
-    LDX more
-.shift_lo
-    LSR outcode.ot+2 : ROR outcode.ot+1 : ROR outcode.ot+0
-    DEX : BNE shift_lo
-    LDA outcode.op+0 : CMP outcode.ot+0
-    LDA outcode.op+1 : SBC outcode.ot+1
-    LDA outcode.op+2 : SBC outcode.ot+2
-    BCC done                        ; (C clear: inside)
+    ZA_AUTO 3, w
+    ZA_AUTO 3, w8
+    LDA outcode.oz+2 : STA w+2
+    LDA outcode.oz+1 : STA w+1
+    LDA outcode.oz+0 : STA w+0
+    CPX #0 : BEQ shifted
+.shift
+    LSR w+2 : ROR w+1 : ROR w+0
+    DEX : BNE shift
+.shifted
+    OC_CMP w : BCS done             ; (C set: outside)
+    LSR w+2 : ROR w+1 : ROR w+0     ; w/2
+    OC_CMP w : BCC done             ; (C clear: inside)
+    LDA w+2 : LSR A : STA w8+2
+    LDA w+1 : ROR A : STA w8+1
+    LDA w+0 : ROR A : STA w8+0
+    LSR w8+2 : ROR w8+1 : ROR w8+0  ; w/8, from w/2
+    LDA w+0 : CLC : ADC w8+0 : STA w+0
+    LDA w+1 : ADC w8+1 : STA w+1
+    LDA w+2 : ADC w8+2 : STA w+2    ; 5w/8
+    OC_CMP w : BCC done
+    LDA w+0 : CLC : ADC w8+0 : STA w+0
+    LDA w+1 : ADC w8+1 : STA w+1
+    LDA w+2 : ADC w8+2 : STA w+2    ; 6w/8
+    OC_CMP w : BCS done
     JMP oc_exact
 .done
     RTS
 }
 
+\ oc_guard: outcode's code gets OC_GUARD if op > oz << X (X > 0).
+.oc_guard
+{
+    ZA_AUTO 4, g
+    LDA outcode.oz+0 : STA g+0
+    LDA outcode.oz+1 : STA g+1
+    LDA outcode.oz+2 : STA g+2
+    STZ g+3
+.shift
+    ASL g+0 : ROL g+1 : ROL g+2 : ROL g+3
+    DEX : BNE shift
+    \ g - op borrows if op > g
+    LDA g+0 : CMP outcode.op+0
+    LDA g+1 : SBC outcode.op+1
+    LDA g+2 : SBC outcode.op+2
+    LDA g+3 : SBC #0
+    BCS inside
+    LDA #OC_GUARD : TSB outcode.code
+.inside
+    RTS
+}
+
 \ outcode: A = the planes vertex (ox, oy, oz) is outside (OC_*), oz at
-\ least ZNEAR.
+\ least ZNEAR, and OC_GUARD if it's outside the guard band (the model's
+\ outside_guard): a vertex inside a side's plane is well inside the band's
+\ (ASSERTed), so only one outside a plane is tested.
 .outcode
 {
     ZA_AUTO 3, ox
     ZA_AUTO 3, oy
     ZA_AUTO 3, oz
     ZA_AUTO 3, op
-    ZA_AUTO 3, ot
     ZA_AUTO1 code
     STZ code
     LDA ox+2 : BMI x_neg
@@ -386,24 +463,24 @@ ASSERT OC_T_SLO > OC_T_SHI AND OC_B_SLO > OC_B_SHI
     LDA ox+1 : STA op+1
     LDA ox+0 : STA op+0
     ORA op+1 : ORA op+2 : BEQ y_side
-    OC_SIDE OC_R_A, OC_R_B, OC_R_SLO, OC_R_SHI
+    OC_SIDE OC_R_A, OC_R_B, OC_R_SHI, GUARD_XS
     BCC y_side
-    LDA #OC_RIGHT : STA code
+    LDA #OC_RIGHT : TSB code
     BRA y_side
 .x_neg
     LDA #0 : SEC : SBC ox+0 : STA op+0
     LDA #0 : SBC ox+1 : STA op+1
     LDA #0 : SBC ox+2 : STA op+2
-    OC_SIDE OC_L_A, OC_L_B, OC_L_SLO, OC_L_SHI
+    OC_SIDE OC_L_A, OC_L_B, OC_L_SHI, GUARD_XS
     BCC y_side
-    LDA #OC_LEFT : STA code
+    LDA #OC_LEFT : TSB code
 .y_side
     LDA oy+2 : BMI y_neg
     STA op+2
     LDA oy+1 : STA op+1
     LDA oy+0 : STA op+0
     ORA op+1 : ORA op+2 : BEQ coded
-    OC_SIDE OC_T_A, OC_T_B, OC_T_SLO, OC_T_SHI
+    OC_SIDE OC_T_A, OC_T_B, OC_T_SHI, GUARD_YS
     BCC coded
     LDA #OC_TOP : TSB code
     BRA coded
@@ -411,13 +488,17 @@ ASSERT OC_T_SLO > OC_T_SHI AND OC_B_SLO > OC_B_SHI
     LDA #0 : SEC : SBC oy+0 : STA op+0
     LDA #0 : SBC oy+1 : STA op+1
     LDA #0 : SBC oy+2 : STA op+2
-    OC_SIDE OC_B_A, OC_B_B, OC_B_SLO, OC_B_SHI
+    OC_SIDE OC_B_A, OC_B_B, OC_B_SHI, GUARD_YS
     BCC coded
     LDA #OC_BOTTOM : TSB code
 .coded
     LDA code
     RTS
 }
+\ Inside a side's plane (B z >= A p) is inside the guard band's (p <= z <<
+\ gs): B < A 2^gs.
+ASSERT OC_L_B < OC_L_A << GUARD_XS AND OC_R_B < OC_R_A << GUARD_XS
+ASSERT OC_T_B < OC_T_A << GUARD_YS AND OC_B_B < OC_B_A << GUARD_YS
 
 \ oc_exact: C set if ka op > kb oz (ka and kb 16-bit): the products in full.
 .oc_exact
@@ -591,57 +672,8 @@ ASSERT OC_T_SLO > OC_T_SHI AND OC_B_SLO > OC_B_SHI
 \ ===========================================================================
 \ The guard band (decision 17; the model's outside_guard and guard_clip).
 
-\ vertex_guard: C set if vertex Y is outside the guard band, |x| > z <<
-\ GUARD_XS or |y| > z << GUARD_YS. Y is kept.
-.vertex_guard
-{
-    ZA_AUTO 4, gz
-    ZA_AUTO 3, ga
-    LDA vflag,Y : AND #VF_GTEST : BEQ test
-    LDA vflag,Y : AND #VF_GOUT : CMP #1
-    RTS
-.test
-    LDA vflag,Y : ORA #VF_GTEST : STA vflag,Y
-    LDA vx0,Y : STA ga+0
-    LDA vx1,Y : STA ga+1
-    LDA vx2,Y : STA ga+2
-    LDX #GUARD_XS
-    JSR compare
-    BCS out
-    LDA vy0,Y : STA ga+0
-    LDA vy1,Y : STA ga+1
-    LDA vy2,Y : STA ga+2
-    LDX #GUARD_YS
-    JSR compare
-    BCC in
-.out
-    LDA vflag,Y : ORA #VF_GOUT : STA vflag,Y
-    SEC
-.in
-    RTS
-\ compare: C set if |ga| > z << X (vertex Y's z)
-.compare
-    LDA ga+2 : BPL a_pos
-    LDA #0 : SEC : SBC ga+0 : STA ga+0
-    LDA #0 : SBC ga+1 : STA ga+1
-    LDA #0 : SBC ga+2 : STA ga+2
-.a_pos
-    LDA vz0,Y : STA gz+0
-    LDA vz1,Y : STA gz+1
-    LDA vz2,Y : STA gz+2
-    STZ gz+3
-.shift
-    ASL gz+0 : ROL gz+1 : ROL gz+2 : ROL gz+3
-    DEX : BNE shift
-    \ gz - |ga| borrows if |ga| > gz
-    LDA gz+0 : CMP ga+0
-    LDA gz+1 : SBC ga+1
-    LDA gz+2 : SBC ga+2
-    LDA gz+3 : SBC #0
-    \ (C clear: outside)
-    ROL A : EOR #1 : ROR A
-    RTS
-}
+\ Whether a vertex is outside the band is found with its outcode
+\ (outcode's OC_GUARD, kept in vflag's VF_GOUT).
 ASSERT GUARD_XS > 0 AND GUARD_YS > 0
 
 \ guard_f: gf*,X = plane's f for vertex Y, g z - s v (guard_clip's plane:
@@ -845,11 +877,18 @@ ENDMACRO
     PHY
     JSR outcode
     PLY
-    STA voc,Y
-    LDA #VF_CODED : ORA vflag,Y : STA vflag,Y
+    \ the guard band's bit to vflag, the planes' to voc
+    ASL A : PHP
+    LSR A : STA voc,Y
+    LDA #VF_CODED OR VF_GTEST : ORA vflag,Y
+    PLP : BCC in_band
+    ORA #VF_GOUT
+.in_band
+    STA vflag,Y
     LDA voc,Y
     RTS
 }
+ASSERT OC_GUARD = &80
 
 \ vertex_project: vertex Y's projection (the maths' project) into vsx and
 \ vsy. Y is kept.
@@ -1270,19 +1309,13 @@ ENDMACRO
     JSR vertex_outcode
     TSB any
     AND every : STA every
+    LDA vflag,Y : AND #VF_GOUT : TSB near     ; (near: now any outside the band)
     INC k : LDA k : CMP n : BNE code
     LDA every : BEQ seen
     RTS
 .seen
     \ the guard band
-    STZ k
-.guard
-    LDX k : LDY fq_idx,X
-    JSR vertex_guard
-    BCS guard_clip_it
-    INC k : LDA k : CMP n : BNE guard
-    BRA projecting
-.guard_clip_it
+    LDA near : AND #VF_GOUT : BEQ projecting
     LDA n : JSR guard_clip
     BNE guarded
     RTS

@@ -109,15 +109,28 @@ def case(db, layout, a_index, area, camera, name):
     }
 
 
+WALK_STEPS = 4                      # frames of a walk from each entrance, as the
+WALK_STEP = 25                      # original steps (step sin / 64, floored); world units
+
+
 def cameras(db, layout, quick=False):
-    """Every entrance view, then the extra cameras: at a spread of
-    entrances, every yaw, every pitch and every roll with the others the
-    entrance's, and random angles."""
+    """Every entrance view, each followed by a short walk forward from it
+    (the camera moved, the angles kept: the transform's cache holds), then
+    the extra cameras: at a spread of entrances, every yaw, every pitch and
+    every roll with the others the entrance's, and random angles."""
     index = {a["id"]: i for i, a in enumerate(layout["areas"])}
     views = list(cam.entrance_views(db))
+    sin, cos = db["tables"]["sin"], db["tables"]["cos"]
     out = []
     for area, e, c in views:
-        out.append((index[area["id"]], area, c, "a%03d-e%03d" % (area["id"], e["id"])))
+        name = "a%03d-e%03d" % (area["id"], e["id"])
+        out.append((index[area["id"]], area, c, name))
+        x, z = c.x, c.z
+        for k in range(1, WALK_STEPS + 1):
+            x += (WALK_STEP * sin[c.yaw]) // 64
+            z += (WALK_STEP * cos[c.yaw]) // 64
+            moved = cam.Camera(x, c.y, z, c.yaw, c.pitch, c.roll)
+            out.append((index[area["id"]], area, moved, "%s-w%d" % (name, k)))
     rng = random.Random(1987)
     picks = views[::max(1, len(views) // (3 if quick else 8))]
     for area, e, c in picks:

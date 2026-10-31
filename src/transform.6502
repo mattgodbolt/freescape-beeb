@@ -149,22 +149,31 @@ ENDMACRO
 \ fill_point: cache slot Y = M (64 p), p = (px, py, pz) in cells.
 .fill_point
 {
-    ZA_AUTO1 px, py, pz, u64, slot
+    ZA_AUTO 3, p                    ; the point's cells
+    px = p : py = p + 1 : pz = p + 2
+    ZA_AUTO1 u64, slot
     ZA_AUTO 9, acc
     STY slot
     LDA mat_big : BEQ fast
     JMP fill_slow_point
 .fast
-    FOR r = 0..2
-        LDA px : CLC : ADC #64 : STA u64
-        FP_INDEX mat + 3 * r + 0
-        FP_SET acc + 3 * r
-        LDA py : CLC : ADC #64 : STA u64
-        FP_INDEX mat + 3 * r + 1
-        FP_ADD acc + 3 * r
-        LDA pz : CLC : ADC #64 : STA u64
-        FP_INDEX mat + 3 * r + 2
-        FP_ADD acc + 3 * r
+    \ a column at a time, past a zero cell or a zero entry of M (a level
+    \ camera's has four)
+    FOR k = 0..8
+        STZ acc + k
+    NEXT
+    FOR k = 0..2
+        LDA px + k : BNE column
+        JMP next
+    .column
+        CLC : ADC #64 : STA u64
+        FOR r = 0..2
+            LDA mat + 3 * r + k : BEQ skip
+            FP_INDEX mat + 3 * r + k
+            FP_ADD acc + 3 * r
+        .skip
+        NEXT
+    .next
     NEXT
     LDY slot
 .store
@@ -195,8 +204,15 @@ ENDMACRO
     LDA mat + 3,X : STA col+1
     LDA mat + 6,X : STA col+2
     FOR r = 0..2
+        LDA col + r : BNE product
+        STZ fill_point.acc + 3 * r
+        STZ fill_point.acc + 3 * r + 1
+        STZ fill_point.acc + 3 * r + 2
+        BRA done
+    .product
         FP_INDEX col + r
         FP_SET fill_point.acc + 3 * r
+    .done
     NEXT
     LDY slot
     JMP fill_point.store
