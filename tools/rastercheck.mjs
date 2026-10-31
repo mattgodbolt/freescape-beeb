@@ -67,7 +67,6 @@ const VIEW_ADDR = S("VIEW_ADDR");
 const SCREEN = S("SCREEN");
 const SCREEN_ROW = S("SCREEN_ROW");
 const ACCCON_X = S("ACCCON_X");
-const ACCCON_Y = S("ACCCON_Y");
 const addr = (y, c) => VIEW_ADDR + Math.floor(y / 8) * SCREEN_ROW + 8 * c + (y % 8);
 
 // Where the frame may write: its zero page, the stack, its own sections
@@ -183,7 +182,7 @@ async function frame(s, shadow, fresh) {
     const want = s.view.map((row) => Buffer.from(row, "hex"));
     const space = shadow ? "shadow" : "main";
     const other = shadow ? "main" : "shadow";
-    m.poke(S("check_acccon"), ACCCON_Y | (shadow ? ACCCON_X : 0));
+    m.poke(S("check_acccon"), shadow ? ACCCON_X : 0);
     if (fresh) {
         await m.call(S("check_forget"));
         for (const sp of [space, other]) {

@@ -86,6 +86,8 @@ SECTION RasterWork
 .lo16       SKIP 256                ; n >> 4 (raster_init)
 .k8         SKIP 256                ; n's bit length (raster_init)
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
+.rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
+.rq_hi      SKIP 512
 .pools      SKIP 4 * 4 * 256
 ENDSECTION
 
@@ -139,6 +141,7 @@ SECTION RasterCode
 .raster_init
 {
     ZA_ENTRY
+    ZA_AUTO2 i_q
     LDX #0
 .shift
     TXA : LSR A : LSR A : LSR A : LSR A : STA lo16,X
@@ -158,6 +161,29 @@ SECTION RasterCode
 .normed
     STA nrm,X
     INX : BNE shift
+    \ rq: q(n) = n^2 DIV 4, from q(n + 1) = q(n) + (n + 1) DIV 2
+    STZ i_q : STZ i_q+1
+    LDX #0
+.q_low
+    LDA i_q : STA rq_lo,X : LDA i_q+1 : STA rq_hi,X
+    INX
+    TXA : BEQ q_256 : LSR A
+    CLC : ADC i_q : STA i_q
+    BCC q_low
+    INC i_q+1
+    BRA q_low
+.q_256
+    LDA #128                            ; (n + 1) DIV 2 for n + 1 = 256
+.q_high
+    CLC : ADC i_q : STA i_q
+    BCC q_stored
+    INC i_q+1
+.q_stored
+    LDA i_q : STA rq_lo + 256,X : LDA i_q+1 : STA rq_hi + 256,X
+    INX : CPX #255 : BEQ q_done
+    TXA : SEC : ROR A                   ; (256 + n + 1) DIV 2
+    BRA q_high
+.q_done
     STZ hz_sky
     JSR raster_forget
     JMP writer_init
@@ -806,34 +832,48 @@ ZA_AUTO1 m_v2
 }
 
 \ mulf_set: A = f, mulf's multiplier.
-\ mulf: m_p = m_v (256 + f), 24 bits: m_v f by quarter squares, u f =
-\ f(u + f) - f(u - f) from sq (f(j)) and ng (f(j - 255)) for each byte u
-\ of m_v, f patched into the operands' low bytes (the tables are page-
-\ aligned), and m_v 256 added.
-ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
+\ mulf: m_p = m_v (256 + f), 24 bits: m_v f by quarter squares, each
+\ byte u of m_v times f as q(u + f) - q(|u - f|), q from rq (the tables
+\ are page-aligned, so f patched into an operand's low byte adds it to
+\ the index), and m_v 256 added.
+ASSERT LO(rq_lo) = 0 AND LO(rq_hi) = 0
 .mulf_set
-    STA mulf.a1+1 : STA mulf.a3+1 : STA mulf.a5+1 : STA mulf.a7+1
-    EOR #&FF
-    STA mulf.a2+1 : STA mulf.a4+1 : STA mulf.a6+1 : STA mulf.a8+1
+    STA mulf.a1+1 : STA mulf.a2+1 : STA mulf.a3+1 : STA mulf.a4+1
+    STA mulf.d1+1 : STA mulf.d2+1
     RTS
 .mulf
 {
+    \ (the low byte's product)
+    LDA m_v
+    SEC
+.d1 SBC #0 : BCS d1_pos                 ; |u - f|
+    EOR #&FF : ADC #1                   ; (C = 0)
+.d1_pos
+    TAY
     LDX m_v
     SEC
-.a1 LDA sq_lo,X                         ; (the low byte's product)
-.a2 SBC ng_lo,X
+.a1 LDA rq_lo,X
+    SBC rq_lo,Y
     STA m_p
-.a3 LDA sq_hi,X
-.a4 SBC ng_hi,X
+.a2 LDA rq_hi,X
+    SBC rq_hi,Y
     STA m_p+1
+    \ (the high byte's)
+    LDA m_v+1
+    SEC
+.d2 SBC #0 : BCS d2_pos
+    EOR #&FF : ADC #1
+.d2_pos
+    TAY
     LDX m_v+1
     SEC
-.a5 LDA sq_lo,X                         ; (the high byte's)
-.a6 SBC ng_lo,X
-    TAY
-.a7 LDA sq_hi,X
-.a8 SBC ng_hi,X
+.a3 LDA rq_lo,X
+    SBC rq_lo,Y
+    STA m_v2
+.a4 LDA rq_hi,X
+    SBC rq_hi,Y
     STA m_p+2
+    LDY m_v2
     \ + the high byte's product 256, + m_v 256
     CLC
     TYA : ADC m_p+1 : STA m_p+1

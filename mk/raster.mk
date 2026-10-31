@@ -7,8 +7,7 @@
 #
 # The check build lays the sections out as decision 20 does: the code, the
 # row runs and the work in a sideways bank (RASTER_BANK), the inputs and
-# what lasts in main RAM, and the maths' tables (track F's, for the
-# products) in HAZEL; the harness's stubs page them in.
+# what lasts in main RAM; the harness's stubs page the bank in.
 
 RASTER_SRC   = src/defs.6502 src/raster.6502 src/writer.6502
 RASTER_MODEL = tools/model/raster.py tools/model/writer.py
@@ -33,12 +32,11 @@ endif
 define RASTER_CHECK_6502
 \ The rasteriser's check build (mk/raster.mk, tools/rastercheck.mjs).
 INCLUDE "../../src/defs.6502"
-INCLUDE "../maths/consts.6502"
 ZA_POOL &00..&8F
 RASTER_BANK = 4
 
-\ The stubs the harness calls: each pages in the bank, HAZEL and the
-\ screen check_acccon names, and puts ACCCON back after.
+\ The stubs the harness calls: each pages in the bank and the screen
+\ check_acccon names, and puts ACCCON back after.
 SECTION RasterCheck, org = &0E00, guard = &0F00, filename = "RCHECK", cmos = TRUE
 .check_init
     ZA_ENTRY
@@ -58,7 +56,7 @@ SECTION RasterCheck, org = &0E00, guard = &0F00, filename = "RCHECK", cmos = TRU
     LDA check_was : STA acccon
     RTS
 .check_acccon
-    EQUB ACCCON_Y
+    EQUB 0
 .check_was
     EQUB 0
 ENDSECTION
@@ -68,12 +66,9 @@ SECTION RasterState, org = &1700, guard = &1900, virtual = TRUE
 ENDSECTION
 SECTION RasterRuns, org = &8000, guard = &8D00, filename = "RRUNS", cmos = TRUE
 ENDSECTION
-SECTION RasterCode, org = &8D00, guard = &A900, filename = "RCODE", cmos = TRUE
+SECTION RasterCode, org = &8D00, guard = &A700, filename = "RCODE", cmos = TRUE
 ENDSECTION
-SECTION RasterWork, org = &A900, guard = &C000, virtual = TRUE
-ENDSECTION
-SECTION RasterHazel, org = &C000, guard = &E000, filename = "RHAZEL"
-INCLUDE "../maths/tables.6502"
+SECTION RasterWork, org = &A700, guard = &C000, virtual = TRUE
 ENDSECTION
 
 INCLUDE "../../src/raster.6502"
@@ -84,7 +79,7 @@ export RASTER_CHECK_6502
 build/raster/check.6502: mk/raster.mk | build/raster
 	printf '%s\n' "$$RASTER_CHECK_6502" > $@
 
-build/raster/RCODE build/raster/RRUNS build/raster/RCHECK build/raster/RHAZEL build/raster/symbols.json &: build/raster/check.6502 $(RASTER_SRC) $(MATHS_GEN)
+build/raster/RCODE build/raster/RRUNS build/raster/RCHECK build/raster/symbols.json &: build/raster/check.6502 $(RASTER_SRC)
 	$(ASM) --warn 2 -p build/raster --symbols build/raster/symbols.json $<
 
 build/raster/scenes.json: tools/rasterscenes.py $(RASTER_MODEL) src/defs.6502 | build/raster
