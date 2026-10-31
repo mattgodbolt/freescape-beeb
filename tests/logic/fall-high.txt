@@ -1,0 +1,6 @@
+# Walking off the top of area 1's cube 5 (cells 13-37 x, 11-17 y, 40-80 z):
+# sixteen cells down to the floor, which ends the game.
+at 1312 1184 3872
+angles 0 54 0
+O x6
+expect GameOver 4

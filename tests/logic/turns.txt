@@ -1,0 +1,50 @@
+# Turning (Q, W), looking up and down (P, L), rolling (N, M) and turning
+# round (U) at every turn size, past 0 and 72 both ways. Z lowers the turn
+# a size a pass, A raises it; both stop at the table's ends.
+expect TurnIndex 2
+expect Turn 3
+Z x2
+expect Turn 1
+Z
+expect TurnIndex 0
+Q x3
+W x5
+P x2
+L x4
+N x2
+M x3
+U
+A
+expect Turn 2
+Q x2
+W x40
+P x37
+L
+N M
+U
+A
+expect Turn 3
+W x30
+L x30
+M x30
+A
+expect Turn 6
+Q x13
+P x13
+N x13
+U x3
+A
+expect Turn 9
+W x9
+L x9
+M x9
+A
+expect Turn 18
+expect TurnIndex 5
+A
+expect TurnIndex 5
+Q x5
+P x5
+N x5
+U
+O

@@ -1,0 +1,43 @@
+# Across an area's edge. The walk stops at the area's extent ($88DF-$88E4,
+# cells 0-127 across); there the margin's test ($BCCB) finds the edge's
+# rectangle (ids 51-54), whose script is GOTO area, 0. Entrance 0 isn't
+# found, so $9D1C wraps the camera: x cell 126 to 1, 0 to 125 (else z),
+# keeping y and the angles.
+
+# Area 5's entrance 6 is on a road at x cell 125, looking along +z; turn to
+# +x and walk off the x=127 edge into area 6.
+goto 5 6
+W x6
+expect Yaw 18
+O x2
+expect AreaId 6
+expect PlayerX 96
+O
+# Back the other way: area 6's x=0 edge has a kerb a cell high (cube 21)
+# to climb first, then rectangle 54 goes back to area 5, at x cell 125.
+U
+K
+O x3
+expect AreaId 5
+expect PlayerX 8032
+O x2
+
+# The z edges: area 5's z=0 rectangle (52) goes to area 11, and area 11's
+# z=127 one back.
+goto 5 7
+U
+O x2
+expect AreaId 11
+expect PlayerZ 8032
+O
+U
+O x3
+expect AreaId 5
+
+# At a slant into the edge, by small steps.
+goto 5 6
+W x5
+X x4
+expect Step 10
+O x40
+expect AreaId 6

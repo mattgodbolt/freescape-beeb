@@ -1,0 +1,36 @@
+# The probe's extension: R raises the eye a level (AreaScale cells) if the
+# cells above the eye are clear, up to ExtMax (4); F lowers it a level
+# without a test, down to 1. The feet stay where they are.
+expect ExtLevel 2
+R
+expect ExtLevel 3
+R
+expect ExtLevel 4
+R
+expect ExtLevel 4
+O
+F x4
+expect ExtLevel 1
+expect BodyHeight 1
+O K
+R x2
+expect ExtLevel 3
+
+# Under area 1's cube 5 (its underside at y cell 11), the feet put in cell
+# 8 at level 3: the eye, in cell 10, doesn't rise into 11.
+at 1312 672 3872
+R
+expect ExtLevel 3
+expect PlayerY 672
+F
+expect ExtLevel 2
+R
+expect ExtLevel 3
+R
+expect ExtLevel 3
+# The probe hangs there until a step crosses a cell, then falls: seven
+# cells, too many.
+F x2
+X x3
+O x8
+expect GameOver 4

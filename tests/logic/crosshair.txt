@@ -1,0 +1,35 @@
+# SPACE toggles shooting mode, in which the movement keys move the
+# crosshair (actions $17-$1A) instead; B shows or hides the crosshair
+# outside it. The crosshair stops at 1 and at twice the view's centre.
+expect CrossOn 255
+SPACE
+expect ShootMode 255
+O x3
+W x110
+expect CrossX 208
+Q x210
+expect CrossX 1
+O x60
+expect CrossY 104
+K x110
+expect CrossY 1
+O Q
+expect PlayerX 4640
+SPACE
+expect ShootMode 0
+expect CrossX 104
+O
+B
+expect CrossOn 0
+SPACE
+expect CrossOn 255
+W x3
+SPACE
+expect CrossOn 0
+B
+expect CrossOn 255
+B
+SPACE
+K x2
+SPACE
+O

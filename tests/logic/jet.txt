@@ -1,0 +1,45 @@
+# The jet (FCL SWAPJET, which the game runs in area 27's hangar; here
+# straight away). Its step splits by the pitch: up by -sin(pitch) and
+# across by |cos(pitch)|, and the move walks the cells in three
+# dimensions: no step up, no fall, stopped by whatever it enters. R and F
+# move it up and down a step.
+fcl 15
+expect InJet 1
+O
+R x2
+expect PlayerY 660
+F x4
+expect Blocked 1
+P x3
+expect Pitch 63
+O x3
+L x6
+O x4
+expect Blocked 1
+# The U turn in the jet turns the pitch round too.
+L
+U
+expect Pitch 60
+O x3
+# At every step size, climbing and diving.
+X x2
+P x4
+O x4
+X x2
+L x8
+O x6
+X x3
+O x8
+S x7
+# Rolled: the step ignores the roll.
+N x5
+O x2
+R x3
+# Up to the ceiling at the area's extent, and the walls.
+R x20
+W x6
+O x40
+# Out of the jet again.
+fcl 15
+expect InJet 0
+O x2

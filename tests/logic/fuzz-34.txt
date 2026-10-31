@@ -1,0 +1,84 @@
+# Found by tools/logic/check.py --fuzz, seed 34.
+# The FCL's REDRAW inside a pass, and a sensor's shot at the shield
+# during it.
+goto 6 24
+A
+Q
+P
+K
+R
+Q
+U F S
+K Q O
+L
+P O
+P
+K O
+F
+W
+R X
+Q
+K
+W
+Q
+R
+R X L
+O
+K R
+W
+S
+W
+K
+U
+K
+W
+Q F B
+K O
+R M U
+P X
+L
+Q
+A
+W O
+K N R
+N
+L N
+F
+K W
+S
+K A
+K
+W O
+P
+A S
+U O
+O W
+R
+U M
+K
+Q Z
+M
+O
+S
+K X
+P
+K M
+L K W
+Z O Q
+N
+O F
+A
+P
+O K
+F M
+Q
+F O S
+X N
+O
+O R K
+O
+W
+R O
+K
+O
+U

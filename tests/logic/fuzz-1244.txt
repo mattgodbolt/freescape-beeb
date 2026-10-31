@@ -1,0 +1,124 @@
+# Found by tools/logic/check.py --fuzz, seed 1244.
+# A minute ends with no energy left: the interrupt ends the game
+# (GameOver 3) and the input goes to the end ($9AB7).
+goto 5 2
+P Q
+Q K B
+P
+X
+L P A
+S
+B W
+O R
+M
+O
+A
+K
+R P
+O X
+O
+P
+O W
+P R
+P
+R
+O
+K O F
+tick
+L
+R
+K F
+S
+O
+B O
+O R
+P
+K
+Q K
+Q F
+W Q X
+O L
+F O
+Q O F
+W U
+M
+K
+K
+O N
+W K
+O P
+Q O
+N
+O
+X
+Z
+A Q X
+F
+F
+O W
+X L Z
+R
+O F
+O
+S
+O Z
+K
+K
+R
+O
+K SPACE
+F O
+P
+SPACE
+tick
+M
+O
+O K
+O
+P
+P N
+W
+O
+F
+B
+R
+O
+L W
+SPACE
+W P O
+O
+K S
+F
+O W
+K
+K
+W
+Q O
+O
+R S
+S F
+O
+P M
+O
+R O
+W
+M
+R K
+O
+K
+A O
+U R
+K
+M R W
+O
+tick
+K
+S K
+O
+F O
+Q
+L
+Z S
+W
+L
+N

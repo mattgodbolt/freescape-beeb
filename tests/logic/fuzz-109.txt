@@ -1,0 +1,85 @@
+# Found by tools/logic/check.py --fuzz, seed 109.
+# The screen copy inside the FCL's REDRAW plays and clears the pending
+# sound ($9C24), after a step-size change.
+goto 5 2
+fcl 15
+O
+P
+W
+O A
+K W
+R
+L
+A N
+Q O
+Q
+O U
+F
+F O A
+P
+F
+K SPACE
+O K
+tick
+Q P
+M L
+P
+P
+K
+Z W
+R
+M Q N
+O
+M O
+L
+O
+O
+W
+F
+N
+O
+U
+F P M
+K
+K
+K N O
+O U F
+Q K
+O
+L Z
+L P
+O U
+K
+O
+R
+L B
+O
+O
+W K R
+U
+R M
+A
+SPACE U
+K
+S O Q
+O
+P
+Q Z
+M F K
+Q X
+K Q
+R M P
+R
+O
+A
+K L P
+F N K
+X
+Q
+F
+Q O
+Z K
+L
+tick
+O F
+X

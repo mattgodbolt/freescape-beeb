@@ -1,0 +1,48 @@
+# Through doorways into other areas. A doorway is a rectangle on a wall's
+# face whose collided script is GOTO area, entrance: the move into it sets
+# Collided, and the events run the script, which puts the camera at the
+# entrance ($9D1C) with the entrance's angles.
+
+# Area 1's rectangle 12 (x cell 126, z cells 72-74) goes to area 2's
+# entrance 4. The wall (cube 4) behind it is hit first and remembered; the
+# rectangle, a flat shape, wins at once.
+at 7840 160 4704
+angles 0 18 0
+O
+expect Collided 12
+expect AreaId 2
+expect EntranceId 4
+expect PlayerX 224
+expect Yaw 18
+O x2
+# Back through area 2's rectangle 3 (x cell 1, z cells 63-65) to area 1's
+# entrance 27.
+U
+O x3
+expect AreaId 1
+expect EntranceId 27
+O x3
+
+# A doorway reached at a slant, and by small steps, so the margin's test
+# finds it ($BCCB) before a step's crossing does.
+at 7840 160 4650
+angles 0 15 0
+X x3
+expect Step 25
+O x10
+expect AreaId 2
+S x3
+
+# Area 1's rectangle 20 (x cells 66-68, z cell 36) goes to area 19, an
+# interior at scale 4: the step and the probe's height scale with it.
+goto 1 19
+at 4288 160 2720
+angles 0 36 0
+O x2
+expect AreaId 19
+expect AreaScale 4
+expect StepUnits 1000
+expect BodyHeight 8
+O x2
+R
+F x2
