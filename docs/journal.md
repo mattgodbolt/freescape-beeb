@@ -285,3 +285,23 @@ Measured that day, flipping at the view's end: a median of 3.2 fields a
 frame over every frame (15.65 frames a second), the worst 12.9; views'
 medians from 1.05 (Beryl, entrance 25) to 10.18 (Stores, entrance 7).
 `raster_frame` takes a median of 126,253 cycles, the worst 401,680.
+
+## 2026-10-31: the rasteriser restructured, and painter's measured
+
+Five rounds on the span buffer (`docs/research/raster.md`): edges by a DDA
+(decision 23), the first line's offset from the gradient, cheaper runs,
+the background, the rasteriser's own squares. Measured over the 65 views:
+the median from 137,564 cycles to 125,118, p90 from 239,476 to 224,082,
+the most from 398,746 to 363,191: a tenth. The analysis said why no more:
+at the median view the byte stores are 28,641 cycles, and everything
+charged to a face-line about 215 cycles each, 51K over 238 face-lines.
+
+So a plain painter's fill was measured with the model the same day: faces
+back to front over each other, overdraw included, write a median of 4,952
+bytes (the floor 2,542 of them) and 9,002 at most, over 251 face-lines
+(879 at most), with 134 partial bytes at odd-pixel edges (695 at most).
+Objects sit on the floor rather than in front of one another, so overdraw
+is small, and at 5 cycles a byte and a lean ~100 a face-line painter's
+should cost about half the span buffer. The picture is the same: the span
+buffer only reproduced the painter's image. The track went back to build
+it.

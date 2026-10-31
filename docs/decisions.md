@@ -278,3 +278,15 @@ characters a line, kept the same in both buffers. Each view is held for 100
 fields, and the figures shown are the mean since it came up, refreshed
 every 25 fields. It gives way to the real thing as soon as the pipeline is
 whole.
+
+## 23. Sloping edges by a DDA (2026-10-31, autonomous)
+
+The rasteriser steps a sloping edge by an 8.8 DDA with no divide: dy is
+normalised to a byte, its reciprocal comes from a 128-byte table, and the
+gradient and the first line's offset are quarter-square products
+(`docs/research/raster.md`). Against the exact pixel-centre rule over
+Driller's views, 98.7% of edge-lines land exactly and the rest one pixel
+either way, never more; an edge never passes its far vertex. The model's
+`raster.py` steps the same way, so the 6502 still matches it byte for
+byte. The rasteriser builds its own quarter-square table at `raster_init`
+(the slideshow has no HAZEL tables); the engine can share one later.
