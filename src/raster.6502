@@ -79,6 +79,7 @@ SECTION RasterWork
 .head       SKIP VIEW_H
 .hsplit     SKIP VIEW_H
     ALIGN 256
+.lo16       SKIP 256                ; n >> 4 (raster_init)
 .pools      SKIP 4 * 4 * 256
 ENDSECTION
 
@@ -87,21 +88,26 @@ FUNCTION pool_ge(k) = pools + (4 * k + 1) * 256
 FUNCTION pool_gh(k) = pools + (4 * k + 2) * 256
 FUNCTION pool_gn(k) = pools + (4 * k + 3) * 256
 
-\ The frame: the line and its span; the gap before the one being looked at
-\ (0: the line's head); the lines not yet full; the next free node of each
-\ pool; this face's pattern bytes for each phase, and their halves.
-ZA_AUTO1 r_y, r_a, r_b, r_prev, nopen
+\ The frame: the line; the gap before the one being looked at (0: the
+\ line's head); the lines not yet full; the next free node of each pool;
+\ this face's pattern bytes for each phase, and their halves.
+ZA_AUTO1 r_y, r_prev, nopen
 ZA_AUTO 4, gtop
 ZA_AUTO 4, r_pv
 ZA_AUTO 4, r_pva
 ZA_AUTO 4, r_pvb
 
-\ The face's two chains (0: forwards from the top vertex, 1: backwards),
-\ each an edge at a time: its pixel boundary on the line, and its stepping
-\ (per line e -= b; when that goes below 0, e += dy and p += a + 1, and
-\ otherwise p += a; ch_a holds a - 1 and ch_a1 holds a), its end vertex
-\ and the line its edge ends before.
+\ The face's two chains, each an edge at a time from the top vertex down,
+\ one walking the vertices forwards and the other backwards (ch_dir 0 or
+\ not): its pixel boundary on the line, and its stepping (per line e -= b;
+\ when that goes below 0, e += dy and p += a + 1, and otherwise p += a;
+\ ch_a holds a - 1 and ch_a1 holds a), its end vertex and the line its
+\ edge ends before. Once a face's line shows which chain is left, that one
+\ is chain 0 (decide), so the span is [ch_p, ch_p+1).
 ZA_AUTO 2, ch_p
+r_a = ch_p
+r_b = ch_p + 1
+ZA_AUTO 2, ch_dir
 ZA_AUTO 2, ch_e
 ZA_AUTO 2, ch_eh
 ZA_AUTO 2, ch_b
@@ -120,8 +126,14 @@ SECTION RasterCode
 \ ---------------------------------------------------------------------------
 \ raster_init: once, before the first frame.
 .raster_init
+{
     ZA_ENTRY
+    LDX #0
+.shift
+    TXA : LSR A : LSR A : LSR A : LSR A : STA lo16,X
+    INX : BNE shift
     JMP writer_init
+}
 
 \ raster_frame: the frame's faces and background into the screen.
 .raster_frame
@@ -209,11 +221,34 @@ SECTION RasterCode
     RTS
 .lines
     LDA ch_i : STA ch_i+1
+    STZ ch_dir : LDA #&FF : STA ch_dir+1
     LDX r_y : JSR row_setup
     LDX #0 : JSR chain_next
     LDX #1 : JSR chain_next
+    \ Which chain is left isn't known until a line's span has some width.
+    LDA #CHK_TEST : JSR patch_checks
     JMP segment
 }
+
+\ decide: the first line where the chains part shows which is left: chain 0
+\ if ch_p < ch_p+1, else the chains swap, every part of them. Either way the
+\ copies stop asking.
+.decide
+{
+    BCC decided
+    FOR v = {ch_p, ch_e, ch_eh, ch_b, ch_bh, ch_dy, ch_dyh, ch_a, ch_a1, ch_i, ch_end, ch_dir}
+        LDA v : LDY v + 1 : STA v + 1 : STY v
+    NEXT
+    LDA sa0 + 1 : LDY sb0 + 1
+    STY sa0 + 1 : STY sa1 + 1 : STY sa2 + 1 : STY sa3 + 1
+    STA sb0 + 1 : STA sb1 + 1 : STA sb2 + 1 : STA sb3 + 1
+.decided
+    LDA #CHK_SKIP
+}
+\ patch_checks: the copies' tests of which chain is left, A one of CHK_*.
+.patch_checks
+    STA chk0 + 1 : STA chk1 + 1 : STA chk2 + 1 : STA chk3 + 1
+    RTS
 
 \ The end of a segment: the face's end, or the chain or chains whose edge
 \ ended here take their next; then the next segment, from the loop's copy
@@ -241,18 +276,17 @@ SECTION RasterCode
     EQUW loop0, loop1, loop2, loop3
 
 \ ---------------------------------------------------------------------------
-\ The line loop, a copy for each value of line AND 3: the span between the
-\ chains, both chains stepped to the next line (each through a BRA patched
-\ to its edge's stepping: STEP8 when the error fits a byte, STEP16, or none
-\ for a vertical edge), the span into the line's gaps, and the next line.
+\ The line loop, a copy for each value of line AND 3: until the face's left
+\ chain is known, a test of it (through a BRA patched past it once it is);
+\ the span [ch_p, ch_p+1) into the line's gaps; both chains stepped to the
+\ next line (each through a BRA patched to its edge's stepping: STEP8 when
+\ the error fits a byte, STEP16, or none for a vertical edge); the next
+\ line.
 
-MACRO SPAN
-    LDA ch_p : CMP ch_p+1 : BCC a_left
-    STA r_b : LDA ch_p+1 : STA r_a
-    BRA done
-.a_left
-    STA r_a : LDA ch_p+1 : STA r_b
-.done
+MACRO CHECK
+    LDA ch_p : CMP ch_p+1 : BEQ undecided
+    JSR decide
+.undecided
 ENDMACRO
 
 MACRO STEP8 c, done
@@ -432,7 +466,17 @@ MACRO INSERT k, next
 }
 ENDMACRO
 
-.loop0  SPAN
+.loop0
+.chk0   BRA chk_test0                 ; patched: CHK_TEST or CHK_SKIP
+        ZA_CANJUMP chk_test0, chk_end0
+.chk_test0 CHECK
+.chk_end0
+        \ A line that starts a character row: its row's pointers.
+        LDA r_y : BIT #4 : BNE row0
+        LDX r_y : JSR row_setup
+.row0
+        INSERT 0, step0
+.step0
 .sa0    BRA sa8_0                       ; patched
         ZA_CANJUMP sa8_0, sa16_0, sa_end0
 .sa8_0  STEP8 0, sa_end0
@@ -443,14 +487,16 @@ ENDMACRO
 .sb8_0  STEP8 1, sb_end0
 .sb16_0 STEP16 1
 .sb_end0
-        \ A line that starts a character row: its row's pointers.
-        LDA r_y : BIT #4 : BNE row0
-        LDX r_y : JSR row_setup
-.row0   INSERT 0, next0
 .next0  INC r_y : LDA r_y : CMP f_yend : BNE loop1
         JMP seg_end
 
-.loop1  SPAN
+.loop1
+.chk1   BRA chk_test1                 ; patched: CHK_TEST or CHK_SKIP
+        ZA_CANJUMP chk_test1, chk_end1
+.chk_test1 CHECK
+.chk_end1
+        INSERT 1, step1
+.step1
 .sa1    BRA sa8_1
         ZA_CANJUMP sa8_1, sa16_1, sa_end1
 .sa8_1  STEP8 0, sa_end1
@@ -461,11 +507,16 @@ ENDMACRO
 .sb8_1  STEP8 1, sb_end1
 .sb16_1 STEP16 1
 .sb_end1
-        INSERT 1, next1
 .next1  INC r_y : LDA r_y : CMP f_yend : BNE loop2
         JMP seg_end
 
-.loop2  SPAN
+.loop2
+.chk2   BRA chk_test2                 ; patched: CHK_TEST or CHK_SKIP
+        ZA_CANJUMP chk_test2, chk_end2
+.chk_test2 CHECK
+.chk_end2
+        INSERT 2, step2
+.step2
 .sa2    BRA sa8_2
         ZA_CANJUMP sa8_2, sa16_2, sa_end2
 .sa8_2  STEP8 0, sa_end2
@@ -476,11 +527,16 @@ ENDMACRO
 .sb8_2  STEP8 1, sb_end2
 .sb16_2 STEP16 1
 .sb_end2
-        INSERT 2, next2
 .next2  INC r_y : LDA r_y : CMP f_yend : BNE loop3
         JMP seg_end
 
-.loop3  SPAN
+.loop3
+.chk3   BRA chk_test3                 ; patched: CHK_TEST or CHK_SKIP
+        ZA_CANJUMP chk_test3, chk_end3
+.chk_test3 CHECK
+.chk_end3
+        INSERT 3, step3
+.step3
 .sa3    BRA sa8_3
         ZA_CANJUMP sa8_3, sa16_3, sa_end3
 .sa8_3  STEP8 0, sa_end3
@@ -491,13 +547,17 @@ ENDMACRO
 .sb8_3  STEP8 1, sb_end3
 .sb16_3 STEP16 1
 .sb_end3
-        INSERT 3, next3
 .next3  INC r_y : LDA r_y : CMP f_yend : BEQ seg_end3
         JMP loop0
 .seg_end3
         JMP seg_end
 
 \ The patched BRAs' offsets, the same in every copy and for both chains.
+CHK_TEST  = chk_test0 - (chk0 + 2)
+CHK_SKIP  = chk_end0 - (chk0 + 2)
+ASSERT chk_test1 - (chk1 + 2) = CHK_TEST AND chk_end1 - (chk1 + 2) = CHK_SKIP
+ASSERT chk_test2 - (chk2 + 2) = CHK_TEST AND chk_end2 - (chk2 + 2) = CHK_SKIP
+ASSERT chk_test3 - (chk3 + 2) = CHK_TEST AND chk_end3 - (chk3 + 2) = CHK_SKIP
 STEP_8    = sa8_0 - (sa0 + 2)
 STEP_16   = sa16_0 - (sa0 + 2)
 STEP_NONE = sa_end0 - (sa0 + 2)
@@ -527,13 +587,14 @@ ASSERT sb8_3 - (sb3 + 2) = STEP_8 AND sb16_3 - (sb3 + 2) = STEP_16 AND sb_end3 -
 .walk
     LDA ch_i,X : ZA_INDEXEDBY 0..1
     STA e_u
-    CPX #0 : BNE back
-    \ Chain 0: the next vertex forwards, wrapping.
+    LDY ch_dir,X : ZA_INDEXEDBY 0..1
+    BNE back
+    \ Forwards: the next vertex, wrapping.
     INC A : CMP f_n : BCC got
     LDA #0
     BRA got
 .back
-    \ Chain 1: backwards.
+    \ Backwards.
     CMP #0 : BNE before
     LDA f_n
 .before
@@ -550,6 +611,7 @@ ASSERT sb8_3 - (sb3 + 2) = STEP_8 AND sb16_3 - (sb3 + 2) = STEP_16 AND sb_end3 -
 \ chain X's, which starts at line r_y. C = 0 when it crosses no line from
 \ r_y on; otherwise C = 1, with the chain's boundary on line r_y, the line
 \ it ends before and its stepping set, and the loop patched to step it.
+\ Keeps X.
 \
 \ The boundary on line k is p = ceil((x - 8) / 16) of the edge's x at the
 \ line's centre c = 16 k + 8. With dx, dy the edge's extent (dy > 0),
@@ -557,27 +619,29 @@ ASSERT sb8_3 - (sb3 + 2) = STEP_8 AND sb16_3 - (sb3 + 2) = STEP_16 AND sb_end3 -
 \   dx = a dy + b (b in [0, dy)), W = w + a t0 = 16 W1 + W2 (W2 0..15),
 \   R = W2 dy + b t0, q = ceil(R / (16 dy)) (0, 1 or 2),
 \   p = U + W1 + q, and the error e = q dy - ceil(R / 16), in [0, dy).
-\ That steps exactly (docs/research/raster.md derives it).
+\ That steps exactly (docs/research/raster.md derives it). A 16-bit value's
+\ bits 4-11 are lo16 of its low byte OR its high byte shifted up 4.
 
-ZA_AUTO1 e_u, e_w, e_n, e_t0, e_wf, e_x0, e_neg, e_p, e_t
+ZA_AUTO1 e_c, e_u, e_w, e_k1, e_n, e_t0, e_wf, e_ux, e_neg, e_p
 ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
 
 .edge_setup
 {
-    \ The end vertex's line first: an edge ending at or above r_y is done.
+    STX e_c
+    \ The end vertex's line first, (y + 7) >> 4: an edge ending at or above
+    \ r_y is done.
     LDA e_w : CLC : ADC f_v0 : TAY
-    LDA rs_vyl,Y : ADC #SUB DIV 2 - 1 : STA e_t
+    LDA rs_vyl,Y : ADC #SUB DIV 2 - 1 : TAX
     LDA rs_vyh,Y : ADC #0
-    FOR i = 1..4
-        ASL e_t : ROL A
-    NEXT
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,X
     CMP r_y : BEQ none : BCS some
 .none
+    LDX e_c
     CLC
     RTS
 .some
-    STA ch_end,X : ZA_INDEXEDBY 0..1
-    SEC : SBC r_y : STA e_n
+    STA e_k1
+    SBC r_y : STA e_n                   ; (C = 1)
     LDA rs_vxl,Y : STA e_dx : LDA rs_vxh,Y : STA e_dx+1
     LDA rs_vyl,Y : STA e_dy : LDA rs_vyh,Y : STA e_dy+1
     LDA e_u : CLC : ADC f_v0 : TAY
@@ -590,17 +654,18 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
     LDA e_dx+1 : SBC rs_vxh,Y : STA e_dx+1
     \ t0 = (8 - y0) AND 15
     LDA #SUB DIV 2 : SEC : SBC rs_vyl,Y : AND #SUB - 1 : STA e_t0
-    \ x0 + 8 = 16 (U + 1) + w: e_x0 = U + 1, e_wf = w
-    LDA rs_vxl,Y : CLC : ADC #SUB DIV 2 : STA e_x0
+    \ x0 + 8 = 16 (U + 1) + w
+    LDA rs_vxl,Y : CLC : ADC #SUB DIV 2 : TAX
     AND #SUB - 1 : STA e_wf
     LDA rs_vxh,Y : ADC #0
-    FOR i = 1..4
-        LSR A : ROR e_x0
-    NEXT
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,X
+    DEC A : STA e_ux
+    LDX e_c
+    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
     LDA e_dx : ORA e_dx+1 : BNE sloped
     \ Vertical: p = U + (w > 0), the same on every line.
     LDA e_wf : CMP #1
-    LDA e_x0 : SBC #0
+    LDA e_ux : ADC #0
     STA ch_p,X : ZA_INDEXEDBY 0..1
     LDA #STEP_NONE : JSR patch_steps
     SEC
@@ -629,24 +694,30 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
     INC e_q : BNE signed
     INC e_q+1
 .signed
-    \ e_q = |a|, e_neg its sign, e_r = b. W = w + a t0, signed 16-bit.
+    \ e_q = |a|, e_neg its sign, e_r = b. W = w + a t0, signed 16-bit: |a| t0
+    \ is 0 or t0 for a steep edge.
+    LDA e_q+1 : BNE product
+    LDA e_q : CMP #2 : BCS product
+    STZ m_r+1
+    LSR A : LDA #0 : BCC times
+    LDA e_t0
+.times
+    STA m_r
+    BRA a_times
+.product
     LDA e_q : STA m_v : LDA e_q+1 : STA m_v+1
     LDA e_t0 : JSR mul4
+.a_times
     LDA e_neg : BEQ w_pos
     SEC : LDA #0 : SBC m_r : STA m_r : LDA #0 : SBC m_r+1 : STA m_r+1
 .w_pos
     CLC
-    LDA m_r : ADC e_wf : STA e_w2
+    LDA m_r : ADC e_wf : TAY
+    AND #SUB - 1 : STA e_wf             ; W2
     LDA m_r+1 : ADC #0
-    \ W2 = W AND 15; W1 = W >> 4, of which the low byte will do (p fits a
-    \ byte, so the sum is right modulo 256).
-    STA e_t
-    LDA e_w2 : AND #SUB - 1 : STA e_wf
-    FOR i = 1..4
-        LSR e_t : ROR e_w2
-    NEXT
-    \ p (so far) = U + W1 = e_x0 - 1 + W1
-    LDA e_x0 : CLC : ADC e_w2 : SEC : SBC #1 : STA e_p
+    \ p (so far) = U + W1, W1's low byte (the sum is right modulo 256)
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
+    CLC : ADC e_ux : STA e_p
     \ R = W2 dy + b t0
     LDA e_dy : STA m_v : LDA e_dy+1 : STA m_v+1
     LDA e_wf : JSR mul4
@@ -662,11 +733,9 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
     INC e_p
     LDA e_dy : STA e_e : LDA e_dy+1 : STA e_e+1
     \ 16 dy (fits: dy <= SUB * VIEW_H)
-    LDA e_dy : STA e_16 : LDA e_dy+1
-    FOR i = 1..4
-        ASL e_16 : ROL A
-    NEXT
-    STA e_16+1
+    LDA e_dy : ASL A : ASL A : ASL A : ASL A : STA e_16
+    LDY e_dy
+    LDA e_dy+1 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA e_16+1
     LDA e_16 : CMP e_w2 : LDA e_16+1 : SBC e_w2+1 : BCS q_done   ; 16 dy >= R
     INC e_p
     CLC
@@ -682,12 +751,10 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
 .steps
     \ e -= (R + 15) >> 4
     CLC
-    LDA e_w2 : ADC #SUB - 1 : STA e_16
-    LDA e_w2+1 : ADC #0
-    FOR i = 1..4
-        LSR A : ROR e_16
-    NEXT
-    STA e_16+1
+    LDA e_w2 : ADC #SUB - 1 : TAY
+    LDA e_w2+1 : ADC #0 : STA e_16+1
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA e_16
+    LSR e_16+1 : LSR e_16+1 : LSR e_16+1 : LSR e_16+1
     SEC
     LDA e_e : SBC e_16 : STA ch_e,X : ZA_INDEXEDBY 0..1
     LDA e_e+1 : SBC e_16+1 : STA ch_eh,X : ZA_INDEXEDBY 0..1
@@ -911,11 +978,13 @@ ZA_AUTO 4, hz_n
     LDA rs_ground : STA bg_r
     LDA rs_horizon : BEQ all_sky
     LDA rs_hdy : BNE sloping
-    \ Level: the first line whose centre is at or below hy turns it, sky
-    \ above it and ground from there when hdx > 0 (a centre on the horizon
-    \ is the ground's, its top edge), the other way round when hdx < 0.
-    \ K = (hy + 7) >> 4, arithmetic, clamped to [0, VIEW_H].
-    LDA rs_hy : CLC : ADC #SUB DIV 2 - 1 : STA hz_n
+    \ Level: a line is ground when its centre is on the horizon or on the
+    \ ground's side, so with hdx > 0 ground starts at the first centre at or
+    \ below hy, K = (hy + 7) >> 4, and with hdx < 0 (upside down) sky starts
+    \ at the first centre below it, K = (hy + 8) >> 4; arithmetic shifts,
+    \ clamped to [0, VIEW_H].
+    LDA rs_hdx : ASL A                  ; C = (hdx < 0)
+    LDA rs_hy : ADC #SUB DIV 2 - 1 : STA hz_n
     LDA rs_hy+1 : ADC #0
     FOR i = 1..4
         CMP #&80 : ROR A : ROR hz_n
@@ -1038,7 +1107,10 @@ ZA_AUTO 4, hz_n
     FOR i = 1..3
         ASL m32_x : ROL m32_x+1 : ROL m32_x+2 : ROL m32_x+3
     NEXT
-    CLC
+    \ Pointing down the screen, the ground is the centres at or left of the
+    \ horizon, so the split is floor(N / D) + 1 = ceil((N + 1) / D): add the
+    \ carry in. Pointing up, ceil(N / D).
+    LDA rs_hdy : EOR #&80 : ASL A       ; C = (hdy > 0) (hdy isn't 0)
     FOR i = 0..3
         LDA hz_n + i : ADC m32_x + i : STA hz_n + i
     NEXT

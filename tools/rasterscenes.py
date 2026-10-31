@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "model"))
 
 from raster import (VIEW_W, VIEW_H, SUB, HALF, Background, Horizon,  # noqa: E402
-                    rasterise, reference)
+                    spans, reference)
 import writer  # noqa: E402
 
 XMAX, YMAX = SUB * VIEW_W, SUB * VIEW_H
@@ -185,7 +185,8 @@ def edge_scenes():
     out.append(scene("empty-sky", []))
     for y in (-50000 // 2, -1, 0, 7, 8, 9, 16 * 30 + 8, YMAX - 1, YMAX, YMAX + 9, 30000):
         out.append(scene(f"level-{y}", [], Horizon(rng.randint(-500, 2000), y, 64, 0), rng))
-    out.append(scene("upside-down", [], Horizon(800, 800, -64, 0), rng))
+    for hy in (800, 808, 816):
+        out.append(scene(f"upside-down-{hy}", [], Horizon(800, hy, -64, 0), rng))
     for k in range(24):
         a = 2 * math.pi * k / 24
         dx, dy = round(DMAX * math.cos(a)), round(DMAX * math.sin(a))
@@ -193,7 +194,10 @@ def edge_scenes():
     for hx, hy, dx, dy in ((832, 832, 0, 64), (832, 832, 0, -64), (8, 8, 1, 1), (24, 0, -1, 1),
                            (-HMAX, -HMAX, 127, 127), (HMAX, -HMAX, -1, 127), (HMAX, HMAX, 127, -1),
                            (-HMAX, 0, 127, -127), (5000, 832, 0, 1), (-5000, 832, 0, -1),
-                           (836, 8, 127, -126), (840, 840, 3, -127)):
+                           (836, 8, 127, -126), (840, 840, 3, -127),
+                           # through pixel centres, where a tie is ground
+                           (8, 8, 2, 1), (8, 1656, 2, -1), (1656, 8, -1, 1), (1656, 1656, -2, -1),
+                           (808, 8, 0, 1), (808, 8, 0, -1), (8, 808, 1, 0), (8, 808, -1, 0)):
         out.append(scene(f"horizon-{hx}-{hy}-{dx}-{dy}", [], Horizon(hx, hy, dx, dy), rng))
 
     whole = [(0, 0), (XMAX, 0), (XMAX, YMAX), (0, YMAX)]
@@ -342,12 +346,12 @@ def build(s):
         h = bg.horizon
         assert abs(h.x) <= HMAX and abs(h.y) <= HMAX and abs(h.dx) <= DMAX and abs(h.dy) <= DMAX, s["name"]
     want = writer.view_bytes(reference(faces, bg))
-    got = writer.view_bytes(rasterise(faces, bg)[0])
+    got = writer.view_bytes(spans(faces, bg)[0])
     if got != want:
         y = next(i for i in range(VIEW_H) if got[i] != want[i])
-        raise SystemExit(f"{s['name']}: rasterise disagrees with the reference on line {y}")
+        raise SystemExit(f"{s['name']}: spans disagree with the reference on line {y}")
     # What the 6502 draws, its pools as big as they are.
-    lines, counts = rasterise(faces, bg, POOL_NODES)
+    lines, counts = spans(faces, bg, POOL_NODES)
     return {
         "name": s["name"],
         "sky": s["sky"],

@@ -85,11 +85,12 @@ const BUCKETS = [
     ["frame", "writer_init"],
     ["face", "raster_face"],
     ["face", "seg_end"],
-    // the line loop's copies: the span, the chains' steps, the insertion
+    // the line loop's copies: which chain is left, the insertion, the
+    // chains' steps, the next line
     ...[0, 1, 2, 3].flatMap((k) => [
         ["span", `loop${k}`],
-        ["step", `sa${k}`],
-        ["insert", `sb_end${k}`],
+        ["insert", `chk_end${k}`],
+        ["step", `step${k}`],
         ["next", `next${k}`],
     ]),
     ["edge", "patch_steps"],

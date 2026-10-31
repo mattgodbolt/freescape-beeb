@@ -6,15 +6,25 @@ PIX_RIGHT (&55); a pattern is four bytes, one for each value of line AND 3.
 So a byte one run covers is that run's pattern byte for the line, and a
 byte where two runs meet is `left AND &AA OR right AND &55` of their two.
 Every byte of the view is written; nothing on the screen is read.
+
+write(lines) returns the view's bytes in the screen's layout, relative to
+VIEW_ADDR: line y, byte column c is at (y DIV 8) * SCREEN_ROW + 8 c +
+(y MOD 8). Bytes outside the view (the columns beyond VIEW_BYTES in each
+character row) are 0. decode(view) turns them back into the view's logical
+colours, VIEW_H lines of VIEW_W pixels.
 """
 
-from raster import DEFS, VIEW_W, VIEW_H
+if __package__:
+    from .raster import DEFS, VIEW_W, VIEW_H
+else:
+    from raster import DEFS, VIEW_W, VIEW_H
 
 VIEW_BYTES = DEFS["VIEW_BYTES"]
 VIEW_ADDR = DEFS["VIEW_ADDR"]
 SCREEN_ROW = DEFS["SCREEN_ROW"]
 PIX_LEFT = DEFS["PIX_LEFT"]
 PIX_RIGHT = DEFS["PIX_RIGHT"]
+LENGTH = (VIEW_H - 1) // 8 * SCREEN_ROW + 8 * (VIEW_BYTES - 1) + (VIEW_H - 1) % 8 + 1
 
 
 def view_bytes(lines):
@@ -35,12 +45,38 @@ def view_bytes(lines):
     return rows
 
 
+def offset(y, c):
+    """Line y's byte column c, from VIEW_ADDR (src/defs.6502)."""
+    return (y // 8) * SCREEN_ROW + 8 * c + (y % 8)
+
+
 def address(y, c):
-    """Where line y's byte column c is on the screen (src/defs.6502)."""
-    return VIEW_ADDR + (y // 8) * SCREEN_ROW + 8 * c + (y % 8)
+    """Where line y's byte column c is on the screen."""
+    return VIEW_ADDR + offset(y, c)
 
 
-def screen(lines):
-    """{address: byte} for every byte of the view."""
-    return {address(y, c): b
-            for y, row in enumerate(view_bytes(lines)) for c, b in enumerate(row)}
+def write(lines):
+    """The view's bytes in the screen's layout, from VIEW_ADDR."""
+    out = bytearray(LENGTH)
+    for y, row in enumerate(view_bytes(lines)):
+        for c, b in enumerate(row):
+            out[offset(y, c)] = b
+    return bytes(out)
+
+
+def pixel_colours(b):
+    """A MODE 2 byte's two logical colours, left then right."""
+    left = sum(((b >> (2 * i + 1)) & 1) << i for i in range(4))
+    right = sum(((b >> (2 * i)) & 1) << i for i in range(4))
+    return left, right
+
+
+def decode(view):
+    """write's bytes back to logical colours, a list of lines of pixels."""
+    out = []
+    for y in range(VIEW_H):
+        line = []
+        for c in range(VIEW_BYTES):
+            line.extend(pixel_colours(view[offset(y, c)]))
+        out.append(line)
+    return out

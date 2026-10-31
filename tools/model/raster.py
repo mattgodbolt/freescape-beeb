@@ -4,6 +4,22 @@ docs/engine.md, stages 8 and 9, and section 9's interface. This is the
 specification the 6502's src/raster.6502 matches byte for byte (through
 writer.py's bytes; tools/rastercheck.mjs compares them).
 
+rasterise(faces, sky, ground, horizon=None, stats=None):
+
+- faces: nearest first, each (pattern, polygon): a pattern is four bytes,
+  one for each value of line AND 3; a polygon is convex, its vertices view
+  coordinates inside [0, 16 VIEW_W] x [0, 16 VIEW_H], in either winding.
+- sky, ground: patterns; horizon: ((px, py), (dx, dy)) in view coordinates,
+  sky to the left of the direction as seen on the screen (a pixel centre on
+  the line is ground), or None for sky everywhere.
+- Returns, for each line 0 .. VIEW_H - 1, its runs (x0, x1, pattern) in
+  pixels, in order, covering [0, VIEW_W) exactly. A run is the pixels of one
+  source (a face, or the sky or ground) that touch, so two faces of the same
+  pattern side by side are two runs, as the 6502 writes them.
+- stats, a dict, gets the counts the cost model uses (Counts).
+
+The rules:
+
 - View coordinates are sixteenths of a pixel (SUB), x right and y down from
   the view's top left; pixel (px, py) has its centre at (16 px + 8, 16 py + 8).
 - The fill rule: a face covers a pixel when the pixel's centre is inside it.
@@ -15,15 +31,10 @@ writer.py's bytes; tools/rastercheck.mjs compares them).
   which is the painter's image for the same order taken back to front.
 - What no face covers is background: sky on one side of the horizon and
   ground on the other (horizon_split), or all sky when there is no horizon.
-
-The output is, for each line 0 .. VIEW_H - 1, its runs (x0, x1, pattern)
-in pixels, in order, covering [0, VIEW_W) exactly. A run is the pixels of
-one source (a face, or the sky or ground) that touch, so two faces of the
-same pattern side by side are two runs, as the 6502 writes them.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,7 +42,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _defs(path=ROOT / "src" / "defs.6502"):
     """The plain constants of src/defs.6502 (NAME = expression), evaluated, so
-    the view's size and place are written down once, there."""
+    the view's size and place are written down once, there (as
+    tools/model/view.py reads them too)."""
     out = {}
     for line in path.read_text().splitlines():
         line = line.split(";", 1)[0].split("\\", 1)[0].strip()
@@ -125,36 +137,37 @@ class Background:
     horizon: Horizon | None = None
 
 
+def is_ground(h, cx, cy):
+    """Whether a point is ground: on the horizon or on its right as seen on
+    the screen, dx (cy - hy) - dy (cx - hx) >= 0."""
+    return h.dx * (cy - h.y) - h.dy * (cx - h.x) >= 0
+
+
 def horizon_split(bg, line):
     """The background on a line: (left, right, split), meaning pixels below
     split take left and the rest take right, split in [0, VIEW_W].
 
-    A pixel is sky when its centre is strictly to the sky's side of the
-    horizon and ground when strictly on the ground's. A centre exactly on it
-    goes by the fill rule, to the side the horizon is a top or left edge of:
-    the side to its right, or below it when it's level. So for a horizon
-    that isn't level it's the same boundary as an edge's, p = ceil((x - 8) /
-    16) of where the horizon crosses the line's centre: right of it is sky
-    when the horizon points down the screen and ground when it points up."""
+    A pixel is ground when its centre is on the horizon or on the ground's
+    side of it (is_ground), and sky otherwise. A level horizon puts a whole
+    line on one side. Otherwise the split is where the horizon crosses the
+    line's centre, at x: pointing down the screen, the sky is right of it
+    and the ground is the pixels whose centres are at or left of x, so the
+    split is floor((x - 8) / 16) + 1; pointing up, the ground is right of
+    it, from ceil((x - 8) / 16)."""
     h = bg.horizon
     if h is None:
         return bg.sky, bg.ground, VIEW_W
     c = SUB * line + HALF
     if h.dy == 0:
-        # The whole line is on one side: the sign of the cross product,
-        # dx (c - hy), and on the line itself the ground when dx > 0 (it is
-        # the ground's top edge) and the sky when dx < 0 (the sky's).
-        s = h.dx * (c - h.y)
-        sky = s < 0 or (s == 0 and h.dx < 0)
-        return bg.sky, bg.ground, VIEW_W if sky else 0
-    # x where the horizon crosses the centre line: hx + dx (c - hy) / dy.
+        return bg.sky, bg.ground, 0 if is_ground(h, 0, c) else VIEW_W
+    # x = hx + dx (c - hy) / dy, and (x - 8) / 16 = n / d.
     num, den = h.x * h.dy + h.dx * (c - h.y), h.dy
     if den < 0:
         num, den = -num, -den
-    split = min(max(pixel_of(num, den), 0), VIEW_W)
+    n, d = num - HALF * den, SUB * den
     if h.dy > 0:
-        return bg.ground, bg.sky, split
-    return bg.sky, bg.ground, split
+        return bg.ground, bg.sky, min(max(n // d + 1, 0), VIEW_W)
+    return bg.sky, bg.ground, min(max(ceil_div(n, d), 0), VIEW_W)
 
 
 @dataclass
@@ -190,7 +203,18 @@ def _piece_bytes(counts, lo, hi):
         counts.whole += n
 
 
-def rasterise(faces, bg, capacity=None):
+def rasterise(faces, sky, ground, horizon=None, stats=None):
+    """The interface (the module's docstring): faces nearest first to each
+    line's runs."""
+    bg = Background(tuple(sky), tuple(ground),
+                    None if horizon is None else Horizon(*horizon[0], *horizon[1]))
+    lines, counts = spans([(tuple(p), [tuple(v) for v in vs]) for p, vs in faces], bg)
+    if stats is not None:
+        stats.update(counts.__dict__, runs=counts.runs, bytes=counts.bytes)
+    return lines
+
+
+def spans(faces, bg, capacity=None):
     """faces: [(pattern, [(x, y), ...]), ...] nearest first, vertices inside
     [0, 16 VIEW_W] x [0, 16 VIEW_H]; bg: a Background. Returns (lines,
     counts): lines[y] = [(x0, x1, pattern), ...] in order, covering
@@ -290,7 +314,8 @@ def rasterise(faces, bg, capacity=None):
 
 def reference(faces, bg):
     """The same image by brute force, every pixel of the view against every
-    face's edge functions (not spans): the model's check on rasterise."""
+    face's edge functions (not spans), and the background pixel by pixel
+    (not by split): the model's check on spans."""
     import numpy as np
 
     cx = (SUB * np.arange(VIEW_W) + HALF)[None, :].astype(np.int64)
@@ -319,12 +344,15 @@ def reference(faces, bg):
 
     lines = []
     for py in range(VIEW_H):
-        left, right, split = horizon_split(bg, py)
         runs = []
         for px in range(VIEW_W):
             f = int(owner[py, px])
-            src = (f, faces[f][0]) if f >= 0 else \
-                (("L", left) if px < split else ("R", right))
+            if f >= 0:
+                src = (f, faces[f][0])
+            elif bg.horizon is not None and is_ground(bg.horizon, SUB * px + HALF, SUB * py + HALF):
+                src = ("G", bg.ground)
+            else:
+                src = ("S", bg.sky)
             if runs and runs[-1][3] == src:
                 runs[-1][1] = px + 1
             else:
