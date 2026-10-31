@@ -156,29 +156,38 @@ It wasn't built.
 
 ## Stages 4-6: the faces (`src/clip.6502`)
 
-Each seen face as `render.draw_faces` takes it: the near clip in 3D
-(Sutherland-Hodgman; a line as a segment), each vertex's outcode, the guard
-band's clip in 3D (decision 17), the projection (the maths' `project`), a
-line widened to its quad and a point to its square, the 2D clip (or only
-repeats dropped), and the area test. A vertex the faces share is coded and
-projected once (`vflag`'s bits); the clips' new vertices follow the
-object's in the same arrays.
+Each seen face as `render.draw_faces` takes it (since the second round,
+below): the near clip in 3D (Sutherland-Hodgman; a line as a segment); a
+face wholly beyond one of the planes x = ±z, 2y = ±z dropped; the guard
+band's clip in 3D (decision 17); the projection (the maths' `project`) and
+each vertex's outcode against the view's rectangle from it; a face wholly
+beyond one edge dropped; a line widened to its quad and a point to its
+square; the 2D clip (or only repeats dropped); and the drawn test. A vertex
+the faces share is tested and projected once (`vflag`'s bits); the clips'
+new vertices follow the object's in the same arrays.
 
-- **Outcodes** are exact: A p > B z for each side, with quick tests first:
-  outside from w = z >> SHI, inside below w/2 and below 5w/8, outside from
-  6w/8, each rounded down; between, two products in full
-  (`tools/mkareas.py`'s `outcode_shifts` asserts each test for every z ≥
-  ZNEAR). Only 3 vertices a median view reach the products [measured].
-- **The guard band's test** is made with the outcode: a vertex inside a
-  side's plane is far inside the band's (ASSERTed), so only one outside a
-  plane compares with z << GUARD_XS (or YS).
-- **Every new coordinate** (near clip, guard band, 2D clip) is the model's
-  `round_div` exactly: a product of up to four bytes by four (`umul32`, a
-  column at a time on the maths' quarter squares) and a long division
-  (`udiv`, by whole bytes until the quotient's size, with a two- or
-  three-byte remainder when the divisor allows).
-- **The area test** is the model's: the fan's cross products from vertex 0,
-  16-bit, by `smul16`.
+- **The planes beyond the view's sides** (`clip.beyond`): x = ±z and 2y = ±z
+  lie outside the view's edges (|x| = 0.66 z, |y| = 0.33 z), so a face wholly
+  beyond one can't be seen; compares, made with the guard band's test,
+  since only a vertex beyond one of them can be outside the band. The guard
+  band's tests and planes share the vertex's z << 4, found once by nibble
+  tables.
+- **The near clip's new coordinates** are the model's `round_div` exactly:
+  a product of up to four bytes by four (`umul32`, a column at a time on
+  the maths' quarter squares) and a long division (`udiv`). They're a few
+  units from the eye, where an error would show most.
+- **The guard band's and the 2D clip's** are crossings (`clip.crossing_t`,
+  `lerp`): one fraction t from the edge's inside end, f_P / (f_P − f_Q) to
+  16 bits with both shifted right until the difference fits 16 bits
+  (`frac16`: the shifts, then sixteen unrolled steps, the remainder's high
+  byte in A), and each coordinate P + (Q − P) t / 2^16 rounded half up
+  (`lerp`). From the inside end, the two faces on an edge cut it at one
+  point.
+- **The 2D clip** is 16-bit (inside the guard band everything projects
+  within it), and runs only the passes for edges a vertex is beyond.
+- **The drawn test** (`clip.drawable`): three vertices or more, one off the
+  line through the first two, decided by the products' signs and zeros
+  where it can be, else by two 16 × 16 products.
 
 ## Stage 7: the sort (`src/order.6502`)
 
@@ -237,79 +246,122 @@ cycles (each instruction's to the innermost stage routine running) and the
 arithmetic's calls; `--profile` gives cycles by routine.
 
 [measured] All 2,485 views and 8,472 matrices agree: 29,508 candidates,
-141,989 vertices, 23,753 faces.
+141,989 vertices, 23,760 faces (with the second round's model).
 
 ## Where the cycles go [measured]
 
-Entrance views (each a turn) and their walks (each a step), median and
-maximum:
+Entrance views (each a turn: the cache refilled) and four-step walks from
+each (each a step: the cache kept), median and maximum, cycles. "First"
+is the pipeline as first merged (exact against the first model); "now" is
+after the second round below.
 
-| stage | turn median | turn max | step median | step max |
+| stage | turn, first | turn, now | step, first | step, now |
 |---|---:|---:|---:|---:|
-| matrix | 1,620 | 1,628 | 44 | 44 |
-| object pass | 7,051 | 17,990 | 7,051 | 17,990 |
-| transform | 40,054 | 71,734 | 13,889 | 23,462 |
-| near clip | 13,095 | 38,875 | 13,505 | 40,351 |
-| guard band | 58,942 | 147,706 | 59,405 | 153,657 |
-| projection (the maths') | 24,937 | 53,036 | 24,934 | 53,064 |
-| outcodes | 34,579 | 66,448 | 34,968 | 67,209 |
-| 2D clip | 47,688 | 116,925 | 47,706 | 117,129 |
-| area test | 19,244 | 48,136 | 19,124 | 48,464 |
-| the faces' own | 34,781 | 76,016 | 34,856 | 76,016 |
-| sort | 12,103 | 48,405 | 12,103 | 48,405 |
-| output | 1,089 | 2,561 | 1,089 | 2,561 |
-| **total** | **320,952** | **524,354** | **292,918** | **474,432** |
+| matrix | 1,620 | 1,620 | 44 | 44 |
+| object pass | 7,051 | 7,051 | 7,051 | 7,051 |
+| transform | 40,054 | 40,054 | 13,889 | 13,889 |
+| near clip | 13,095 | 13,083 | 13,505 | 13,493 |
+| guard band | 58,942 | 35,690 | 59,405 | 35,861 |
+| projection (the maths') | 24,937 | 29,649 | 24,934 | 29,601 |
+| outcodes (3D, first; from the projection now, in it) | 34,579 | - | 34,968 | - |
+| 2D clip | 47,688 | 34,157 | 47,706 | 36,157 |
+| area test, first; drawn test, now | 19,244 | 5,143 | 19,124 | 5,143 |
+| the faces' own (and the beyond and guard tests, now) | 34,781 | 48,710 | 34,856 | 48,810 |
+| sort | 12,103 | 12,086 | 12,103 | 12,086 |
+| output | 1,089 | 1,080 | 1,089 | 1,080 |
+| **total, median** | **320,952** | **253,073** | **292,918** | **220,860** |
+| **total, max** | 524,354 | 393,945 | 474,432 | 350,597 |
 
-At a median turn the clips make 60 exact `round_div`s: 6 near-clip points
-(two each), 10 guard-band points (three each) and 18 2D cuts. Each is a
-product and a long division of 1.5K-3K cycles, about 140K of the frame.
-That is the model's rule, not a choice here; it's the first proposal below.
+On the way [measured, the same views]: the crossings, the outcodes from the
+projection and the drawn test (the approved proposals) took a median turn
+to 278,674 and a step to 246,565; the drop of faces beyond x = ±z, 2y = ±z
+to 271,344 and 242,414; the normalised fractions and the 2D clip's skipped
+passes to 257,135 and 225,807; z << 4 once a vertex to the figures above.
 
-## Proposals, with figures
+**The target (about 30K a step and 45K a turn at the median) is not met:
+a step is 221K, a turn 253K.** At a median turn now: 30 crossings' fractions
+(`frac16`, 20K), 64 products of up to four bytes by four (`umul32`, 16K),
+12 exact near-clip divisions, 56 projections (30K, the maths'), 29 fills
+(17K), the guard and beyond tests (about 20K), the faces' loops and
+copies (about 25K), and the sort (12K).
 
-1. **Clip crossings from one parameter, by reciprocal tables** (the near
-   clip, the guard band and the 2D clip). Where the model now rounds each
-   new coordinate `a + round_div(Δ f_a, f_a − f_b)` exactly, it would take
-   t = f_a / (f_a − f_b) once a crossing, as a 16-bit fraction from a
-   normalised reciprocal (`rtw-sources.md` section 1.5), and each
-   coordinate as `a + round(Δ t)`. [counted] about 1.6K cycles a guard-band
-   point (t, then three products of four bytes by two), 1.2K a near-clip
-   point and 550 a 2D cut, against 7K, 4.6K and 2.3K now: **about 100K off
-   a median frame**. The cost is precision: t's
-   2^-16 moves a cut point by up to |Δ|·2^-16. At the guard band (16 views
-   wide) that is invisible after the 2D clip; at the near plane a visible
-   cut point could move by pixels when Δ is large, so the near clip may
-   need more bits of t (24, at about twice the cost). The model would make
-   crossings the same way. A decision for the coordinator and Matt.
-2. **No area test**, as the original has none (its object joins the draw
-   list when a face has "something left after the clip",
-   `zx-driller.md`): a face is drawn when three distinct vertices are left.
-   A degenerate face covers no pixel, but it can put its object on the draw
-   list and so change the sort. Saves the area test: **19K at the median,
-   48K at most** [measured].
-3. **Outcodes from the projected vertices**: decide the side-plane
-   rejection and the need to clip in 2D from (sx, sy) against the view's
-   rectangle, after the guard band and the projection, instead of from the
-   3D planes. Byte compares on 16-bit values in place of most of the
-   outcodes' **35K**, less the projections of vertices only rejected faces
-   use. It changes which edge-on slivers are rejected, as the projection's
-   rounding does.
+## The floor (decision 8a)
 
-Proposals 2 and 3 are simple to make in both the model and the 6502; 1 is
-the one that matters.
+The coordinator asked how much of each stage the floor takes: the area's
+floor object (`colours.floor`), one face 127 cells on a side in most areas,
+whose vertices lie far to the side every frame. `objectcheck.mjs --floor`
+counts each candidate's cycles, from its turn in `objects_frame`'s loop to
+the next's, the floor's apart [measured]:
+
+| | turn, first | turn, now | step, now |
+|---|---:|---:|---:|
+| the floor, median | 64,573 (19%) | 43,290 (16%) | 42,488 (18%) |
+| its share of the guard band | 47% | 41% | 42% |
+| ... of the near clip | 27% | 27% | 27% |
+| ... of the 2D clip | 21% | 23% | 23% |
+
+**The floor as the horizon**, measured and not taken. `render.py`'s
+`floor_as_horizon` (off: `FLOOR_AS_HORIZON`) draws no floor face and passes
+the rasteriser a horizon from the matrix alone: a view ray (X / FX, −Y / FY,
+1) is level when it's square to the camera's up, M's second column, which
+with FY = 2 FX is 2 m01 X − m11 Y + m21 FY = 0, sky where positive; as the
+rasteriser takes it, a point on the centre line across the line's steeper
+axis and the direction (m11, 2 m01), the ground the floor's top face's
+pattern. Against the floor as a face [measured, every check view, the model]:
+
+- 141,224 of 32,603,200 pixels differ (0.43%): 3,562 over the 65 entrance
+  views (0.5%), mostly the thin band past the floor's far edge;
+- but up to 2,574 of a view's 10,816 near the platform's edge looking out
+  (area 8's entrance 11, turned): the original shows the void past the
+  edge, the horizon ground to infinity;
+- and areas 14 and 18, whose floors are 11 cells thick, show objects the
+  floor's top hides;
+- against the original (`zxcompare.py`, with the ground given the floor's
+  colour so it's fair: a scratch variant, as `zxcompare` itself renders no
+  horizon): 99.37% of pixels away from edges agree, against 99.95% with the
+  floor as a face; the worst views 91.4% (area 4's entrance 28), 91.6% and
+  93.3%.
+
+It would save about 43K a frame, but it isn't only the thin band: the edge
+of the world goes. The 6502 side isn't built; it's the decision below.
+
+## Decisions proposed
+
+For the coordinator to number:
+
+1. **Clip crossings by one fraction** (approved, rtw-sources §1.5): the
+   guard band's and the 2D clip's new vertices from t = f_P / (f_P − f_Q),
+   both shifted right until the difference fits 16 bits, to 16 bits, from
+   the edge's inside end, and each coordinate P + (Q − P) t / 2^16 rounded
+   half up; the near clip's stay exact. Against the exact clips, 149
+   pixels of 32.6 million differ over the check's views, and the draw order
+   in 3 views [measured].
+2. **Outcodes from the projected vertices** (approved): a face wholly beyond
+   one of the view's edges, or needing the 2D clip, is found from its
+   projected vertices; before the guard band, a face wholly beyond x = ±z or
+   2y = ±z (outside the view's sides) is dropped, by compares, which changes
+   no pixel of any check view [measured].
+3. **The drawn test** (approved, in place of the area test): three vertices
+   or more, not all on one line, so no degenerate polygon reaches the
+   rasteriser.
+4. **The floor as the horizon** (amending 8a), not taken: the figures above.
+   A cheaper floor that keeps the edge of the world would draw the horizon
+   and the void past the floor's edges as sky; not built.
 
 ## What's left
 
-- **Speed, exact**: a level camera's paths (`rtw-sources.md` 1.3-1.4: the
-  edges' zero components skipped in the vertex adds, one projection a
-  vertical edge); the area test's signs before its products; the outcodes'
-  quick tests on fewer bytes; the arithmetic as macros where it's hot; the
-  sort's compare.
-- **Size**: this track's code is 12.2K, too big for main RAM beside the
-  rest; the engine's build should put it in a sideways bank with the
-  working copy (and the records in the others), which needs only the
-  sections' placement.
+- **The target.** The biggest costs now are per vertex (the projection, the
+  guard and beyond tests, the transform's adds and, on a turn, its fills)
+  and the clips' arithmetic. What would move them most: a pass over each
+  object's vertices before its faces (tests and projections in one tight
+  loop, the faces then only gathering codes); a level camera's paths
+  (rtw-sources §1.3-1.4: the edges' zero components skipped in the adds;
+  one reciprocal for a vertical edge's two ends, which is the projection
+  track's to build); the floor as above; the arithmetic inline (§1.7); a
+  memo of the sort's compares (about half of them repeat).
+- **Size**: this track's code is too big for main RAM beside the rest; the
+  engine's build should put it in a sideways bank with the working copy.
 - **The logic's side**: moving an object (the rig) means updating its
   record's cells and calling `cache_reset`.
-- **The glue** to the rasteriser: `out_*` to `rs_*` (or the same arrays),
-  colour indices to patterns.
+- **The glue** to the rasteriser: `out_*` to `rs_*`, colour indices to
+  patterns.
