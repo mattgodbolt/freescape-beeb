@@ -24,7 +24,7 @@ define RASTER_CHECK_6502
 INCLUDE "../../src/defs.6502"
 ZA_POOL &00..&8F
 
-SECTION RasterCode, org = &1600, guard = &3000, filename = "RCODE", cmos = TRUE
+SECTION RasterCode, org = &0E00, guard = &3000, filename = "RCODE", cmos = TRUE
 .check_init
     ZA_ENTRY
     JMP raster_init
@@ -40,17 +40,17 @@ SECTION RasterCode, org = &1600, guard = &3000, filename = "RCODE", cmos = TRUE
 .check_acccon
     EQUB ACCCON_Y
 ENDSECTION
-SECTION RasterIn, org = &0E00, guard = &1600, virtual = TRUE
+SECTION RasterIn, org = &0400, guard = &0B00, virtual = TRUE
 ENDSECTION
 SECTION RasterRuns, org = &C000, guard = &CD00, filename = "RRUNS", cmos = TRUE
 ENDSECTION
-SECTION RasterWork, org = &CD00, guard = &DF00, virtual = TRUE
+SECTION RasterWork, org = &CD00, guard = &E000, virtual = TRUE
 ENDSECTION
-SECTION RasterState, org = &DF00, guard = &E000, virtual = TRUE
+SECTION RasterState, org = &0B00, guard = &0D00, virtual = TRUE
 ENDSECTION
 
-INCLUDE "../../src/writer.6502"
 INCLUDE "../../src/raster.6502"
+INCLUDE "../../src/writer.6502"
 endef
 export RASTER_CHECK_6502
 

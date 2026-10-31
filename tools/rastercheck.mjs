@@ -40,9 +40,9 @@ const symFile = `${dir}/symbols.json`;
 const sections = {};
 for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
     for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
-const scenes = JSON.parse(fs.readFileSync(`${dir}/scenes.json`, "utf8")).scenes.filter(
-    (s) => !only || s.name.includes(only),
-);
+const all = JSON.parse(fs.readFileSync(`${dir}/scenes.json`, "utf8"));
+const scenes = all.scenes.filter((s) => !only || s.name.includes(only));
+const sequences = (all.sequences || []).filter((q) => !only || q.name.includes(only));
 
 const m = await headless({ symbols: symFile });
 const S = (name) => m.sym(name);
@@ -79,6 +79,7 @@ const writable = (a) => viewAddrs.has(a) || allowed.some(([lo, hi]) => a >= lo &
 // labels at or below it.
 const BUCKETS = [
     ["check", "check_init"],
+    ["frame", "raster_init"],
     ["row", "row_setup"],
     ["run", "put_run"],
     ["join", "put_bnd"],
@@ -160,28 +161,29 @@ function writeScene(s) {
     }
 }
 
-const results = [];
-let failures = 0;
-const totals = {};
-for (const [i, s] of scenes.entries()) {
+// One frame of scene s into a screen (shadow or not), checked: the view's
+// bytes are the model's; nothing else of either screen changed; nothing was
+// written outside the rasteriser's memory; rs_overflow is the model's. With
+// fresh, the screens are forgotten first and the view starts as each
+// expected byte's complement, so every byte must be written (and the count
+// written must be the model's).
+async function frame(s, shadow, fresh) {
     writeScene(s);
     const want = s.view.map((row) => Buffer.from(row, "hex"));
-    // Alternate the screens, so both are drawn into.
-    const shadow = i % 2 === 1;
     const space = shadow ? "shadow" : "main";
     const other = shadow ? "main" : "shadow";
     m.poke(S("check_acccon"), ACCCON_Y | (shadow ? ACCCON_X : 0));
-    // Every byte of the view starts as its expected value's complement, and
-    // the rest of both screens as something the frame mustn't touch.
-    const before = { [space]: [], [other]: [] };
-    for (const sp of [space, other]) {
-        const fill = new Uint8Array(0x8000 - SCREEN);
-        for (let a = 0; a < fill.length; a++) fill[a] = (a * 7 + (sp === space ? 0x5a : 0xa5)) & 255;
-        m.write(SCREEN, fill, sp);
-        before[sp] = fill;
+    if (fresh) {
+        await m.call(S("raster_forget"));
+        for (const sp of [space, other]) {
+            const fill = new Uint8Array(0x8000 - SCREEN);
+            for (let a = 0; a < fill.length; a++) fill[a] = (a * 7 + (sp === space ? 0x5a : 0xa5)) & 255;
+            m.write(SCREEN, fill, sp);
+        }
+        for (let y = 0; y < VIEW_H; y++)
+            for (let c = 0; c < VIEW_BYTES; c++) m.poke(addr(y, c), want[y][c] ^ 0xff, space);
     }
-    for (let y = 0; y < VIEW_H; y++)
-        for (let c = 0; c < VIEW_BYTES; c++) m.poke(addr(y, c), want[y][c] ^ 0xff, space);
+    const before = { [space]: m.read(SCREEN, 0x8000 - SCREEN, space), [other]: m.read(SCREEN, 0x8000 - SCREEN, other) };
 
     // Profile: each instruction's cycles to its routine's bucket.
     const prof = {};
@@ -213,7 +215,6 @@ for (const [i, s] of scenes.entries()) {
 
     const problems = [];
     for (let y = 0; y < VIEW_H && problems.length < 4; y++) {
-        const got = m.read(addr(y, 0) - 0, 1, space);
         for (let c = 0; c < VIEW_BYTES; c++) {
             const b = m.peek(addr(y, c), space);
             if (b !== want[y][c]) {
@@ -221,7 +222,6 @@ for (const [i, s] of scenes.entries()) {
                 break;
             }
         }
-        void got;
     }
     for (const sp of [space, other]) {
         const now = m.read(SCREEN, 0x8000 - SCREEN, sp);
@@ -237,34 +237,65 @@ for (const [i, s] of scenes.entries()) {
     if (strays.length) problems.push(`wrote outside its memory: ${strays.map((a) => "&" + a.toString(16)).join(" ")}`);
     const overflow = m.peek(S("rs_overflow")) !== 0;
     if (overflow !== s.counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${s.counts.overflow}`);
-    if (counts.bytes !== s.counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${s.counts.bytes}`);
-
-    for (const [k, v] of Object.entries(prof)) totals[k] = (totals[k] || 0) + v;
-    const line = `${s.name.padEnd(28)} ${String(cycles).padStart(7)} c` +
-        `  runs ${String(counts.runs).padStart(4)} joins ${String(counts.joins).padStart(4)}`;
-    if (problems.length) {
-        failures++;
-        console.log(`FAIL ${line}`);
-        for (const p of problems) console.log(`     ${p}`);
-    } else if (verbose) {
-        console.log(`ok   ${line}  ` + Object.entries(prof).sort().map(([k, v]) => `${k} ${v}`).join(" "));
-    }
-    results.push({ name: s.name, cycles, profile: prof, measured: counts, counts: s.counts, ok: !problems.length });
+    if (fresh && counts.bytes !== s.counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${s.counts.bytes}`);
+    return { cycles, prof, counts, problems };
 }
 
+const report = (label, r) => {
+    const line = `${label.padEnd(28)} ${String(r.cycles).padStart(7)} c` +
+        `  runs ${String(r.counts.runs).padStart(4)} joins ${String(r.counts.joins).padStart(4)}` +
+        ` bytes ${String(r.counts.bytes).padStart(5)}`;
+    if (r.problems.length) {
+        failures++;
+        console.log(`FAIL ${line}`);
+        for (const p of r.problems) console.log(`     ${p}`);
+    } else if (verbose) {
+        console.log(`ok   ${line}  ` + Object.entries(r.prof).sort().map(([k, v]) => `${k} ${v}`).join(" "));
+    }
+};
+
+// Each scene alone, the screens alternating so both are drawn into.
+const results = [];
+let failures = 0;
+const totals = {};
+for (const [i, s] of scenes.entries()) {
+    const r = await frame(s, i % 2 === 1, true);
+    report(s.name, r);
+    for (const [k, v] of Object.entries(r.prof)) totals[k] = (totals[k] || 0) + v;
+    results.push({ name: s.name, cycles: r.cycles, profile: r.prof, measured: r.counts, counts: s.counts, ok: !r.problems.length });
+}
 const sum = results.reduce((t, r) => t + r.cycles, 0);
 console.log(`${results.length - failures}/${results.length} scenes match the model; ` +
     `${sum} cycles in all, by part: ` +
     Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(100 * v / sum).toFixed(1)}%`).join(", "));
 
+// The sequences: frames in turn into alternate screens, each keeping what
+// was drawn into it two frames before.
+const seqResults = [];
+let seqFailures = 0;
+for (const q of sequences) {
+    const before = failures;
+    const cycles = [];
+    const written = [];
+    for (const [t, s] of q.frames.entries()) {
+        const r = await frame(s, t % 2 === 1, t === 0);
+        report(`${q.name} frame ${t}`, r);
+        cycles.push(r.cycles);
+        written.push(r.counts.bytes);
+    }
+    if (failures > before) seqFailures++;
+    seqResults.push({ name: q.name, cycles, written, alone: q.frames.map((s) => s.counts.bytes) });
+    console.log(`  ${q.name.padEnd(10)} cycles ${cycles.join(" ")}; bytes written ${written.join(" ")}`);
+}
+console.log(`${sequences.length - seqFailures}/${sequences.length} sequences match the model frame by frame`);
+
 // The cost model: cycles against the model's counts, by least squares over
 // the scenes that didn't overflow.
 const TERMS = [
     ["lines", (c) => VIEW_H - c.full_lines],    // lines the background fills
-    ["face-lines", (c) => c.face_lines],
-    ["runs", (c) => c.runs],
-    ["bytes", (c) => c.whole],                  // whole bytes, through the row runs
-    ["joins", (c) => c.joins],                  // bytes two runs share
+    ["face-lines", (c) => c.face_rows],         // every line of every face's range
+    ["runs", (c) => c.runs],                    // pieces of faces and of background
+    ["bytes", (c) => c.bytes],                  // whole bytes and shared ones
     ["edges", (c) => c.edges],
 ];
 const fit = (rows) => {
@@ -298,5 +329,5 @@ const fit = (rows) => {
 const fitted = fit(results.filter((r) => !r.counts.overflow));
 console.log("cost model: cycles = " + TERMS.map(([name], i) => `${fitted.coef[i].toFixed(1)} ${name}`).join(" + ") +
     ` (rms error ${(100 * fitted.rms).toFixed(1)}%, worst ${(100 * fitted.worst).toFixed(1)}%)`);
-if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ terms: TERMS.map(([t]) => t), fit: fitted, results }, null, 1) + "\n");
+if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ terms: TERMS.map(([t]) => t), fit: fitted, results, sequences: seqResults }, null, 1) + "\n");
 process.exit(failures ? 1 : 0);

@@ -150,32 +150,59 @@ def box_faces(rng, x0, x1, ytop0, ytop1, ybot0, ybot1, top=None):
     return [(p, v) for p, v in faces if len(v) >= 3]
 
 
+def driller(i, pan=0, horizon_y=None, sky=None, name=None):
+    """Boxes on the ground, a level camera: most edges vertical. pan moves
+    them across (a turn), horizon_y moves the horizon (a pitch), sky
+    changes its pattern; each gives the same boxes and patterns otherwise."""
+    rng = random.Random(2000 + i)
+    hy = rng.choice([SUB * 52, SUB * 40 + 3, SUB * 60 + 8, SUB * 30])
+    if horizon_y is not None:
+        hy = horizon_y
+    faces = []
+    for _ in range([3, 6, 10, 14][i % 4]):
+        x0 = rng.randint(0, XMAX - 32)
+        x1 = min(XMAX, x0 + rng.randint(16, 900))
+        yb0 = rng.randint(hy, YMAX)
+        yb1 = min(YMAX, max(hy, yb0 + rng.randint(-200, 200)))
+        h = rng.randint(32, 1200)
+        yt0, yt1 = max(0, yb0 - h), max(0, yb1 - h + rng.randint(-100, 100))
+        top = None
+        if rng.random() < 0.4 and yt0 > 40 and yt1 > 40:
+            shift = rng.randint(-200, 200)
+            top = (clamp((x0 + shift, yt0 - rng.randint(8, 120))),
+                   clamp((x1 + shift, yt1 - rng.randint(8, 120))))
+            top = None if (top[0][1] >= yt0 or top[1][1] >= yt1) else top
+        faces += box_faces(rng, x0, x1, yt0, yt1, yb0, yb1, top)
+    # The ground cuboid's face: below the horizon, across the view.
+    if i % 2:
+        faces.append((pattern(rng), [(0, hy + 40), (XMAX, hy + 40), (XMAX, YMAX), (0, YMAX)]))
+    if pan:
+        faces = [(p, hull([clamp((x + pan, y)) for x, y in v])) for p, v in faces]
+        faces = [(p, v) for p, v in faces if len(v) >= 3]
+    return scene(name or f"driller{i:02d}", faces, Horizon(XMAX // 2, hy, 64, 0), rng, sky=sky)
+
+
 def driller_scenes():
-    """Boxes on the ground, a level camera: most edges vertical."""
-    out = []
-    for i in range(16):
-        rng = random.Random(2000 + i)
-        horizon_y = rng.choice([SUB * 52, SUB * 40 + 3, SUB * 60 + 8, SUB * 30])
-        faces = []
-        for _ in range([3, 6, 10, 14][i % 4]):
-            x0 = rng.randint(0, XMAX - 32)
-            x1 = min(XMAX, x0 + rng.randint(16, 900))
-            yb0 = rng.randint(horizon_y, YMAX)
-            yb1 = min(YMAX, max(horizon_y, yb0 + rng.randint(-200, 200)))
-            h = rng.randint(32, 1200)
-            yt0, yt1 = max(0, yb0 - h), max(0, yb1 - h + rng.randint(-100, 100))
-            top = None
-            if rng.random() < 0.4 and yt0 > 40 and yt1 > 40:
-                shift = rng.randint(-200, 200)
-                top = (clamp((x0 + shift, yt0 - rng.randint(8, 120))),
-                       clamp((x1 + shift, yt1 - rng.randint(8, 120))))
-                top = None if (top[0][1] >= yt0 or top[1][1] >= yt1) else top
-            faces += box_faces(rng, x0, x1, yt0, yt1, yb0, yb1, top)
-        # The ground cuboid's face: below the horizon, across the view.
-        if i % 2:
-            faces.append((pattern(rng), [(0, horizon_y + 40), (XMAX, horizon_y + 40), (XMAX, YMAX), (0, YMAX)]))
-        out.append(scene(f"driller{i:02d}", faces, Horizon(XMAX // 2, horizon_y, 64, 0), rng))
-    return out
+    return [driller(i) for i in range(16)]
+
+
+def sequences():
+    """Frames in turn, alternately into each screen, which keeps what was
+    drawn into it: what the 6502 leaves alone must be what's wanted."""
+    out = {
+        "still": [driller(7) for _ in range(6)],
+        "pan": [driller(3, pan=24 * t) for t in range(8)],
+        "rise": [driller(5, horizon_y=SUB * 40 + 19 * t) for t in range(8)],
+        "alternate": [driller(1 if t % 4 < 2 else 2) for t in range(8)],
+        "recolour": [driller(9, sky=[0x0f, 0x3c, 0xf0, 0xc3] if t >= 3 else None) for t in range(6)],
+        "empty": [scene("empty", []) for _ in range(4)],
+        "turning": [scene("turning", [], Horizon(832, 832, round(127 * math.cos(t / 9)), round(127 * math.sin(t / 9))),
+                          random.Random(7)) for t in range(6)],
+    }
+    # The pitch moves the boxes, but the sky and ground stay as they were.
+    for f in out["rise"]:
+        f["sky"], f["ground"] = out["rise"][0]["sky"], out["rise"][0]["ground"]
+    return [{"name": k, "frames": v} for k, v in out.items()]
 
 
 def edge_scenes():
@@ -366,14 +393,16 @@ def build(s):
 def main():
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
-    scenes = []
-    for s in edge_scenes() + driller_scenes() + random_scenes():
+    def built(s):
         if isinstance(s["horizon"], Horizon):
             h = s["horizon"]
             s["horizon"] = [h.x, h.y, h.dx, h.dy]
-        scenes.append(build(s))
-    Path(sys.argv[1]).write_text(json.dumps({"scenes": scenes}) + "\n")
-    print(f"{len(scenes)} scenes, each the same as the model's brute force")
+        return build(s)
+
+    scenes = [built(s) for s in edge_scenes() + driller_scenes() + random_scenes()]
+    seqs = [{"name": q["name"], "frames": [built(s) for s in q["frames"]]} for q in sequences()]
+    Path(sys.argv[1]).write_text(json.dumps({"scenes": scenes, "sequences": seqs}) + "\n")
+    print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, each the same as the model's brute force")
 
 
 if __name__ == "__main__":

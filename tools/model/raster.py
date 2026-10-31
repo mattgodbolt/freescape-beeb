@@ -177,6 +177,7 @@ class Counts:
     faces: int = 0          # faces looked at (before every line was full)
     edges: int = 0          # edges set up: non-horizontal, crossing a line
     edge_lines: int = 0     # (edge, line) steps
+    face_rows: int = 0      # (face, line) for every line a face's range takes
     face_lines: int = 0     # (face, line) with a span, on a line not yet full
     pieces: int = 0         # visible pieces of faces written
     bg_pieces: int = 0      # background pieces written
@@ -242,6 +243,9 @@ def spans(faces, bg, capacity=None):
             break
         counts.faces += 1
         n = len(vertices)
+        if n >= 3:
+            ys = [y for _, y in vertices]
+            counts.face_rows += max(0, min(first_line(max(ys)), VIEW_H) - max(first_line(min(ys)), 0))
         for i in range(n):
             (x0, y0), (x1, y1) = vertices[i], vertices[(i + 1) % n]
             k = list(edge_crossings(x0, y0, x1, y1))

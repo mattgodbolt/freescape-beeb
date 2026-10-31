@@ -83,6 +83,14 @@ SECTION RasterWork
 .pools      SKIP 4 * 4 * 256
 ENDSECTION
 
+\ What lasts from frame to frame: each screen's lines' backgrounds
+\ (raster_background).
+SECTION RasterState
+    ALIGN 256
+.bg_was     SKIP 256
+.bg_sig     SKIP 16
+ENDSECTION
+
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * 256
 FUNCTION pool_ge(k) = pools + (4 * k + 1) * 256
 FUNCTION pool_gh(k) = pools + (4 * k + 2) * 256
@@ -132,6 +140,7 @@ SECTION RasterCode
 .shift
     TXA : LSR A : LSR A : LSR A : LSR A : STA lo16,X
     INX : BNE shift
+    JSR raster_forget
     JMP writer_init
 }
 
@@ -839,14 +848,24 @@ ZA_AUTO2 m_v, m_r
 \ and ground on the other, line by line: a copy of the line for each pool.
 \ On each line the pixels left of its split (hsplit) take bg_l and the rest
 \ bg_r.
+\
+\ A line no face touched is background from end to end, and if the screen
+\ being drawn held the same background on it last time, it still does, so
+\ it isn't written. bg_was keeps, for each screen (ACCCON's X) and line,
+\ split + 1 when the line was background alone (0 otherwise), and bg_sig
+\ the two patterns' bytes those splits were drawn in; different patterns
+\ forget the screen's lines.
 
-ZA_AUTO1 bg_l, bg_r, bg_split, g_s, g_e, g_h
+ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, g_s, g_e, g_h
 ZA_AUTO 4, bgv_l
 ZA_AUTO 4, bgv_la
 ZA_AUTO 4, bgv_lb
 ZA_AUTO 4, bgv_r
 ZA_AUTO 4, bgv_ra
 ZA_AUTO 4, bgv_rb
+
+BG_SCREEN = 128                     ; bg_was's offset for the second screen
+ASSERT VIEW_H <= BG_SCREEN
 
 .raster_background
 {
@@ -862,8 +881,47 @@ ZA_AUTO 4, bgv_rb
         AND #PIX_LEFT : STA bgv_ra + k
         LDA bgv_r + k : AND #PIX_RIGHT : STA bgv_rb + k
     NEXT
+    \ The screen drawn: its lines' records, and the patterns they were
+    \ drawn in.
+    LDX #0
+    LDA acccon : AND #ACCCON_X : BEQ main
+    LDX #8
+.main
+    TXA : BEQ first
+    LDA #BG_SCREEN
+.first
+    STA bg_buf
+    LDY #0
+    FOR k = 0..3
+        LDA bgv_l + k : CMP bg_sig + k,X : BEQ same_l
+        STA bg_sig + k,X : INY
+    .same_l
+        LDA bgv_r + k : CMP bg_sig + 4 + k,X : BEQ same_r
+        STA bg_sig + 4 + k,X : INY
+    .same_r
+    NEXT
+    TYA : BEQ known
+    LDX bg_buf : JSR forget_screen
+.known
     STZ r_y
     JMP bg0
+}
+
+\ raster_forget: neither screen holds what the rasteriser last drew there
+\ (for when something else has drawn on them).
+.raster_forget
+    ZA_ENTRY
+    LDX #0 : JSR forget_screen
+    LDX #BG_SCREEN
+\ forget_screen: no line of the screen whose records start at X is known.
+.forget_screen
+{
+    LDY #VIEW_H
+    LDA #0
+.line
+    STA bg_was,X
+    INX : DEY : BNE line
+    RTS
 }
 
 \ The gap [g_s, g_e), its neighbours' halves in g_h, split at bg_split,
@@ -923,18 +981,27 @@ MACRO BGLINE k, next
     .row
     ENDIF
     LDA hsplit,X : STA bg_split
-    LDA head,X : BNE open
-    JMP stepped
-.open
+    TXA : ORA bg_buf : TAY              ; the line's record for this screen
+    LDA head,X : BEQ faces
     CMP #UNTOUCHED : BNE gaps
-    \ No face here: [0, W) with no neighbours (both its ends are even), as
-    \ if it were node 0, which has no next.
+    \ No face here: background alone, which the screen may hold already.
+    LDA bg_split : INC A
+    CMP bg_was,Y : BNE draw
+    JMP stepped
+.draw
+    STA bg_was,Y
+    \ [0, W) with no neighbours (both its ends are even), as if it were
+    \ node 0, which has no next.
     STZ g_s
     LDA #VIEW_W : STA g_e
     LDX #0
     BRA one
+.faces
+    LDA #0 : STA bg_was,Y
+    JMP stepped
 .gaps
     TAX
+    LDA #0 : STA bg_was,Y
 .gap
     LDA pool_gs(k),X : STA g_s
     LDA pool_ge(k),X : STA g_e
