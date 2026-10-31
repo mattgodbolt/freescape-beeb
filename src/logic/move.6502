@@ -1,0 +1,301 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the movement actions
+\ (tools/logic/move.py: the original's $A279, actions 1 to &14, and $A364,
+\ a step)
+\ ***************************************************************************
+
+\ The flags an action ORs into GameFlags (mv_lo) and GameFlags2 (mv_hi).
+ZA_AUTO1 mv_lo, mv_hi
+
+\ movement: action A (1 to &14). Each sets EventsDue but the size keys',
+\ and ORs its flags into GameFlags and GameFlags2.
+.movement
+{
+    ZA_AUTO1 act
+    STA act
+    STZ mv_lo : STZ mv_hi
+    CMP #1 : BNE not_rise
+    JSR rise
+    JMP events
+.not_rise
+    CMP #2 : BNE not_fall
+    JSR fall
+    JMP events
+.not_fall
+    CMP #3 : BEQ step_on
+    CMP #4 : BNE not_step
+.step_on
+    EOR #4 : JSR step                           ; A non-zero: forward
+    JMP events
+.not_step
+    LDX #turns_end - turns - 3
+.turn
+    CMP turns,X : BEQ turned
+    DEX : DEX : DEX : BPL turn
+    CMP #&0D : BEQ round
+    CMP #&0B : BEQ turn_size
+    CMP #&0C : BEQ turn_size
+    CMP #&11 : BEQ step_size
+    CMP #&12 : BEQ step_size
+    JMP flags                                   ; nothing: &0E, &0F, &10, &13, &14
+.turned
+    LDA turns+1,X : STA mv_lo
+    LDY turns+2,X                               ; the angle, and which way
+    JSR turn_by
+    JMP events
+.round
+    \ &0D: turn round; in the jet with a pitch, the pitch is 72 - pitch
+    LDA #&24 : STA mv_lo
+    LDA Yaw : CLC : ADC #&24
+    CMP #&48 : BMI round_yaw
+    SEC : SBC #&48
+.round_yaw
+    STA Yaw
+    LDA InJet : BEQ events
+    LDA Pitch : BEQ events
+    LDA #&48 : SEC : SBC Pitch : STA Pitch
+    LDA #&64 : STA mv_lo
+    BRA events
+.turn_size
+    \ &0B, &0C: the turn's size, along TurnTable, stopping at its ends
+    LDX TurnIndex
+    CMP #&0B : BNE turn_down
+    LDA TurnTable : DEC A : CMP TurnIndex : BEQ flags
+    INX
+    BRA turn_set
+.turn_down
+    CPX #0 : BEQ flags
+    DEX
+.turn_set
+    STX TurnIndex
+    LDA TurnTable+1,X : STA Turn
+    LDA #&80 : STA mv_lo
+    LDA #7 : JSR wait
+    BRA flags
+.step_size
+    \ &11, &12: the step's size, along StepTable, and StepUnits with it
+    LDX StepIndex
+    CMP #&11 : BNE step_down
+    LDA StepTable : DEC A : CMP StepIndex : BEQ flags
+    INX
+    BRA step_set
+.step_down
+    CPX #0 : BEQ flags
+    DEX
+.step_set
+    STX StepIndex
+    LDA StepTable+1,X : STA Step
+    JSR step_units
+    LDA #1 : STA mv_hi
+    LDA #7 : JSR wait
+    BRA flags
+.events
+    LDA #1 : STA EventsDue
+.flags
+    LDA mv_lo : TSB GameFlags
+    LDA mv_hi : TSB GameFlags2
+    RTS
+
+    \ the turns, looks and rolls: action, flags, and the angle's offset
+    \ from Pitch with bit 7 set to add
+.turns
+    EQUB 5, &24, Yaw - Pitch
+    EQUB 6, &24, (Yaw - Pitch) OR &80
+    EQUB 7, &44, 0
+    EQUB 8, &44, &80
+    EQUB 9, &04, (Roll - Pitch) OR &80
+    EQUB &0A, &04, Roll - Pitch
+.turns_end
+}
+ASSERT Yaw = Pitch + 1 AND Roll = Pitch + 2
+
+\ turn_by ($A4B4, $A4C5): the angle at Pitch + (Y AND &7F) by Turn, mod
+\ 72: added if Y's bit 7 is set, else subtracted.
+.turn_by
+{
+    TYA : AND #&7F : TAX
+    TYA : BPL less
+    LDA Pitch,X : CLC : ADC Turn
+    CMP #&48 : BMI put
+    SEC : SBC #&48
+    BRA put
+.less
+    LDA Pitch,X : SEC : SBC Turn
+    BPL put
+    CLC : ADC #&48
+.put
+    STA Pitch,X
+    RTS
+}
+
+\ step_units: StepUnits = AreaScale * Step, as the original's $910E.
+.step_units
+{
+    LDA Step : STA mhl : STZ mhl+1
+    LDA AreaScale : JSR mul_a_hl
+    LDA m24 : STA StepUnits
+    LDA m24+1 : STA StepUnits+1
+    RTS
+}
+
+\ rise (action 1, R): in the jet, up StepUnits; on the probe, up a level
+\ if the cells above its head are clear. The target's x and z are the
+\ camera's first, whatever happens.
+.rise
+{
+    ZA_AUTO2 y0, hl
+    LDA PlayerX : STA TargetX
+    LDA PlayerX+1 : STA TargetX+1
+    LDA PlayerZ : STA TargetZ
+    LDA PlayerZ+1 : STA TargetZ+1
+    LDA InJet : BEQ probe
+    LDA PlayerY : CLC : ADC StepUnits : STA TargetY
+    LDA PlayerY+1 : ADC StepUnits+1 : STA TargetY+1
+    JMP moved
+.probe
+    LDA ExtLevel : CMP ExtMax : BMI up
+    RTS
+.up
+    LDA PlayerY : STA y0 : STA hl
+    LDA PlayerY+1 : STA y0+1 : STA hl+1
+    LDX AreaScale                               ; AreaScale cells up (0 is 256)
+.cell
+    LDA hl : CLC : ADC #&40 : STA hl
+    BCC same
+    INC hl+1
+.same
+    DEX : BNE cell
+    LDA hl : STA TargetY
+    LDA hl+1 : STA TargetY+1
+    LDA #1 : STA InJet                          ; tested as the jet's move is
+    JSR move
+    STZ InJet
+    LDA hl : CMP TargetY : BNE short
+    LDA hl+1 : CMP TargetY+1 : BNE short
+    INC ExtLevel
+    LDA BodyHeight : CLC : ADC AreaScale : STA BodyHeight
+    LDA #&14 : STA mv_lo
+    LDA #&80 : STA mv_hi
+    RTS
+.short
+    LDA y0 : STA PlayerY                         ; (x and z as the margin left them)
+    LDA y0+1 : STA PlayerY+1
+    RTS
+}
+
+\ fall (action 2, F): in the jet, down StepUnits; on the probe, down a
+\ level, untested.
+.fall
+{
+    LDA InJet : BEQ probe
+    LDA PlayerX : STA TargetX
+    LDA PlayerX+1 : STA TargetX+1
+    LDA PlayerZ : STA TargetZ
+    LDA PlayerZ+1 : STA TargetZ+1
+    LDA PlayerY : SEC : SBC StepUnits : STA TargetY
+    LDA PlayerY+1 : SBC StepUnits+1 : STA TargetY+1
+    JMP moved
+.probe
+    LDA ExtLevel : CMP #1 : BEQ done
+    DEC ExtLevel
+    LDA BodyHeight : SEC : SBC AreaScale : STA BodyHeight
+    LDX AreaScale                               ; AreaScale cells down (0 is 256)
+.cell
+    LDA PlayerY : SEC : SBC #&40 : STA PlayerY
+    BCS same
+    DEC PlayerY+1
+.same
+    DEX : BNE cell
+    LDA #&14 : STA mv_lo
+    LDA #&80 : STA mv_hi
+.done
+    RTS
+}
+
+\ moved: the move, and the flags for a move if it moved.
+.moved
+{
+    JSR move
+    BEQ done
+    LDA #&14 : STA mv_lo
+.done
+    RTS
+}
+
+\ --- $A364: a step ----------------------------------------------------------
+
+\ step: a step forward (A non-zero) or back of StepUnits along the yaw:
+\ floor(step * sin / 64) in x and floor(step * cos / 64) in z, each negated
+\ after the floor for a step back. In the jet the step first splits by the
+\ pitch. On the probe the move is made from the feet, BodyHeight - 1 cells
+\ below the eye.
+.step
+{
+    ZA_AUTO1 fwd
+    ZA_AUTO2 hl, feet
+    STA fwd
+    LDA KeyCount : CMP #1 : BNE whole
+    STA Wipe                                    ; the pass's only key
+.whole
+    LDA StepUnits : STA hl
+    LDA StepUnits+1 : STA hl+1
+    LDA InJet : BEQ yaw
+    \ y by the pitch's sine, and the step across by its cosine's magnitude
+    LDA Pitch : ASL A : TAX
+    LDA SinCos,X : EOR #&FF : INC A
+    JSR by_hl
+    LDX #TargetY - TargetX : JSR along
+    LDA Pitch : ASL A : TAX
+    LDA SinCos+1,X : BPL cos
+    EOR #&FF : INC A
+.cos
+    JSR by_hl
+    LDA mhl : STA hl
+    LDA mhl+1 : STA hl+1
+.yaw
+    LDA Yaw : ASL A : TAX
+    LDA SinCos+1,X
+    JSR by_hl
+    LDX #TargetZ - TargetX : JSR along
+    LDA Yaw : ASL A : TAX
+    LDA SinCos,X
+    JSR by_hl
+    LDX #0 : JSR along
+    STZ feet : STZ feet+1
+    LDA InJet : BNE go
+    \ the feet: (BodyHeight - 1 AND 255) cells below the eye
+    LDA BodyHeight : DEC A
+    LSR A : ROR feet
+    LSR A : ROR feet
+    STA feet+1
+    LDA PlayerY : SEC : SBC feet : STA PlayerY : STA TargetY
+    LDA PlayerY+1 : SBC feet+1 : STA PlayerY+1 : STA TargetY+1
+.go
+    JSR move
+    BEQ still
+    LDA #&14 : STA mv_lo
+.still
+    LDA PlayerY : CLC : ADC feet : STA PlayerY
+    LDA PlayerY+1 : ADC feet+1 : STA PlayerY+1
+    RTS
+
+    \ by_hl: mhl = shift6(A * hl).
+.by_hl
+    LDX hl : STX mhl
+    LDX hl+1 : STX mhl+1
+    JSR mul_a_hl
+    JMP shift6
+
+    \ along: the target's coordinate at TargetX + X = the camera's, at
+    \ PlayerX + X, plus mhl forward, less it back.
+.along
+{
+    LDA fwd : BNE ahead
+    LDA #0 : SEC : SBC mhl : STA mhl
+    LDA #0 : SBC mhl+1 : STA mhl+1
+.ahead
+    LDA PlayerX,X : CLC : ADC mhl : STA TargetX,X
+    LDA PlayerX+1,X : ADC mhl+1 : STA TargetX+1,X
+    RTS
+}
+}

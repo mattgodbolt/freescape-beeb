@@ -1,0 +1,450 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the events and the FCL
+\ (tools/logic/fcl.py: the original's $9B6E, the events of a pass, and
+\ $B320, one script)
+\
+\ An instruction is an opcode (bit 7: it runs only for a shot; clear, only
+\ for a collision or a condition) and its operands; its length is the
+\ original's table, FclLengths. A test that fails, or an opcode the
+\ interpreter doesn't do (0 among them), ends the script. The renderer's,
+\ the sound's and the screen's parts are hooks (src/logic/hooks.6502).
+\ ***************************************************************************
+
+\ events ($9B6E): if EventsDue, the collided object's script (or, if it
+\ has none and the move was stopped, the bump's sound), then the global
+\ conditions and the area's (AreaCondPtr is read after the globals', as a
+\ GOTO among them changes it).
+.events
+{
+    ZA_AUTO1 e
+    LDA EventsDue : BEQ done
+    LDA Collided : BEQ conditions
+    STA FoundId
+    LDA #0 : JSR lookup : BCC conditions
+    LDA (lk) : AND #&0F : TAX
+    LDA ObjectHeader,X : STA e                  ; where its FCL starts
+    LDY #8 : LDA (lk),Y : SEC : SBC e : BEQ bump
+    STA run.n
+    LDA lk : CLC : ADC e : STA run.ip
+    LDA lk+1 : ADC #0 : STA run.ip+1
+    JSR run
+    BRA conditions
+.bump
+    LDA Blocked : BEQ conditions
+    LDA #&13 : JSR sound_later
+.conditions
+    LDA GlobalCondPtr : STA conditions_at.c
+    LDA GlobalCondPtr+1 : STA conditions_at.c+1
+    JSR conditions_at
+    LDA AreaCondPtr : STA conditions_at.c
+    LDA AreaCondPtr+1 : STA conditions_at.c+1
+    JMP conditions_at
+.done
+    RTS
+}
+
+\ sound_later: sound A after the screen's copy if one's due (GameFlags bit
+\ 2 or GameFlags2 bit 3), else now.
+.sound_later
+{
+    PHA
+    LDA GameFlags : AND #4 : BNE later
+    LDA GameFlags2 : AND #8 : BNE later
+    PLA
+    JMP hook_sound
+.later
+    PLA : STA Sound
+    RTS
+}
+
+\ conditions_at: a count of conditions at c, then each one's length and
+\ its FCL.
+.conditions_at
+{
+    ZA_AUTO2 c
+    ZA_AUTO1 n, len
+    LDA (c) : BEQ done
+    STA n
+.each
+    INC c : BNE same
+    INC c+1
+.same
+    LDA (c) : STA len : STA run.n
+    LDA c : CLC : ADC #1 : STA run.ip
+    LDA c+1 : ADC #0 : STA run.ip+1
+    JSR run
+    LDA c : CLC : ADC len : STA c
+    BCC next
+    INC c+1
+.next
+    DEC n : BNE each
+.done
+    RTS
+}
+
+\ run ($B320): the n bytes of FCL at ip, for a shot if ShotFlag is set,
+\ else for a collision or a condition.
+.run
+{
+    ZA_AUTO2 ip
+    ZA_AUTO1 n, op, skip_by
+.instruction
+    LDA (ip) : AND #&7F : STA op : STA FclOp
+    LDA ShotFlag : BEQ collision
+    LDA (ip) : BPL skip                         ; a shot's script: shots' instructions only
+    BRA go
+.collision
+    LDA (ip) : BMI skip
+.go
+    JSR execute : BCC done
+.skip
+    LDX op : LDA FclLengths,X : STA skip_by
+    LDA ip : CLC : ADC skip_by : STA ip
+    BCC same
+    INC ip+1
+.same
+    LDA n : SEC : SBC skip_by : STA n
+    BEQ done : BMI done
+    BRA instruction
+.done
+    RTS
+}
+
+\ execute: the instruction at run.ip, opcode run.op. C clear when it ends
+\ the script.
+ZA_AUTO1 a1, a2
+.execute
+{
+    LDY #1 : LDA (run.ip),Y : STA a1
+    INY : LDA (run.ip),Y : STA a2
+    LDA run.op : CMP #(ops_end - ops) DIV 2 : BCS stop
+    ASL A : TAX
+    JMP (ops,X)
+    ZA_CANJUMP fcl_stop, fcl_score, fcl_energy, fcl_here, fcl_there, fcl_var, fcl_bit, fcl_sound, fcl_goto, fcl_shield, fcl_swapjet, fcl_spfx, fcl_redraw, fcl_delay, fcl_syncsnd
+.stop
+    CLC
+    RTS
+.ops
+    EQUW fcl_stop, fcl_score, fcl_energy, fcl_here              ; 0-3
+    EQUW fcl_here, fcl_here, fcl_there, fcl_there               ; 4-7
+    EQUW fcl_there, fcl_var, fcl_var, fcl_var                   ; 8-&0B
+    EQUW fcl_bit, fcl_bit, fcl_bit, fcl_sound                   ; &0C-&0F
+    EQUW fcl_here, fcl_there, fcl_goto, fcl_shield              ; &10-&13
+    EQUW fcl_var, fcl_swapjet, fcl_stop, fcl_stop               ; &14-&17
+    EQUW fcl_stop, fcl_spfx, fcl_redraw, fcl_delay              ; &18-&1B
+    EQUW fcl_syncsnd, fcl_bit, fcl_here, fcl_here               ; &1C-&1F
+    EQUW fcl_there, fcl_there                                   ; &20-&21
+.ops_end
+}
+
+.fcl_stop
+    CLC
+    RTS
+
+\ 1, ADDSCORE: 24 bits, clamped at 0 and &7FFFFF by the third byte's sign.
+.fcl_score
+{
+    ZA_AUTO1 a3, mid
+    LDY #3 : LDA (run.ip),Y : STA a3
+    LDA Score : CLC : ADC a1 : TAX
+    LDA Score+1 : ADC a2 : STA mid
+    LDA Score+2 : ADC a3 : BPL put
+    LDX #0 : STX mid
+    LDA #0
+    BIT a3 : BMI put
+    LDX #&FF : STX mid
+    LDA #&7F
+.put
+    STX Score : STA Score+2
+    LDA mid : STA Score+1
+    LDA #2 : TSB GameFlags2
+    SEC
+    RTS
+}
+
+\ 2, ADDENERGY, and &13, ADDSHIELD: below 0 ends the game, above 63 is 63.
+.fcl_energy
+    LDA Energy : CLC : ADC a1
+    LDX #3 : JSR limit : STA Energy
+    LDA #4 : TSB GameFlags2
+    SEC
+    RTS
+.fcl_shield
+    LDA Shield : CLC : ADC a1
+    LDX #1 : JSR limit : STA Shield
+    LDA #&10 : TSB GameFlags2
+    SEC
+    RTS
+.limit
+{
+    CMP #0 : BPL positive
+    STX GameOver
+    LDA #0
+    RTS
+.positive
+    CMP #&3F : BMI done
+    LDA #&3F
+.done
+    RTS
+}
+
+\ 3 TOGVIS, 4 VIS, 5 INVIS, &10 DESTROY, &1E on only if shown, &1F on only
+\ if hidden: object a1, a global or this area's.
+.fcl_here
+{
+    LDA a1 : STA FoundId
+    LDA #0 : JSR lookup : BCC on
+    LDA run.op
+    CMP #&1E : BEQ if_shown
+    CMP #&1F : BEQ if_hidden
+    JSR show_hide
+.on
+    SEC
+    RTS
+}
+
+\ C set if the object at lk is shown, or hidden.
+.if_shown
+    LDA (lk) : EOR #&40 : BRA visible
+.if_hidden
+    LDA (lk)
+.visible
+    ASL A : ASL A                               ; (bit 6 into C)
+    RTS
+
+\ 6, 7, 8, &11, &20, &21: the same in area a1, object a2, but the screen
+\ isn't told.
+.fcl_there
+{
+    LDA a2 : STA FoundId
+    LDA a1 : JSR lookup : BCC on
+    LDA run.op
+    CMP #&20 : BEQ if_shown
+    CMP #&21 : BEQ if_hidden
+    LDA (lk) : AND #&20 : BNE on                ; destroyed: nothing more
+    LDA run.op
+    CMP #&11 : BNE not_destroy
+    LDA (lk) : ORA #&20 : STA (lk)
+    BRA hide
+.not_destroy
+    CMP #6 : BNE vis_or_not
+    LDA (lk) : AND #&40 : BNE show              ; toggled
+    BRA hide
+.vis_or_not
+    CMP #7 : BEQ show
+.hide
+    LDA (lk) : ORA #&40 : STA (lk)
+    BRA on
+.show
+    LDA (lk) : AND #&BF : STA (lk)
+.on
+    SEC
+    RTS
+}
+
+\ show_hide ($B424-$B4C9): TOGVIS, VIS, INVIS or DESTROY (run.op) on the
+\ object at lk, a global or this area's.
+.show_hide
+{
+    LDA (lk) : AND #&20 : BNE done              ; destroyed: nothing more
+    LDA #1 : STA Wipe
+    LDA run.op
+    CMP #&10 : BNE not_destroy
+    LDA (lk) : ORA #&20 : STA (lk)
+    BRA hide
+.not_destroy
+    CMP #3 : BNE vis_or_not
+    LDA (lk) : AND #&40 : BNE show              ; toggled
+    BRA hide
+.vis_or_not
+    CMP #4 : BNE hide
+.show
+    LDA (lk) : AND #&BF : STA (lk)
+    LDA #4 : TSB GameFlags
+.done
+    RTS
+.hide
+    LDA (lk) : ORA #&40 : STA (lk)
+    AND #&0F : CMP #2 : BNE drawn               ; a sensor leaves the interrupt's list
+    LDA SensorList+1 : BEQ drawn
+    LDY #7 : LDA (lk),Y : JSR hook_sensor_off
+.drawn
+    LDA NDrawn : BEQ done
+    LDA FoundId : JSR hook_undraw : BCC done    ; it was in the last draw list
+    LDA #8 : TSB GameFlags2
+    RTS
+}
+
+\ 9 += 1, &0A -= 1, &14 = a2, &0B on only if = a2: FCL variable a1, at
+\ FclVars + (a1 - 1 AND 255), which for a1 past 32 or of 0 is another of
+\ the original's variables.
+.fcl_var
+{
+    LDX a1 : DEX
+    LDA run.op
+    CMP #9 : BNE not_inc
+    INC FclVars,X
+    BRA on
+.not_inc
+    CMP #&0A : BNE not_dec
+    DEC FclVars,X
+    BRA on
+.not_dec
+    CMP #&14 : BNE test
+    LDA a2 : STA FclVars,X
+    BRA on
+.test
+    LDA FclVars,X : CMP a2 : BEQ on
+    CLC
+    RTS
+.on
+    SEC
+    RTS
+}
+ASSERT FclVars + 255 < zxv + ZXV_LEN
+
+\ &0C set, &0D clear, &1D toggle, &0E on only if = a2: FCL bit a1 ($B595):
+\ a byte of FclBits, and a mask, 0 for a bit past the byte's 8.
+.fcl_bit
+{
+    ZA_AUTO1 mask
+    LDA a1 : DEC A
+    LDX #0
+.byte
+    CMP #8 : BMI found
+    SEC : SBC #8
+    INX : CPX #3 : BNE byte
+.found
+    TAY
+    LDA #0 : CPY #8 : BCS put
+    LDA #1
+    CPY #0 : BEQ put
+.shift
+    ASL A
+    DEY : BNE shift
+.put
+    STA mask
+    LDA run.op
+    CMP #&1D : BNE not_toggle
+    LDA FclBits,X : AND mask : BNE clear
+    BRA set
+.not_toggle
+    CMP #&0C : BEQ set
+    CMP #&0D : BEQ clear
+    LDA FclBits,X : AND mask                    ; &0E
+    BEQ is_clear
+    LDA #1
+.is_clear
+    CMP a2 : BEQ on
+    CLC
+    RTS
+.set
+    LDA FclBits,X : ORA mask : STA FclBits,X
+    BRA on
+.clear
+    LDA mask : EOR #&FF : AND FclBits,X : STA FclBits,X
+.on
+    SEC
+    RTS
+}
+
+\ &0F SOUND: now. &1C SYNCSND: after the copy, if one's due.
+.fcl_sound
+    LDA a1 : JSR hook_sound
+    SEC
+    RTS
+.fcl_syncsnd
+    LDA a1 : JSR sound_later
+    SEC
+    RTS
+
+\ &12 GOTO area a1, entrance a2.
+.fcl_goto
+    LDA #&0A : STA Sound
+    LDA a1 : STA AreaId
+    LDA a2 : STA EntranceId
+    JSR go_to_entrance
+    LDA #&FC : STA GameFlags
+    LDA #&FF : STA GameFlags2
+    SEC
+    RTS
+
+\ &15 SWAPJET ($B635): into the jet or out of it, swapping the energy and
+\ shield each vehicle keeps.
+.fcl_swapjet
+{
+    LDA InJet : BNE out
+    LDA #&80 : TSB FclBits+3
+    LDA #1 : STA InJet
+    LDA Energy : STA ProbeEnergy
+    LDA Shield : STA ProbeShield
+    LDA JetEnergy : STA Energy
+    LDA JetShield : STA Shield
+    BRA flags
+.out
+    STZ InJet
+    LDA #&80 : TRB FclBits+3
+    LDA Energy : STA JetEnergy
+    LDA Shield : STA JetShield
+    LDA ProbeEnergy : STA Energy
+    LDA ProbeShield : STA Shield
+.flags
+    LDA #&94 : TSB GameFlags2
+    LDA #8 : TSB GameFlags
+    SEC
+    RTS
+}
+
+\ &19 SPFX: the area's colours, from its header (AreaNamePtr - 7): all four
+\ if a1 AND &CC, else colour (a1 AND &30) >> 4 from the header's a1 AND 3;
+\ then the screen takes them.
+.fcl_spfx
+{
+    ZA_AUTO2 h
+    LDA AreaNamePtr : SEC : SBC #7 : STA h
+    LDA AreaNamePtr+1 : SBC #0 : STA h+1
+    LDA a1 : AND #&CC : BEQ one
+    LDY #3
+.all
+    LDA (h),Y : STA AreaColours,Y
+    DEY : BPL all
+    BRA screen
+.one
+    LDA a1 : AND #3 : TAY
+    LDA a1 : AND #&30 : LSR A : LSR A : LSR A : LSR A : TAX
+    LDA (h),Y : STA AreaColours,X
+.screen
+    JSR screen_update
+    SEC
+    RTS
+}
+
+\ screen_update ($A77A): the screen takes the area's colours, the five
+\ sensors' flash counters (6 bytes apart in SensorList) restart at 2, and
+\ AreaChanged is done.
+.screen_update
+{
+    STZ AreaChanged
+    LDX #3
+.colour
+    LDA AreaColours,X : STA ScreenColours,X
+    DEX : BPL colour
+    LDA #2
+    FOR i = 0..4
+        STA SensorList + &22 + 6 * i
+    NEXT
+    JMP hook_screen_colours
+}
+
+\ &1A REDRAW: the redraw, the copy and the panel there and then.
+.fcl_redraw
+    JSR hook_redraw
+    STZ GameFlags : STZ GameFlags2
+    SEC
+    RTS
+
+\ &1B DELAY: a1 frames.
+.fcl_delay
+    LDA a1 : JSR wait
+    SEC
+    RTS

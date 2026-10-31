@@ -1,0 +1,52 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the logic's sideways RAM banks
+\ (docs/research/logic6502.md, "Memory")
+\
+\ LOGIC_BANK (file LOGIC) holds Driller's database at its top (LOGIC_DB),
+\ the ZX's bytes in the original's layout, so the logic walks the records
+\ the original walks, and below it the code that reads the database: the
+\ areas, the FCL and the objects' index. The FCL changes the objects' flags
+\ in it, so a new game loads it afresh.
+\
+\ LOGIC_CODE_BANK (file LOGICC) holds the rest of the logic: the pass and
+\ the keys, the movement, the walk and the object test, and the
+\ arithmetic, with the original's tables they read. It has room to share.
+\
+\ The code and the database together come to more than a bank. The two
+\ halves call each other through main RAM (src/logic/call.6502), which is
+\ where the frame calls in too, and the logic's variables are in main RAM
+\ (src/logic/vars.6502).
+\
+\ Include at the top level, after src/logic/vars.6502 and with
+\ src/input.6502's KEYS_BYTES and keys about. It needs
+\ build/logic6502/db.bin.
+\ ***************************************************************************
+
+SECTION Logic, org = &8000, guard = &C000, filename = "LOGIC", cmos = TRUE
+.logic_db_code
+INCLUDE "area.6502"
+INCLUDE "fcl.6502"
+INCLUDE "index.6502"
+.logic_db_code_end
+ASSERT P% <= LOGIC_DB
+    SKIPTO LOGIC_DB
+.logic_db
+    INCBIN "../../build/logic6502/db.bin"
+ASSERT P% = &C000
+ENDSECTION
+ASSERT logic_db = LOGIC_DB
+
+SECTION LogicCode, org = &8000, guard = &C000, filename = "LOGICC", cmos = TRUE
+.logic_code
+INCLUDE "pass.6502"
+INCLUDE "move.6502"
+INCLUDE "walk.6502"
+INCLUDE "touch.6502"
+INCLUDE "arith.6502"
+    \ the original's tables (tools/mklogicdata.py)
+.SinCos     EQUB ZX_SINCOS                      ; 72 (sin, cos) pairs, signed, 1.0 = 64
+.KeyTable   EQUB ZX_KEY_TABLE                   ; key, action, shooting action; then key, action
+.KeyCodes   EQUB ZX_KEY_CODES                   ; a code for each key, five a half-row
+ASSERT LEN(ZX_KEY_TABLE) = 3 * ZX_KEYS3 + 2 * ZX_KEYS2
+.logic_code_end
+ENDSECTION

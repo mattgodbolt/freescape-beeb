@@ -1,0 +1,51 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the logic's main RAM part: the frame's way
+\ in, and the way between its two banks (docs/research/logic6502.md, "The
+\ frame's interface")
+\
+\ Each entry pages the bank it needs in (ROMSEL) and goes on to the logic,
+\ which returns to the caller with LOGIC_CODE_BANK or LOGIC_BANK in. The
+\ engine owns the machine, so nothing else pages a bank behind it; a
+\ caller that wants another bank pages it back itself. Include in main
+\ RAM, with src/logic/hooks.6502.
+\ ***************************************************************************
+
+\ logic_go_pass: a pass of the logic (logic_pass): A = 0 if nothing was to
+\ be done (no key and no minute), 1 if a pass ran, 2 if the game is over.
+.logic_go_pass
+    LDA #LOGIC_CODE_BANK : STA romsel
+    JMP logic_pass
+
+\ logic_go_minute: a minute of the clock has ended (logic_minute).
+.logic_go_minute
+    LDA #LOGIC_CODE_BANK : STA romsel
+    JMP logic_minute
+
+\ logic_go_init: the logic ready, once LOGICW, LOGIC and LOGICC are
+\ loaded: the area's objects indexed.
+.logic_go_init
+    LDA #LOGIC_BANK : STA romsel
+    JMP index_objects
+
+\ far_events: the events (LOGIC_BANK), from the pass (LOGIC_CODE_BANK).
+.far_events
+    LDA #LOGIC_BANK : STA romsel
+    JSR events
+    LDA #LOGIC_CODE_BANK : STA romsel
+    RTS
+
+\ far_answer: answer (LOGIC_BANK, which has the records) for touch
+\ (LOGIC_CODE_BANK), keeping A and C. Clobbers Y.
+.far_answer
+    LDY #LOGIC_BANK : STY romsel
+    JSR answer
+    LDY #LOGIC_CODE_BANK : STY romsel
+    RTS
+
+\ wait ($A56F, $A9D0): Countdown = A, and the interrupt counts it to 0
+\ (hook_wait: the frame's to time). Both banks call it.
+.wait
+    STA Countdown
+    JSR hook_wait
+    STZ Countdown
+    RTS

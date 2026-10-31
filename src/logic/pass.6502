@@ -1,0 +1,286 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - a pass of the logic: the input and the
+\ events (tools/logic/passes.py: the original's $9825 to $982B, $9990 the
+\ input, $943C the keys, $A95C the crosshair, $BB27 the minute)
+\
+\ The original's input waits until a key is held or a minute of the clock
+\ ends; here logic_pass returns instead, and the frame calls it again.
+\ ***************************************************************************
+
+\ logic_pass: one pass, the input and then the events. A = 0 if there was
+\ nothing to do (no key held and no minute: the original waits in its
+\ input), 1 if a pass ran, 2 if the input found the game over (the
+\ original goes to its end, $9AB7, which hook_game_over stands for).
+.logic_pass
+{
+    JSR input_pass
+    CMP #1 : BNE done
+    JSR far_events
+    LDA #1
+.done
+    RTS
+}
+
+\ logic_minute ($BB27, the interrupt's, as a minute of the clock ends): a
+\ unit of energy spent and the minute counters (FCL variables 30 and 31)
+\ up, or with no energy left the game over. Once the game is over no time
+\ is kept. The next pass takes the minute.
+.logic_minute
+{
+    LDA GameOver : BNE done
+    LDA Energy : BEQ out
+    INC FclVar30 : INC MinuteCount
+    DEC Energy
+    LDA Energy : STA PanelEnergy
+    RTS
+.out
+    LDA #3 : STA GameOver
+.done
+    RTS
+}
+
+\ input_pass ($9990): clear the pass's flags, read the keys, and do each
+\ key's action in turn, in the keyboard's order (decision 19). A as
+\ logic_pass's.
+.input_pass
+{
+    ZA_AUTO1 i
+    STZ GameFlags : STZ GameFlags2
+    STZ Collided : STZ ShotFlag : STZ Wipe : STZ EventsDue
+    STZ Sound : STZ Blocked : STZ ActionIndex
+    LDA #0 : JSR hook_key_lights                ; off
+    JSR read_keys
+    PHP
+    LDA GameOver : BEQ alive
+    PLP
+    JSR hook_game_over
+    LDA #2
+    RTS
+.alive
+    LDA MinuteSeen : CMP MinuteCount : BEQ keyed
+    PLP
+    LDA MinuteCount : STA MinuteSeen            ; a minute's pass: the keys do nothing
+    LDA #1 : STA EventsDue
+    RTS
+.keyed
+    PLP : BCS actions
+    LDA #0
+    RTS
+.actions
+    LDX #0
+.map
+    LDA Keys,X : JSR action_of : STA Actions,X
+    INX : CPX KeyCount : BNE map
+    LDA #1 : JSR hook_key_lights                ; on
+    STZ i
+.act
+    LDX i : LDA Actions,X
+    CMP #1 : BMI not_move
+    CMP #&15 : BPL not_move
+    JSR movement
+    BRA next
+.not_move
+    CMP #&15 : BMI not_cross
+    CMP #&1F : BPL not_cross
+    JSR crosshair_action
+    BRA next
+.not_cross
+    CMP #&28 : BEQ rig
+    CMP #&2A : BEQ rig
+    CMP #&29 : BNE next
+    JSR hook_info
+    LDA #1
+    RTS
+.rig
+    JSR hook_rig
+    LDA #1
+    RTS
+.next
+    INC i
+    LDA i : STA ActionIndex
+    CMP KeyCount : BNE act
+    LDA #1
+    RTS
+}
+
+\ action_of ($99EF-$9A1B): A = key code A's action from the key table (in
+\ shooting mode, the first table's second action), &7F if none. Keeps X.
+.action_of
+{
+    ZA_AUTO1 code, n
+    STA code
+    LDY #0
+    LDA KeyTable3 : STA n                       ; (0 is 256)
+.three
+    LDA KeyTable,Y : CMP code : BEQ found3
+    INY : INY : INY
+    DEC n : BNE three
+    LDA KeyTable2 : STA n
+.two
+    LDA KeyTable,Y : CMP code : BEQ found2
+    INY : INY
+    DEC n : BNE two
+    LDA #&7F
+    RTS
+.found3
+    LDA ShootMode : BEQ found2
+    LDA KeyTable+2,Y
+    RTS
+.found2
+    LDA KeyTable+1,Y
+    RTS
+}
+
+\ read_keys ($943C): up to five keys held, in the keyboard's order (the
+\ ZX's half-rows, as src/input.6502's bitmap keys holds them), as codes in
+\ Keys. C set and A the first code, or C clear if no key is held. A held
+\ set seen last time waits RepeatDelay, then RepeatRate, before it counts
+\ again (both 0 in play). The original reads the Kempston joystick too
+\ when Control is 2; Driller's is 0 in play, and the BBC has none.
+.read_keys
+{
+    ZA_AUTO1 mask
+.again
+    LDX #KEYS_BYTES - 1
+.copy
+    LDA keys,X : STA KeyRows,X
+    DEX : BPL copy
+    STZ KeyCount
+    LDX #0                                      ; the half-row
+    LDY #0                                      ; the key's code, five a half-row
+.row
+    LDA #1 : STA mask
+.bit
+    LDA KeyRows,X : AND mask : BEQ up
+    PHY
+    LDA KeyCodes,Y : LDY KeyCount : STA Keys,Y
+    PLY
+    INC KeyCount
+    LDA KeyCount : CMP #5 : BEQ read
+    LDA mask : EOR #&FF : AND KeyRows,X : STA KeyRows,X   ; taken
+.up
+    INY
+    ASL mask
+    LDA mask : CMP #&20 : BNE bit
+    INX : CPX #KEYS_BYTES : BNE row
+    LDA KeyCount : BNE read
+    STZ LastKeyCount
+    CLC
+    RTS
+.read
+    LDA LastKeyCount : CMP KeyCount : BNE new
+    TAX
+.same
+    DEX
+    LDA LastKeys,X : CMP Keys,X : BNE new
+    CPX #0 : BNE same
+    LDA Repeating : BNE counting                ; held, and seen before
+    LDA #1 : STA Repeating
+    LDA RepeatDelay : STA RepeatCopy : STA Countdown
+    JMP again
+.counting
+    LDA Countdown : BEQ go
+    JSR hook_wait
+    STZ Countdown
+    JMP again
+.go
+    LDA RepeatRate : STA Countdown
+    LDA Keys
+    SEC
+    RTS
+.new
+    STZ Repeating
+    LDX KeyCount : STX LastKeyCount
+.last
+    DEX
+    LDA Keys,X : STA LastKeys,X
+    CPX #0 : BNE last
+    LDA Keys
+    SEC
+    RTS
+}
+ASSERT KEYS_BYTES = 8
+
+\ crosshair_action ($A95C): actions &15 to &1E. SPACE (&1E) toggles
+\ shooting mode, in which the movement keys move the crosshair (&17 to
+\ &1A); B (&15) shows or hides the crosshair; 0 (&16) fires, if the
+\ crosshair is shown.
+.crosshair_action
+{
+    ZA_AUTO1 act
+    STA act
+    CMP #&1E : BNE not_mode
+    LDA ShootMode : EOR #&FF : STA ShootMode
+    LDA GameFlags : PHA
+    LDA GameFlags2 : PHA
+    LDA #1 : STA GameFlags : STZ GameFlags2     ; the panel for the moment
+    JSR hook_panel
+    PLA : STA GameFlags2
+    PLA : STA GameFlags
+    LDA #&13 : JSR hook_sound
+    LDA ShootMode : BEQ leaving
+    LDA CrossOn : BNE wait9
+    LDA #&FF : STA CrossOn
+    BRA centred
+.leaving
+    LDA CrossOn : BEQ wanted
+    JSR hook_crosshair
+.wanted
+    LDA CrossWanted : STA CrossOn : BEQ wait9
+.centred
+    JSR centre
+    JSR hook_crosshair
+.wait9
+    LDA #9 : JMP wait
+.not_mode
+    CMP #&15 : BNE not_b
+    LDA ShootMode : BEQ b
+    RTS
+.b
+    LDA CrossWanted : EOR #&FF : STA CrossWanted
+    STA CrossOn : BEQ b_drawn
+    JSR centre
+.b_drawn
+    JSR hook_crosshair
+    BRA wait9
+.not_b
+    LDA CrossOn : BEQ done
+    LDA act
+    CMP #&16 : BEQ fire
+    CMP #&18 : BEQ left
+    CMP #&17 : BEQ right
+    CMP #&1A : BEQ up
+    CMP #&19 : BNE done
+    JSR hook_crosshair                          ; &19, down
+    LDA CrossY : CMP #1 : BEQ moved
+    DEC CrossY
+    BRA moved
+.left
+    JSR hook_crosshair
+    LDA CrossX : CMP #1 : BEQ moved
+    DEC CrossX
+    BRA moved
+.right
+    JSR hook_crosshair
+    LDA ViewCentre : ASL A : CMP CrossX : BEQ moved
+    INC CrossX
+    BRA moved
+.up
+    JSR hook_crosshair
+    LDA ViewCentre+1 : ASL A : CMP CrossY : BEQ moved
+    INC CrossY
+.moved
+    JMP hook_crosshair
+.fire
+    JSR hook_laser
+    LDA #1 : JSR hook_sound
+    JSR hook_laser
+    JSR hook_shot
+    LDA #1 : STA EventsDue : STA ShotFlag
+.done
+    RTS
+.centre
+    LDA ViewCentre : STA CrossX
+    LDA ViewCentre+1 : STA CrossY
+    RTS
+}

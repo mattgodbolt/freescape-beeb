@@ -1,0 +1,79 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the index of the area's objects
+\ (src/logic/touch.6502 scans it)
+\
+\ The original scans the area's records and the globals' for every
+\ crossing ($A597). Their cells and sizes change only as an area loads
+\ (the rig's parts move then), so the logic keeps them in an index in main
+\ RAM (ix_*, src/logic/vars.6502), built from the records in the
+\ original's order as the area loads: each object's first cell and end
+\ (first plus size, AND 255) on each axis, and its record. Its flags, type
+\ and id, which the FCL changes or the answer needs, are read from the
+\ record itself (answer), as the original reads them. In LOGIC_BANK, with
+\ the records.
+\ ***************************************************************************
+
+\ index_objects: the index, from the area's records (AreaObjPtr,
+\ AreaObjects) and then the globals' (NGlobals), as the original scans
+\ them. Clobbers A, X, Y.
+.index_objects
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 n
+    LDX #0
+    LDA AreaObjects : BEQ globals
+    STA n
+    LDA AreaObjPtr : STA p
+    LDA AreaObjPtr+1 : STA p+1
+    JSR records
+.globals
+    LDA NGlobals : STA n
+    LDA #LO(Globals) : STA p
+    LDA #HI(Globals) : STA p+1
+    JSR records
+    STX ix_n
+    RTS
+.records
+    LDA p : STA ix_pl,X
+    LDA p+1 : STA ix_ph,X
+    LDY #1 : LDA (p),Y : STA ix_xo,X
+    LDY #4 : CLC : ADC (p),Y : STA ix_xe,X
+    LDY #2 : LDA (p),Y : STA ix_yo,X
+    LDY #5 : CLC : ADC (p),Y : STA ix_ye,X
+    LDY #3 : LDA (p),Y : STA ix_zo,X
+    LDY #6 : CLC : ADC (p),Y : STA ix_ze,X
+    LDY #8 : LDA (p),Y
+    CLC : ADC p : STA p
+    BCC same
+    INC p+1
+.same
+    INX
+    DEC n : BNE records
+    RTS
+}
+ASSERT ZX_N_GLOBALS > 0 AND ZX_AREAS_MOST + ZX_N_GLOBALS <= IX_MAX
+
+\ answer: object X of the index is entered. If it's visible, a rectangle,
+\ a line or a polygon is the answer (C set, A its id) and any other is
+\ remembered in HitRemembered (C clear); invisible, C clear. Keeps X.
+\ (touch calls it through far_answer, from LOGIC_CODE_BANK.)
+.answer
+{
+    ZA_AUTO2 p
+    LDA ix_pl,X : STA p
+    LDA ix_ph,X : STA p+1
+    LDA (p) : AND #&40 : BNE go_on
+    LDY #7 : LDA (p),Y : TAY                    ; its id
+    LDA (p) : AND #&0F
+    CMP #3 : BEQ at_once
+    CMP #&0A : BMI remember
+.at_once
+    TYA
+    SEC
+    RTS
+.remember
+    STY HitRemembered
+.go_on
+    CLC
+    RTS
+}

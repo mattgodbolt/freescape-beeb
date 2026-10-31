@@ -1,0 +1,78 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - where the logic calls what it leaves out
+\ (tools/logic/hooks.py, by the original's addresses)
+\
+\ The logic calls these where the original calls its own routines. Each
+\ does nothing yet (or answers that nothing was drawn or hit), as the
+\ transcription's defaults do, which tools/logiccheck.mjs checks the logic
+\ against. The renderer, the sound and the screen fill them in. They run
+\ with the logic's bank paged in, and may use any of the pool's bytes the
+\ logic isn't using across the call.
+\ ***************************************************************************
+
+\ hook_sound ($9574): play sound A (the original waits while it plays).
+.hook_sound
+    RTS
+
+\ hook_wait: wait while the interrupt counts Countdown down from A frames
+\ (the turn's and step's size keys, 7; the crosshair keys, 9; FCL DELAY).
+\ Countdown is 0 once the logic goes on.
+.hook_wait
+    RTS
+
+\ hook_key_lights ($99AE, $9A64): the panel's key lights, A = 0 off, 1 on.
+.hook_key_lights
+    RTS
+
+\ hook_panel ($B72B): redraw the panel's figures that GameFlags and
+\ GameFlags2 say changed (SPACE calls it with GameFlags 1).
+.hook_panel
+    RTS
+
+\ hook_crosshair ($AAA0): draw or erase (by EOR) the crosshair at CrossX,
+\ CrossY.
+.hook_crosshair
+    RTS
+
+\ hook_screen_colours ($A77A after its first lines): the view takes
+\ ScreenColours.
+.hook_screen_colours
+    RTS
+
+\ hook_redraw (FCL REDRAW): the redraw, the copy, the sensors' tests and
+\ the panel, there and then.
+.hook_redraw
+    RTS
+
+\ hook_undraw ($B492): hiding object A, which the last redraw's draw list
+\ may hold (NDrawn is its length); C set if it did, which asks for a redraw
+\ from the list (GameFlags2 bit 3).
+.hook_undraw
+    CLC
+    RTS
+
+\ hook_sensor_off ($B467): sensor A is hidden: it stops firing.
+.hook_sensor_off
+    RTS
+
+\ hook_laser ($AA50-$AA8C): the laser's lines from the view's corners (EOR:
+\ called twice, to draw and to erase).
+.hook_laser
+    RTS
+
+\ hook_shot ($B153): the object under the crosshair into Collided, from
+\ the renderer's projected faces. Nothing is hit yet.
+.hook_shot
+    RTS
+
+\ hook_rig ($BEFA): D drills (A = &28) or C collects (A = &2A) a rig.
+.hook_rig
+    RTS
+
+\ hook_info ($C3DC): I shows the information screen and waits for a key.
+.hook_info
+    RTS
+
+\ hook_game_over ($9AB7): GameOver is set: the end of the game.
+.hook_game_over
+    RTS

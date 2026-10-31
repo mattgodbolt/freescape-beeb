@@ -1,0 +1,179 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the logic's multiplies and divide
+\ (tools/logic/arith.py, which has the original's: $910E, $9179, $92D7,
+\ $928C)
+\
+\ Each gives the original's result for every input; tools/logiccheck.mjs
+\ checks them against the transcription on edge and random cases. The
+\ original divides by shifting a bit at a time from the dividend's top 1;
+\ for any divisor but 0 that's the floor of the magnitudes' quotient, so
+\ cross_coord divides however is quickest, and takes the original's way
+\ only for a divisor of 0, where its remainder runs on in its own way.
+\ ***************************************************************************
+
+\ mul_a_hl: m24 = A * mhl, a signed byte by a signed word, exact: the
+\ original's $910E. mhl is left as its magnitude. Clobbers A, X.
+ZA_AUTO2 mhl
+ZA_AUTO 3, m24
+.mul_a_hl
+{
+    ZA_AUTO1 ma, sign
+    STA ma
+    EOR mhl+1 : STA sign
+    LDA ma : BPL apos
+    EOR #&FF : INC A : STA ma                   ; |A|: 128 for -128
+.apos
+    LDA mhl+1 : BPL hpos
+    LDA #0 : SEC : SBC mhl : STA mhl
+    LDA #0 : SBC mhl+1 : STA mhl+1              ; |HL|: 32768 for -32768
+.hpos
+    STZ m24 : STZ m24+1 : STZ m24+2
+    LDX #8
+.bit
+    ASL m24 : ROL m24+1 : ROL m24+2
+    ASL ma : BCC next
+    LDA m24 : CLC : ADC mhl : STA m24
+    LDA m24+1 : ADC mhl+1 : STA m24+1
+    BCC next
+    INC m24+2
+.next
+    DEX : BNE bit
+    BIT sign : BPL done
+    LDA #0 : SEC : SBC m24 : STA m24
+    LDA #0 : SBC m24+1 : STA m24+1
+    LDA #0 : SBC m24+2 : STA m24+2
+.done
+    RTS
+}
+
+\ shift6: mhl = bits 6-21 of m24, which is floor(m24 / 64) to 16 bits: the
+\ step's SLA L : RL H : RL A twice, then H and A. Clobbers A, m24.
+.shift6
+{
+    LDA m24
+    ASL A : ROL m24+1 : ROL m24+2
+    ASL A : ROL m24+1 : ROL m24+2
+    LDA m24+1 : STA mhl
+    LDA m24+2 : STA mhl+1
+    RTS
+}
+
+\ cross_coord: cres = cs + q, where q is the original's $92D7 of $9179's
+\ product: ct * cd divided by cD, signed, the quotient's magnitude rounded
+\ up where the remainder is at least half the divisor's (an arithmetic
+\ shift of it, so &C000 for &8000), to 16 bits. This is where the move's
+\ walk crosses a boundary: start + t * delta / delta_main
+\ (tools/logic/move.py's _crossing). Clobbers A, X, Y, ct, cd, cD.
+ZA_AUTO2 ct, cd, cD, cs, cres
+.cross_coord
+{
+    ZA_AUTO 4, n                                ; |ct * cd|, then the quotient
+    ZA_AUTO2 rem, half
+    ZA_AUTO1 sign, bits
+    LDA ct : ORA ct+1 : BEQ zero                ; a product of 0 divides to 0
+    LDA cd : ORA cd+1 : BNE product
+.zero
+    LDA cs : STA cres
+    LDA cs+1 : STA cres+1
+    RTS
+.product
+    LDA ct+1 : EOR cd+1 : STA sign
+    LDA ct+1 : BPL tpos
+    LDA #0 : SEC : SBC ct : STA ct
+    LDA #0 : SBC ct+1 : STA ct+1
+.tpos
+    LDA cd+1 : BPL dpos
+    LDA #0 : SEC : SBC cd : STA cd
+    LDA #0 : SBC cd+1 : STA cd+1
+.dpos
+    \ n = ct * cd, 16 by 16 bits, unsigned
+    STZ n+2 : STZ n+3
+    LDX #16
+.mbit
+    LSR cd+1 : ROR cd : BCC mnext
+    LDA n+2 : CLC : ADC ct : STA n+2
+    LDA n+3 : ADC ct+1 : STA n+3
+.mnext
+    ROR n+3 : ROR n+2 : ROR n+1 : ROR n
+    DEX : BNE mbit
+    \ the divisor's magnitude, and its sign
+    LDA cD : ORA cD+1 : BNE divisor
+    JMP by_zero
+.divisor
+    LDA cD+1 : BPL Dpos
+    LDA #0 : SEC : SBC cD : STA cD
+    LDA #0 : SBC cD+1 : STA cD+1
+    LDA sign : EOR #&80 : STA sign
+.Dpos
+    \ n / cD, restoring, from the dividend's first non-zero byte: the
+    \ quotient in n, the remainder in rem. (|cD| <= &8000, so the remainder
+    \ doubled and a bit fits 16 bits.)
+    STZ rem : STZ rem+1
+    LDY #32
+.skip
+    LDA n+3 : BNE divide
+    LDA n+2 : STA n+3
+    LDA n+1 : STA n+2
+    LDA n : STA n+1
+    STZ n
+    TYA : SEC : SBC #8 : TAY
+    BRA skip                                    ; (n isn't 0)
+.divide
+    ASL n : ROL n+1 : ROL n+2 : ROL n+3
+    ROL rem : ROL rem+1
+    LDA rem : SEC : SBC cD : TAX
+    LDA rem+1 : SBC cD+1 : BCC dnext
+    STA rem+1 : STX rem
+    INC n
+.dnext
+    DEY : BNE divide
+    \ rounded up if rem - half is positive, as a 16-bit difference
+    LDA cD+1 : CMP #&80 : ROR A : STA half+1
+    LDA cD : ROR A : STA half
+.round
+    LDA rem : SEC : SBC half
+    LDA rem+1 : SBC half+1 : BMI signed
+    INC n : BNE signed
+    INC n+1
+.signed
+    BIT sign : BPL add
+    LDA #0 : SEC : SBC n : STA n
+    LDA #0 : SBC n+1 : STA n+1
+.add
+    LDA cs : CLC : ADC n : STA cres
+    LDA cs+1 : ADC n+1 : STA cres+1
+    RTS
+
+    \ A divisor of 0, as the original's divide runs it: from the
+    \ dividend's top 1, each bit is a quotient bit of 1, and the remainder
+    \ takes rem * 2 + the bit, less what carries out of 16 bits. So the
+    \ quotient is bits 1s, bits the dividend's length, and the half is 0.
+.by_zero
+    STZ rem : STZ rem+1
+    LDX #32
+.lead
+    ASL n : ROL n+1 : ROL n+2 : ROL n+3
+    BCS top
+    DEX : BRA lead                              ; (n isn't 0)
+.top
+    STX bits
+.zbit
+    ROL rem : ROL rem+1
+    BCC zkept
+    LDA rem : BNE zlow
+    DEC rem+1
+.zlow
+    DEC rem
+.zkept
+    DEX : BEQ zdone
+    ASL n : ROL n+1 : ROL n+2 : ROL n+3
+    BRA zbit
+.zdone
+    STZ n : STZ n+1
+    LDX bits
+.ones
+    SEC : ROL n : ROL n+1
+    DEX : BNE ones
+    STZ half : STZ half+1
+    BRA round
+}

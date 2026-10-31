@@ -1,0 +1,254 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - which object a crossing enters, and
+\ keeping clear of faces (tools/logic/move.py: the original's $A597 and
+\ $BCCB; docs/research/zx-logic.md, "Moving")
+\
+\ Here and in the move, every 8-bit compare keeps the original's test of
+\ the sign of the difference (CMP then BMI or BPL, as its CP then JP M),
+\ and every sum wraps as the Z80's does.
+\
+\ The objects' cells and sizes come from the index (src/logic/index.6502):
+\ a crossing on one axis, nearly every one, looks only for the objects
+\ whose face it is, in a loop of a few cycles an object. An object it
+\ enters is answered from its record (answer, in LOGIC_BANK with the
+\ records: far_answer pages it in).
+\ ***************************************************************************
+
+\ The bits of a crossing (tools/logic/move.py): which axes cross a cell
+\ boundary, and which way.
+X_MOVES = 2 : X_UP = 1
+Y_MOVES = 8 : Y_UP = 4
+Z_MOVES = &20 : Z_UP = &10
+
+\ cell_of: A = the cell of the position whose low byte is A and high byte
+\ X: (v >> 6) AND 255, the original's ADD HL,HL twice then H.
+.cell_of
+{
+    ZA_AUTO1 h
+    STX h
+    ASL A : ROL h
+    ASL A : ROL h
+    LDA h
+    RTS
+}
+
+\ --- $A597: which object a crossing enters ---------------------------------
+
+\ touch: does the crossing tc (its bits) from the current cell (CellX,
+\ CellY, CellZ) enter a visible object: the area's, then the globals? C
+\ set if so, with its id in A; HitRemembered as the original leaves it. A
+\ rectangle, a line or a polygon hit is the answer at once; any other is
+\ remembered and the scan goes on, and the last remembered is the answer.
+\ Clobbers X, Y.
+ZA_AUTO1 tc
+.touch
+{
+    ZA_AUTO1 tf                                 ; the face's cell, for a crossing on one axis
+    STZ HitRemembered
+    LDA tc
+    CMP #X_MOVES OR X_UP : BEQ x_up
+    CMP #X_MOVES : BEQ x_down
+    CMP #Z_MOVES OR Z_UP : BEQ z_up
+    CMP #Z_MOVES : BEQ z_down
+    CMP #Y_MOVES : BEQ y_down
+    CMP #Y_MOVES OR Y_UP : BEQ y_up
+    JMP any
+.x_up
+    LDX CellX : INX : STX tf
+    JMP scan_xo
+.x_down
+    LDA CellX : STA tf
+    JMP scan_xe
+.z_up
+    LDX CellZ : INX : STX tf
+    JMP scan_zo
+.z_down
+    LDA CellZ : STA tf
+    JMP scan_ze
+.y_up
+    LDX CellY : INX : STX tf
+    JMP scan_yo
+.y_down
+    LDA CellY : STA tf
+    JMP scan_ye
+
+    \ FACE_SCAN faces, w1, w2: the objects whose face (the array faces
+    \ holds tf there) the crossing is, and which hold the current cell on
+    \ the other two axes (w1, w2), in the original's order.
+MACRO FACE_SCAN faces, w1, w2
+    LDX #0
+.object
+    LDA faces,X : CMP tf : BEQ face
+.next
+    INX : CPX ix_n : BNE object
+    JMP remembered
+.face
+    JSR w1 : BNE next
+    JSR w2 : BNE next
+    JSR far_answer : BCC next
+    RTS
+ENDMACRO
+.scan_xo
+    FACE_SCAN ix_xo, within_y, within_z
+.scan_xe
+    FACE_SCAN ix_xe, within_y, within_z
+.scan_zo
+    FACE_SCAN ix_zo, within_x, within_y
+.scan_ze
+    FACE_SCAN ix_ze, within_x, within_y
+.scan_yo
+    FACE_SCAN ix_yo, within_x, within_z
+.scan_ye
+    FACE_SCAN ix_ye, within_x, within_z
+
+    \ Any other crossing: each object as the original tests it ($A5CE,
+    \ $A64E, $A6CE): through a face on one axis, holding the other two or
+    \ crossing into the object on them at the same time.
+.any
+    LDX #0
+.each
+    JSR face_x : BNE y_face
+    JSR within_y : BEQ x_z
+    JSR face_y : BNE y_face
+.x_z
+    JSR within_z : BEQ hit
+    JSR face_z : BEQ hit
+.y_face
+    JSR face_y : BNE z_face
+    JSR within_x : BEQ y_z
+    \ $A682: x isn't held, so it must cross into the object at the same
+    \ time; going up, the original adds one to cx if cx < ox, but to the
+    \ object's end otherwise.
+    LDA tc : AND #X_MOVES : BEQ z_face
+    LDA tc : AND #X_UP : BEQ y_x_down
+    LDA CellX : CMP ix_xo,X : BMI y_x_reg
+    LDA ix_xe,X
+.y_x_reg
+    INC A : CMP ix_xo,X : BNE z_face
+    BRA y_z
+.y_x_down
+    LDA ix_xe,X : CMP CellX : BNE z_face
+.y_z
+    JSR within_z : BEQ hit
+    JSR face_z : BEQ hit
+.z_face
+    JSR face_z : BNE miss
+    JSR within_x : BEQ z_y
+    JSR face_x : BNE miss
+.z_y
+    JSR within_y : BEQ hit
+    JSR face_y : BNE miss
+.hit
+    JSR far_answer : BCC miss
+    RTS
+.miss
+    INX : CPX ix_n : BNE each
+.remembered
+    LDA HitRemembered : CMP #1                  ; C set for any id but 0
+    RTS
+
+    \ within_x, _y, _z: Z set if the current cell is in object X on that
+    \ axis, o <= cur < o + s, as the original tests it: the sign of cur - o,
+    \ then o + s against cur.
+MACRO WITHIN o, e, cur
+    LDA cur : CMP o,X : BMI no
+    LDA e,X : CMP cur : BEQ no : BMI no
+    LDA #0
+    RTS
+.no
+    LDA #1
+    RTS
+ENDMACRO
+.within_x
+    WITHIN ix_xo, ix_xe, CellX
+.within_y
+    WITHIN ix_yo, ix_ye, CellY
+.within_z
+    WITHIN ix_zo, ix_ze, CellZ
+
+    \ face_x, _y, _z: Z set if the crossing crosses that axis into object
+    \ X: going up, the next cell is its first; going down, this cell is
+    \ the one past its last.
+MACRO FACE moves, up, o, e, cur
+    LDA tc : AND #moves : BEQ no
+    LDA tc : AND #up : BEQ down
+    LDA cur : INC A : CMP o,X
+    RTS
+.down
+    LDA e,X : CMP cur
+    RTS
+.no
+    LDA #1
+    RTS
+ENDMACRO
+.face_x
+    FACE X_MOVES, X_UP, ix_xo, ix_xe, CellX
+.face_y
+    FACE Y_MOVES, Y_UP, ix_yo, ix_ye, CellY
+.face_z
+    FACE Z_MOVES, Z_UP, ix_zo, ix_ze, CellZ
+}
+
+\ --- $BCCB: keeping clear of faces -----------------------------------------
+
+\ keep_clear: if the target is within Margin of its cell's edge on any
+\ axis, and crossing those edges (all at once) enters an object, move it
+\ back to Margin from each of those edges (the low byte only). The first
+\ such object's id goes to Collided.
+.keep_clear
+{
+    ZA_AUTO1 kc, low, add
+    LDA #&40 : SEC : SBC Margin : STA low
+    STZ kc
+    LDA TargetX : AND #&3F : CMP Margin : BPL x_high
+    LDA #X_MOVES : TSB kc
+    BRA y
+.x_high
+    CMP low : BMI y
+    LDA #X_MOVES OR X_UP : TSB kc
+.y
+    LDA TargetY : AND #&3F : CMP Margin : BPL y_high
+    LDA #Y_MOVES : TSB kc
+    BRA z
+.y_high
+    CMP low : BMI z
+    LDA #Y_MOVES OR Y_UP : TSB kc
+.z
+    LDA TargetZ : AND #&3F : CMP Margin : BPL z_high
+    LDA #Z_MOVES : TSB kc
+    BRA test
+.z_high
+    CMP low : BMI test
+    LDA #Z_MOVES OR Z_UP : TSB kc
+.test
+    LDA kc : BEQ done
+    STA tc : JSR touch : BCC done
+    LDX Collided : BNE moved                    ; (the first one's id is kept)
+    STA Collided
+.moved
+    LDA kc : AND #X_MOVES : BEQ y_moved
+    LDX Margin
+    LDA kc : AND #X_UP : BEQ x_put
+    LDX low
+.x_put
+    STX add
+    LDA TargetX : AND #&C0 : CLC : ADC add : STA TargetX
+.y_moved
+    LDA kc : AND #Y_MOVES : BEQ z_moved
+    LDX Margin
+    LDA kc : AND #Y_UP : BEQ y_put
+    LDX low
+.y_put
+    STX add
+    LDA TargetY : AND #&C0 : CLC : ADC add : STA TargetY
+.z_moved
+    LDA kc : AND #Z_MOVES : BEQ done
+    LDX Margin
+    LDA kc : AND #Z_UP : BEQ z_put
+    LDX low
+.z_put
+    STX add
+    LDA TargetZ : AND #&C0 : CLC : ADC add : STA TargetZ
+.done
+    RTS
+}
