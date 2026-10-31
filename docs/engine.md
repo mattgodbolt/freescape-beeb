@@ -277,7 +277,9 @@ a change is agreed and recorded here first.
   has its centre at `(16·px + 8, 16·py + 8)`.
 - **The fill rule**: a polygon covers a pixel when the pixel's centre is
   inside it. A centre exactly on an edge counts for top and left edges
-  and not for bottom and right ones.
+  and not for bottom and right ones. A sloping edge's boundary on each
+  line it crosses is a DDA's (`tools/model/raster.py`'s `edge_crossings`),
+  at most a pixel from the exact one and never past the edge's far vertex.
 - **`maths.project(X, Y, Z)`** (`tools/model/maths.py`): camera-space
   24-bit signed integers (stage 3's), `Z >= ZNEAR`, to `(sx, sy)` in view
   coordinates, which may lie far outside the view. The focal lengths and

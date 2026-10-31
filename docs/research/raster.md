@@ -4,8 +4,9 @@ Stages 8-10 of `docs/engine.md`: faces nearest first into the span buffer,
 the background, and the view's bytes. The model (`tools/model/raster.py`,
 `writer.py`) is the specification; the 6502 (`src/raster.6502`,
 `src/writer.6502`) matches it byte for byte, checked by `make raster`
-(`tools/rastercheck.mjs`). Written 2026-10-31; every figure below was
-measured that day, as each section says, in headless jsbeeb (Master) through
+(`tools/rastercheck.mjs`). Written 2026-10-31 and revised the same day for
+the restructure (the rounds below); every figure was measured that day, as
+each section says, in headless jsbeeb (Master) through
 `tools/rastercheck.mjs`'s instruction-level profile, unless it says
 otherwise.
 
@@ -26,41 +27,51 @@ otherwise.
 - **The fill rule.** A face covers a pixel when the pixel's centre is inside
   it; a centre on an edge counts for top and left edges. Per line: every
   non-horizontal edge is crossed by the lines whose centres are in
-  [top, bottom) of it, at the boundary `p = ceil((x - 8) / 16)` of its x
-  there, and the face covers [p_left, p_right). `raster.reference` renders
-  the same image from edge functions, pixel by pixel, and every scene must
-  agree with it before the 6502 sees it.
+  [top, bottom) of it, and the face covers [p_left, p_right) of the edges'
+  boundaries there. A vertical edge's boundary is the exact one,
+  `(x + 7) >> 4`; a sloping edge's is a DDA's (below), which the exact
+  boundary `ceil((x - 8) / 16)` (`edge_crossings_exact`) is the measure of.
+- **Faster rather than exact** (decisions 11-12: Matt would "much rather
+  we have a faster version than a pixel correct one"). Measured 2026-10-31
+  by comparing `edge_crossings` with `edge_crossings_exact` on every edge:
+  on Driller's 65 entrance views, 38,903 of 39,412 edge-lines (98.7%) get
+  the exact boundary, 268 are a pixel left of it and 241 a pixel right,
+  none further; 190 of 351,520 view bytes (0.054%) differ, in 41 views. On
+  the 148 synthetic scenes, 0.19% of bytes differ. Every DDA term rounds
+  toward the edge's top vertex, so a boundary never passes the edge's far
+  end and never leaves the view.
 - **The background.** A pixel is ground when its centre is on the horizon
   or right of its direction as seen on the screen; sky otherwise; all sky
-  with no horizon. (The whole-view model's stand-in documented "a centre on
-  the line is ground", so that's the rule; the first version gave a tie to
-  the side the horizon was a top or left edge of, which is as consistent but
-  wasn't the documented interface.)
+  with no horizon. Driller's views have no horizon (decision 8a): the sky
+  is the background and the ground is the floor object's face.
 - **The interface** is the stand-in's: `rasterise(faces, sky, ground,
   horizon, stats)` and `write(lines)`, `decode(view)`. `spans(faces, bg,
-  capacity)` is the algorithm itself, with the counts the cost model uses
-  and, given the 6502's pool size, its overflow (below).
+  capacity, crossings)` is the algorithm itself, with the counts the cost
+  model uses and, given the 6502's pool size, its overflow (below).
 
 ## The 6502
 
-### Edges, exactly
+### Edges, by a DDA
 
-Vertices are in sixteenths, so an exact boundary on each line needs the
-edge's sub-pixel start. With dx, dy the edge's extent (dy > 0), t0 the first
-line centre's distance below the top vertex (0-15) and x0 - 8 = 16 U + w:
+A sloping edge's x steps in 8.8 fixed point from its top vertex, with no
+division and no compare a line (Rich Talbot-Watkins's portalc does the
+same, `docs/research/rtw-sources.md` 1.5-1.6):
 
-- a, b = floor divmod(dx, dy); W = w + a t0 = 16 W1 + W2;
-- R = W2 dy + b t0; q = ceil(R / (16 dy)), which is 0, 1 or 2;
-- p0 = U + W1 + q, and the error e0 = q dy - ceil(R / 16), in [0, dy);
-- each line: e -= b; if that goes below 0, e += dy and p += a + 1, else
-  p += a.
+- dy, in sixteenths, is normalised to n·2^s with n in [128, 255], rounded
+  up when bits go (`k8` gives the bit length, `nrm` the shifted byte);
+- r = 256 + f(n) ≤ 65536 / n, f from a 128-byte table (`recipf`);
+- the gradient g = |dx|·r >> (8 + s) and the first line's offset
+  g·t0 >> 4 (t0 the line centre's distance below the vertex); an edge no
+  taller than a line crosses one line at most, has no gradient, and takes
+  its offset as |dx|·t0·r >> (12 + s), since g needn't fit 16 bits;
+- X = 16·(x0 - 8) + 255 ± offset, `X += ±g` a line, and the boundary is
+  X's high byte.
 
-That's the DDA `p_k = ceil(N_k / 16 dy)` with its error divided by 16, which
-is exact because the error's low four bits never change (both steps are
-multiples of 16). A vertical edge is `p = (x + 7) >> 4` on every line; a
-steep one (|dx| < dy) needs no division; an error that fits a byte steps in
-8 bits. Each chain's step in each copy of the line loop is a `BRA` patched to
-its edge's kind (`STEP8`, `STEP16` or none).
+The products by r are quarter squares, `q(u + f) - q(|u - f|)` a byte, from
+a table of `n^2 DIV 4` (n up to 510) that `raster_init` builds, 1K in the
+bank's work, so the rasteriser needs nothing of HAZEL or of the maths
+track's tables. Each chain's step in each copy of the line loop is a `BRA`
+patched to the edge's kind: the 16-bit add, or none for a vertical edge.
 
 ### The span buffer
 
@@ -86,28 +97,35 @@ realistic ones (a 72-triangle grid) at 140, against 254; the pathological
 ### Writing
 
 - Whole bytes go through the row runs: a page a character row of
-  `STA abs,Y` (Y the line in the row), entered at the piece's first whole
-  byte with an RTS planted after its last. Each row keeps one plant, moved
-  only when a piece ends elsewhere, and one extra slot (storing into
-  `rr_scratch`) so a plant at the line's end comes out like any other.
-  `put_run` *jumps* into the run, whose RTS returns to `put_run`'s caller.
+  `STA abs,Y`, entered at the piece's first whole byte with an RTS planted
+  after its last. Y is the line itself: each row's addresses are 8 lines
+  back for each row above it. Each row keeps one plant, moved only when a
+  piece ends elsewhere, and one extra slot (storing into `rr_scratch`) so a
+  plant at the line's end comes out like any other; after it, the row's own
+  RTS, which ends a piece to the view's right edge without a plant when the
+  row's plant is left of the piece (as Chase H.Q.'s runs end on their own
+  RTS, `rtw-sources.md` 3.3). `put_run` *jumps* into the run, whose RTS
+  returns to `put_run`'s caller.
 - A byte two runs share is `left AND &AA OR right AND &55`, through the
   row's two screen pages (`put_bnd`).
 - The background fills each line's remaining gaps, split where the horizon
   crosses the line (`hsplit`, a level horizon a table, a sloping one an edge
-  DDA in 16 bits, pinned when it's far outside).
+  DDA in 16 bits, pinned when it's far outside; an all-sky frame after
+  another leaves the table as it was).
 - **What the screen already holds.** A line no face touched is background
   from end to end; if the screen being drawn (ACCCON's X) held the same
   background on it last time, it isn't written. `bg_was` keeps split + 1 for
   each screen and line, `bg_sig` the patterns those were drawn in; other
-  patterns, or `raster_forget`, forget them.
+  patterns, or `raster_forget`, forget them. Every skip comes from these
+  records; the screen is never read (the sources that read it measured a
+  loss, `rtw-sources.md` 6).
 
 ## The interface for the frame
 
-- `raster_init` once (it builds `lo16`, forgets both screens and plants the
-  row runs); `raster_forget` whenever something else has drawn on the
+- `raster_init` once (it builds its tables, forgets both screens and plants
+  the row runs); `raster_forget` whenever something else has drawn on the
   screens; `raster_frame` each frame, with ACCCON's X selecting the screen
-  drawn into and ACCCON's Y set if the sections are in HAZEL.
+  drawn into.
 - Inputs (`RasterIn`): `rs_nfaces`; per face `rs_fn` (vertices), `rs_fv`
   (first vertex), `rs_fc` (pattern); vertices `rs_vxl/vxh/vyl/vyh` in
   sixteenths inside the view, each face convex, either winding; patterns
@@ -118,100 +136,121 @@ realistic ones (a 72-triangle grid) at 140, against 254; the pathological
 - It uses its own zero page (baron's allocator), the stack, and its sections,
   and clobbers A, X, Y. It reads nothing else but ACCCON, and writes nothing
   else but the view (the check watches every write).
-- Sections: `RasterCode` and `RasterIn` anywhere outside `&3000-&7FFF`;
-  `RasterRuns` page-aligned (its own section, so the build can place it);
-  `RasterWork` (per frame) and `RasterState` (frame to frame). The check
-  build's sizes (2026-10-31): code 6,417 bytes, row runs 3,232, work 4,616
-  (with its alignment), state 286, inputs 1,792. All of it but the inputs
-  fits one 16K sideways bank, which nothing else needs paged while it runs.
+- Sections: `RasterCode`, `RasterRuns` (page-aligned), `RasterWork` (per
+  frame, and the tables `raster_init` builds) and `RasterState` (frame to
+  frame) in one sideways bank, the inputs in main RAM (decision 20). The
+  check build's sizes (2026-10-31): code 6,200 bytes, row runs 3,232. The
+  slideshow (`src/slides.6502`) puts all four in its bank one after another
+  and asserts they fit; they do, with the work's 1K of squares.
 
 ## Checks
 
 - The model against its brute force on every scene (and every Driller view):
-  faces by edge functions, background by the horizon's cross product.
-- The 6502 against the model, byte for byte, on 148 scenes (random convex
-  polygons, Driller-like boxes, and the edge cases the brief lists) with the
-  view first set to each expected byte's complement, so every byte must be
-  written, and as many writes as the model counts; nothing else of either
-  screen may change, and nothing outside the rasteriser's memory may be
-  written. Scenes alternate the screens.
+  faces by edge functions, background by the horizon's cross product. The
+  span buffer must give the brute force's image with the exact edges; then
+  every edge's DDA must be within a pixel of the exact boundary on every
+  line it crosses, and cross the same lines.
+- The 6502 against the model (with the DDA), byte for byte, on 148 scenes
+  (random convex polygons, Driller-like boxes, and the edge cases the brief
+  lists) with the view first set to each expected byte's complement, so
+  every byte must be written, and as many writes as the model counts;
+  nothing else of either screen may change, and nothing outside the
+  rasteriser's memory may be written. Scenes alternate the screens.
 - Seven sequences of frames into alternate screens, which keep what was
   drawn: still, panning, pitching, alternating scenes, a recoloured sky,
   empty, a turning horizon. Each frame must equal the model's.
-- Mutation testing (2026-10-31, `tools/rastercheck.mjs` on copies of the
-  source with one change each): 17 single-instruction changes to the
-  arithmetic, the halves, the gap cases, the plants, the chain swap and the
-  horizon's ties; every one that changes behaviour fails the check. One,
-  stopping at 103 open lines rather than 104, at first didn't, which added
-  the `all-but-one-line` scene; two (a logical shift where only the low byte
-  is used, a product taken where a shortcut was) don't change behaviour.
-- Driller's own entrance views (65, through the whole-view model's render,
-  run from the main checkout 2026-10-31) found a bug every synthetic scene
-  had missed: taking out a line's first gap branched on the flags of
-  `LDY r_y`, so on line 0 alone a span stopped after its first gap. The
-  `top-line` scenes now catch it.
+- Mutation testing (2026-10-31, the check on copies of the source with one
+  change each, run on the scenes and on Driller's views): 17 changes to the
+  DDA's arithmetic (the normalising, its rounding, the reciprocal's special
+  case, the shifts, the products' carries, the step), the writer's plants
+  and right-edge ends, the chain swap, the line-0 unlink, the horizon's ties
+  and the background's records; the scenes catch all of them but one that
+  is equivalent (it sends the same cases the same way). Driller's views
+  alone miss three more (the horizon's tie, the all-sky table after a
+  horizon, a carry the views' products never make), which is why the
+  synthetic scenes stay.
+- Driller's own entrance views (65, through the whole-view model's render)
+  found a bug every synthetic scene had missed: taking out a line's first
+  gap branched on the flags of `LDY r_y`, so on line 0 alone a span stopped
+  after its first gap. The `top-line` scenes now catch it.
 
 ## Measurements
 
 All 2026-10-31, `tools/rastercheck.mjs` (cycles from the call to the return,
-less the stub's own).
+less the stub's own), each view drawn into a screen that remembers nothing
+(`raster_forget` first), so the background skip never applies.
 
 ### Driller's entrance views (the work the game will see)
 
-65 views, faces 2-36 (median 14), every line of every face's range 51-925
-(median about 290), runs 104-951. After the last round: **min 54,712, median
-138,079, mean 153,463, max 399,750 cycles** for the rasteriser alone (a field
-is 39,936). By part: insertion 24.1%, writing bytes 18.4%, edge set-up
-14.9%, runs 12.1%, background 7.8%, stepping 6.3%, face set-up 5.4%, rows
-2.9%, line loop 2.9%, shared bytes 2.3%, the horizon 1.0%.
-
-### The cost model
-
-Least squares over every scene and view that didn't overflow (210), the
-bytes' cost fixed at the 5 cycles an `STA abs,Y` takes (the profile's row-run
-share confirms it; with every view writing all 5,408 bytes, a fit can't tell
-bytes from lines):
-
-    cycles ~ 123 lines + 86 face-lines + 159 runs + 5 bytes + 1574 edges
-
-(lines: lines the background fills; face-lines: every line of every face's
-range; runs: pieces of faces and background; edges: edges crossing a line).
-RMS error 10.8%. The edge term carries the per-face set-up and the chain's
-walk over horizontal edges, which go with edges (about 2.3 a face); the
-profile's own edge share comes to 450-700 cycles an edge on the views and
-Driller-like scenes, a vertical edge with the chain's step to it about 200.
-Fitted to Driller's views alone: 83 face-lines + 232 runs + 841 edges +
-5 bytes, 6.6% RMS.
+65 views, faces 2-36 (median 14), edges crossing a line median 34 (15 of
+them sloping), face-lines median 238, runs median 278. After the last
+round: **min 51,800, median 125,118, mean 141,291, p90 224,082, max
+363,191 cycles** for the rasteriser and writer together (a field is
+39,936). Median by part: insertion 28,806, writing bytes 28,641, edge
+set-up 17,598, runs 13,895, background 11,775, face set-up 8,037, stepping
+4,688, rows 4,211, the line loop 3,929, shared bytes 3,182.
 
 ### The rounds
 
-| Round | driller07 (synthetic, 17 faces) | Driller's views, median |
-|---|---:|---:|
-| First version: a line set-up a line, a dispatch a line, steps through zero page with a general 16-bit divide | 436,241 | |
-| Line loop unrolled by pool; steps by edge kind, patched; rows set up once a character row; the background unrolled | 347,619 | |
-| The face's left chain found once (the chains swap); edge shifts by table; no product for a steep edge | 336,537 | |
-| `put_run` jumps into the run | 331,139 | 140,773 |
-| A vertical edge's own short set-up | | 138,760 |
-| The chains start the way the last face's left chain did (Driller's faces share a winding) | 328,857 | 138,079 |
+Each round on the same 65 views (no horizon, decision 8a), with the cost
+model `cycles ≈ a·lines + b·face-lines + c·runs + d·bytes + e·edges` fitted
+to them after it (RMS error 5-6% each):
 
-The background skip doesn't show in single scenes (they forget first); in
-the sequences, an empty view costs about 52,000 cycles the first time on a
-screen and 9,556 after, and a slowly turning horizon rewrites a third to
-three fifths of the bytes. Every line of the synthetic Driller-like scenes is touched by a face,
-so they don't skip; Driller's views have sky above the buildings.
+| Round | median | p90 | max | a | b | c | d | e |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Before: the exact edges, as merged | 137,564 | 239,476 | 398,746 | 100.5 | 76.3 | 271.8 | 1.2 | 892.6 |
+| Edges by the DDA, reciprocal by table, products by quarter squares | 132,539 | 228,847 | 374,407 | 88.3 | 69.8 | 257.8 | 1.8 | 837.8 |
+| The first line's offset from the gradient (one product an edge) | 131,342 | 225,361 | 367,773 | 79.9 | 69.5 | 250.7 | 2.2 | 813.1 |
+| Runs: Y the line, no empty-piece test, a lighter replant, right-edge pieces on the row's own RTS | 127,046 | 224,791 | 364,006 | 81.4 | 77.0 | 240.3 | 1.9 | 796.2 |
+| Background: an all-sky frame's splits kept; heads and records cleared 8 a pass | 124,796 | 223,146 | 361,588 | 83.7 | 77.0 | 239.7 | 1.6 | 795.2 |
+| The rasteriser's own squares (no HAZEL; `|u - f|` by a subtraction) | 125,118 | 224,082 | 363,191 | 84.2 | 76.7 | 241.2 | 1.5 | 806.3 |
+
+Every view writes all 5,408 bytes, so the fit can't tell bytes from lines
+(d is near 0 and a takes the bytes); the profile's bytes are 5.3 cycles
+each. On the 148 synthetic scenes the last round fits 185.8 lines + 108.1
+face-lines + 129.4 runs + 4.0 bytes + 1400.5 edges (9.5% RMS).
+
+A sloping edge's set-up, with the chain's walk to it, costs about 870
+cycles in the first DDA round and a vertical one about 200 (the profile's
+edge routines over the views' edges); the exact rule's was 450-700 an edge
+on average over both kinds.
+
+### Measured and not built
+
+- **Edges shared between faces.** Of the 1,141 sloping edges the views'
+  faces have (crossing a line), 219 (19%) have the same two endpoints as
+  an earlier face's; the median view has 2. A cache would save about 2 set-ups and cost a
+  lookup on each of the 15: not worth it.
+- **Vertical coherence.** 74% of face-lines have the same span as the
+  face's line above, but what decides the work is whether the line's gaps
+  are the same too: a copy-on-write simulation of lines sharing their gap
+  lists while they're equal hit 54% of face-lines, and on the busiest view
+  715 of 876 missed, each at 8.2 runs, more work than now.
+- **Insert first, write once.** Writing each line from its finished
+  partition would merge neighbouring pieces of one pattern, but those save
+  2% of runs; writing at once stays, made cheaper.
+- **A `put_run` for each phase** (the pattern loaded in the copy): about 6
+  cycles a face's piece against 16 more a row set-up for the extra patches,
+  an estimated 600 cycles a view; not built.
 
 ## What's left
 
-- **The budget.** The median view's rasteriser alone is about 3.5 fields,
-  against a whole frame in two (decision 2's target). The fixed part
-  (writing 5,408 bytes, about 27K) is a fifth of it; the rest is per face-line
-  and per run, about 85-160 cycles each, and per edge.
-- **Edges shared between faces.** A box's faces come together and share
-  edges, set up identically from the same top vertex; a cache of the last few
-  edges (keyed by their two vertices) would save most of a set-up on a hit.
+- **The budget.** The median view is about 3.1 fields and the busiest 9.1,
+  against the coordinator's 40K and 80K. Writing the view's 5,408 bytes is
+  27,040 cycles of `STA abs,Y` alone, two thirds of the 40K, before a face
+  is inserted; what's per face-line (insertion, its run, stepping, the
+  loop: about 215 cycles each) is another 51K at the median. Reaching 40K
+  needs work the frame doesn't do, not cheaper work:
+  - writing only what changed, from records of the last frame on the same
+    screen (lines' runs, as the background's lines are recorded now): a
+    still or slowly moving view would write a fraction of its bytes;
+  - a routine a line rather than a row (`STA abs`, 4 cycles, and a plant
+    that lasts while the line's ends don't move): about 5.4K a view off the
+    bytes and most of the replants, but 16K of code, which the bank hasn't
+    room for beside the rest;
+  - half the lines rasterised, each written twice: an estimated quarter
+    off (what's per face-line and the background halve), with half the
+    vertical resolution.
 - **More of what the screen holds.** Only whole background lines are skipped
   now; the background runs before the first face and after the last, on lines
   whose split didn't move, are the next step, and they need the same records.
-- **Code size.** The four copies of the line loop and of the background
-  carry most of it; a sideways bank holds it easily, and the alternative
-  (shared code reading the pool through pointers) costs cycles a line.

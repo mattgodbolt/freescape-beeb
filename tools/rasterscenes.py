@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "model"))
 
 from raster import (VIEW_W, VIEW_H, SUB, HALF, Background, Horizon,  # noqa: E402
+                    edge_crossings, edge_crossings_exact,
                     spans, reference)
 import writer  # noqa: E402
 
@@ -371,7 +372,10 @@ def edge_scenes():
 
 
 def build(s):
-    """The model's image of a scene, checked against the brute force."""
+    """The model's image of a scene. Its span buffer, with the fill rule's
+    exact edges, must give the brute force's image; and the DDA's edges
+    (docs/research/raster.md), which the image is made with, must be within
+    a pixel of the exact ones on every line."""
     bg = Background(tuple(s["sky"]), tuple(s["ground"]),
                     None if s["horizon"] is None else Horizon(*s["horizon"]))
     faces = [(tuple(p), [tuple(v) for v in vs]) for p, vs in s["faces"]]
@@ -382,10 +386,19 @@ def build(s):
         h = bg.horizon
         assert abs(h.x) <= HMAX and abs(h.y) <= HMAX and abs(h.dx) <= DMAX and abs(h.dy) <= DMAX, s["name"]
     want = writer.view_bytes(reference(faces, bg))
-    got = writer.view_bytes(spans(faces, bg)[0])
+    got = writer.view_bytes(spans(faces, bg, crossings=edge_crossings_exact)[0])
     if got != want:
         y = next(i for i in range(VIEW_H) if got[i] != want[i])
         raise SystemExit(f"{s['name']}: spans disagree with the reference on line {y}")
+    for _, vs in faces:
+        for i in range(len(vs)):
+            dda = edge_crossings(*vs[i], *vs[(i + 1) % len(vs)])
+            exact = dict(edge_crossings_exact(*vs[i], *vs[(i + 1) % len(vs)]))
+            for k, p in dda:
+                if abs(p - exact.pop(k)) > 1:
+                    raise SystemExit(f"{s['name']}: an edge's DDA is {p - exact[k]} pixels out on line {k}")
+            if exact:
+                raise SystemExit(f"{s['name']}: an edge's DDA misses lines {sorted(exact)}")
     # What the 6502 draws, its pools as big as they are.
     lines, counts = spans(faces, bg, POOL_NODES)
     return {
@@ -402,24 +415,24 @@ def build(s):
 def driller_views(db_path, out):
     """Every Driller entrance view's faces, from the whole-view model
     (tools/model/render.py), as scenes: what the rasteriser gets in the
-    game. The model has no horizon yet, so a level camera's goes through the
-    view's centre. Derived from the originals, so built, never committed."""
+    game, with no horizon, as the render has it (decision 8a: the sky is
+    the background, the ground the floor object's face). Derived from the
+    originals, so built, never committed."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tools.model import camera as cam, parts, render, view
+    from tools.model import camera as cam, parts, render
 
     db = json.loads(Path(db_path).read_text())
     scenes = []
     for area, entrance, camera in cam.entrance_views(db):
         v = render.render(db, area, camera)
-        level = getattr(camera, "pitch", 0) == 0 and getattr(camera, "roll", 0) == 0
         scenes.append(build({
             "name": render.name(area, entrance),
             "sky": list(parts.sky(area)), "ground": list(parts.ground(area)),
-            "horizon": [view.XC, view.YC, 64, 0] if level else None,
+            "horizon": None,
             "faces": [(list(parts.pattern(area, f.colour)), [list(p) for p in f.poly]) for f in v.faces],
         }))
     Path(out).write_text(json.dumps({"scenes": scenes}) + "\n")
-    print(f"{len(scenes)} of Driller's entrance views, each the same as the model's brute force")
+    print(f"{len(scenes)} of Driller's entrance views, checked against the model's brute force")
 
 
 def main():
@@ -436,7 +449,7 @@ def main():
     scenes = [built(s) for s in edge_scenes() + driller_scenes() + random_scenes()]
     seqs = [{"name": q["name"], "frames": [built(s) for s in q["frames"]]} for q in sequences()]
     Path(sys.argv[1]).write_text(json.dumps({"scenes": scenes, "sequences": seqs}) + "\n")
-    print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, each the same as the model's brute force")
+    print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, checked against the model's brute force")
 
 
 if __name__ == "__main__":
