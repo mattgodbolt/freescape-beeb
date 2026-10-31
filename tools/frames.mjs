@@ -457,13 +457,14 @@ console.log(`frames: ${flips} flips, ${writes} screen writes checked; the latest
 checking = false;
 
 // The keys: each alone, then with O held.
+// (the ZX's keys, decision 10: ESCAPE is its 1, COPY and the cursor keys
+// its cursor joystick's 0 and 5-8)
 const KEYS = {
-    O: "K_FORWARD", K: "K_BACK", Q: "K_TURN_LEFT", W: "K_TURN_RIGHT",
-    P: "K_LOOK_UP", L: "K_LOOK_DOWN", N: "K_ROLL_LEFT", M: "K_ROLL_RIGHT",
-    R: "K_RISE", F: "K_FALL", U: "K_UTURN", K0: "K_FIRE", K5: "K_FIRE", COPY: "K_FIRE",
-    A: "K_ANGLE_UP", Z: "K_ANGLE_DOWN", S: "K_STEP_UP", X: "K_STEP_DOWN",
-    D: "K_DRILL", C: "K_COLLECT", SPACE: "K_MODE", I: "K_INFO", T: "K_SOUND", ESCAPE: "K_ESCAPE",
-    UP: "K_CUR_UP", DOWN: "K_CUR_DOWN", LEFT: "K_CUR_LEFT", RIGHT: "K_CUR_RIGHT",
+    O: "K_O", K: "K_K", Q: "K_Q", W: "K_W", P: "K_P", L: "K_L", N: "K_N", M: "K_M",
+    R: "K_R", F: "K_F", U: "K_U", A: "K_A", Z: "K_Z", S: "K_S", X: "K_X",
+    K0: "K_0", K5: "K_5", K6: "K_6", K7: "K_7", K8: "K_8",
+    D: "K_D", C: "K_C", SPACE: "K_SPACE", B: "K_B", I: "K_I", T: "K_T", Y: "K_Y",
+    ESCAPE: "K_1", COPY: "K_0", UP: "K_7", DOWN: "K_6", LEFT: "K_5", RIGHT: "K_8",
 };
 const KEYS_BYTES = sym("KEYS_BYTES");
 const bitmap = (at) => Array.from(ram.subarray(at, at + KEYS_BYTES));
@@ -492,7 +493,7 @@ for (const [key, name] of Object.entries(KEYS)) {
     let ok = true;
     if (!same(held, bits(name))) ok = fail(`${key} held: keys ${show(held)}, not ${name}'s ${show(bits(name))}`);
     if (!same(made, bits(name))) ok = fail(`${key} made: keys_made ${show(made)}, not ${name}'s`);
-    if (!same(both, bits(name, "K_FORWARD"))) ok = fail(`${key} with O: keys ${show(both)}`);
+    if (!same(both, bits(name, "K_O"))) ok = fail(`${key} with O: keys ${show(both)}`);
     if (!same(after, bits())) ok = fail(`${key} released: keys ${show(after)}`);
     if (ok !== false) keysOk++;
 }
