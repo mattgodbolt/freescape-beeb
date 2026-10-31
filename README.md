@@ -14,7 +14,7 @@ Master. The disc follows the work as it lands, so it's in progress.
 
 *2026-10-31.* The disc boots into MODE 2, double-buffered in main and
 shadow RAM with the flip at the vertical sync, and draws a moving test
-pattern where the 3D view will go, at 25 frames a second. Driller's own
+pattern where the 3D view will go. Driller's own
 ZX code runs headless as the oracle and draws every entrance view, so the
 engine has its reference. The Python model of the renderer, the maths,
 the span buffer and row writer, and the colours are being built in

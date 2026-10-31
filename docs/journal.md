@@ -48,3 +48,25 @@ with `make frames` (jsbeeb's full video, 10s a run):
   - interrupts held off for longer than the flip's window, and for
     longer than a field;
   - an interrupt longer than a field.
+
+## 2026-10-31: the ZX oracle (track D)
+
+Driller's ZX tape loads headless in SkoolKit's simulator, past its copy
+protection and menu, to the main loop in play (`tools/zx.py --boot`).
+The original's own redraw then draws any view (`--view AREA:ENTRANCE`),
+and `make zxviews` draws all 65 entrance views into `build/zx/views/`.
+`docs/research/zx-driller.md` has what it found, with addresses: a cell is
+64 world units and the camera's position is the eye; the matrix is
+`S · Rroll · Rpitch · Ryaw` in signed bytes, each step rounded; the
+projection is `104 + 104·X/Z` across and `52 + 52·Y/Z` up, with `S`
+giving both axes the same focal length; there's no near plane, only the
+pyramid from the eye; and the sort is ScummVM's but with the area's
+objects before the globals. `tools/zx_arith.py` copies the original's
+maths, and its check calls the original's own routines on random inputs:
+no case differed.
+
+Measured that day (48K timing, with contention and the game's interrupt):
+a redraw takes a median of 2,293,923 T-states (0.66s), from 670,879 to
+4,273,507 over the 65 views. Projection is 63% of it, the sort 11% and
+drawing 26%. The start view matches the frame the game drew at boot byte
+for byte.
