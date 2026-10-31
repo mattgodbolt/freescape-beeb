@@ -102,8 +102,10 @@ which owns the machine and makes no OS call.
 - **Units.** Object positions and sizes are bytes in the original's cells.
   The engine's world unit is the one Driller's camera moves in, so an
   object's corner in world units is its cell coordinate times a constant
-  `CELL`. The data track establishes `CELL` and the camera's units from
-  the original and ScummVM, and records them here.
+  `CELL`, **64**, as the original's (`docs/research/model.md`, "Units").
+  The camera's position is the eye, in the same units, 16-bit; an
+  entrance puts it at its cell's middle across, `64·L·scale − 32` above
+  the cell's floor (`L` the probe's extension, 2 at the start).
 
 ## 4. The frame
 
