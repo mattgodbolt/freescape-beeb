@@ -99,10 +99,18 @@ def case(db, layout, a_index, area, camera, name):
             "slot": slots[cand.index], "mask": mask, "vmask": vmask, "verts": verts,
             "faces": [[f.colour, [list(p) for p in f.poly]] for f in faces],
         })
+    # The area's floor object (decision 8a), for the cycles' accounting.
+    floor = None
+    fid = parts.colours.floor(area) if hasattr(parts.colours, "floor") else None
+    for i, o in enumerate(area["objects"]):
+        if o["id"] == fid and o["type"] != 0 and i in slots:
+            floor = slots[i]
+            break
     return {
         "name": name, "area": a_index,
         "camera": [camera.x, camera.y, camera.z, camera.yaw, camera.pitch, camera.roll],
         "matrix": [v for row in m for v in row],
+        "floor": floor,
         "cands": rows,
         "order": [slots[d[0].index] for d in ordered],
         "out": [[f.colour, [list(p) for p in f.poly]] for f in out],

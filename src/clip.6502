@@ -1,30 +1,35 @@
 \ ***************************************************************************
 \ FREESCAPE for the BBC Master - a candidate's faces: the near clip, the
-\ side planes, the guard band, the projection and the 2D clip
-\ (docs/engine.md, stages 4-6; tools/model/clip.py, and render.py's
-\ draw_faces, which this follows step for step)
+\ guard band, the projection and the 2D clip (docs/engine.md, stages 4-6;
+\ tools/model/clip.py, and render.py's draw_faces, which this follows step
+\ for step)
 \
 \ For each face the camera sees, in its object's face order:
 \
 \ - the near clip: if a vertex is nearer than ZNEAR, the face is clipped
-\   against that plane in 3D (Sutherland-Hodgman; a line as a segment);
+\   against that plane in 3D (Sutherland-Hodgman; a line as a segment),
+\   each new coordinate the model's round_div exactly (umul32, rdiv);
 \   nothing left means it isn't drawn;
-\ - the side planes: each vertex's outcode, exactly (A p > B z, as the
-\   model's outcode()); a face with every vertex outside one plane isn't
-\   drawn;
 \ - the guard band (decision 17): a face with a vertex outside |X| <= 16 Z
-\   or |Y| <= 8 Z is clipped against those planes in 3D;
-\ - each vertex projected (the maths' project); a line widened to the quad
-\   a one-pixel line covers, a point to its pixel's square;
-\ - the 2D clip against the view's rectangle if a vertex was outside a
-\   side plane or the face was widened, else repeated vertices dropped;
-\ - drawn if three or more vertices are left and they have an area.
+\   or |Y| <= 8 Z is clipped against those planes in 3D, by crossings;
+\ - each vertex projected (the maths' project), and its outcode against the
+\   view's rectangle found from the projection (the model's outcode2d); a
+\   face with every vertex beyond one edge isn't drawn;
+\ - a line widened to the quad a one-pixel line covers, a point to its
+\   pixel's square;
+\ - the 2D clip against the view's rectangle if a vertex was beyond an edge
+\   or the face was widened, by crossings; else repeated vertices dropped;
+\ - drawn if three or more vertices are left, not all on one line.
 \
-\ A vertex the object's faces share is classified, tested against the
-\ guard band and projected once (vflag's VF_* bits say which it has been).
-\ The clips' new vertices are vertices VMAX onwards of the same arrays,
-\ made afresh for each face. Every new coordinate is the model's round_div
-\ exactly: a product and a long division (umul32, rdiv).
+\ A crossing (the model's crossing_t and lerp) is one fraction t =
+\ floor(2^16 f_P / (f_P - f_Q)) from the edge's inside end P (frac16), and
+\ each coordinate P + (Q - P) t / 2^16 rounded half up (lerp).
+\
+\ A vertex the object's faces share is tested against the guard band and
+\ projected once (vflag's VF_* bits say which it has been). The clips' new
+\ vertices are vertices VMAX onwards of the same arrays, made afresh for
+\ each face. After the guard band every projection fits 16 bits, so the
+\ 2D polygons are 16-bit.
 \
 \ A drawn face's polygon goes into the output's vertices (out_vx*, out_vy*:
 \ view coordinates, 16-bit) and its record into tf_* in the order found;
@@ -43,21 +48,25 @@ OUT_FACES   = 128                   ; faces a frame draws, at most
 OUT_VERTS   = 256                   ; their vertices
 OC_LEFT = 2 : OC_RIGHT = 4 : OC_TOP = 8 : OC_BOTTOM = 16
 VF_NEAR     = &80                   ; vflag: nearer than ZNEAR (transform_object's)
-VF_CODED    = &40                   ; ... voc holds its outcode
-VF_PROJ     = &20                   ; ... vsx, vsy hold its projection
-VF_GTEST    = &10                   ; ... tested against the guard band ...
-VF_GOUT     = &08                   ; ... and outside it
+VF_GTEST    = &40                   ; ... tested against the guard band ...
+VF_GOUT     = &20                   ; ... and outside it
+VF_PROJ     = &10                   ; ... projected: vsx, vsy and voc hold it
 CLIP_W      = SUB * VIEW_W          ; the view's rectangle, in view coordinates
 CLIP_H      = SUB * VIEW_H
 HALF        = SUB DIV 2
-ASSERT CLIP_W < &8000 AND CLIP_H < &8000
 \ A face's near clip makes two vertices at most, and each of the guard
 \ band's four planes two more.
 ASSERT VMAX + 2 + 4 * 2 <= VALL
 ASSERT ZNEAR >= PROJ_ZNEAR          ; the projection takes what the near clip leaves
+\ Inside the guard band a projection is within 16 FX (8 FY) of the centre,
+\ so the 2D clip's coordinates, their distances from the view's edges and
+\ the differences of two (a crossing's denominator) all fit 16 bits.
+ASSERT PROJ_XC + (VIEW_FX << GUARD_XS) + CLIP_W < &8000
+ASSERT PROJ_YC + (VIEW_FY << GUARD_YS) + CLIP_H < &8000
 
 SECTION ObjWork
-.voc        SKIP VALL               ; a vertex's outcode
+.voc        SKIP VALL               ; a vertex's outcode against the view's rectangle
+.vbc        SKIP VALL               ; ... and the planes beyond its sides (vertex_guard)
 .vsxl       SKIP VALL               ; its projection
 .vsxh       SKIP VALL
 .vsyl       SKIP VALL
@@ -69,21 +78,18 @@ SECTION ObjWork
 .gf1        SKIP NPOLY
 .gf2        SKIP NPOLY
 .gf3        SKIP NPOLY
-\ the 2D polygons, 24-bit coordinates: the clip's passes go from one
+\ the 2D polygons, 16-bit coordinates: the clip's passes go from one
 \ buffer to the other and back
-.pa_x0      SKIP NP2
-.pa_x1      SKIP NP2
-.pa_x2      SKIP NP2
-.pa_y0      SKIP NP2
-.pa_y1      SKIP NP2
-.pa_y2      SKIP NP2
-.pb_x0      SKIP NP2
-.pb_x1      SKIP NP2
-.pb_x2      SKIP NP2
-.pb_y0      SKIP NP2
-.pb_y1      SKIP NP2
-.pb_y2      SKIP NP2
-.p_in       SKIP NP2 + 1            ; a pass's inside flags, the first again at the end
+.pa_xl      SKIP NP2
+.pa_xh      SKIP NP2
+.pa_yl      SKIP NP2
+.pa_yh      SKIP NP2
+.pb_xl      SKIP NP2
+.pb_xh      SKIP NP2
+.pb_yl      SKIP NP2
+.pb_yh      SKIP NP2
+.p_fl       SKIP NP2 + 1            ; a pass's f (bound - v, or v - bound) for each
+.p_fh       SKIP NP2 + 1            ; vertex, the first again after the last
 .p_n        SKIP 1                  ; the 2D polygon's vertices
 \ the faces drawn, in the order found
 .tf_n       SKIP 1
@@ -316,227 +322,6 @@ SECTION ObjCode
 .done
     RTS
 }
-
-\ smul16: sp (4 bytes, signed) = sa * sb, each signed 16-bit.
-.smul16
-{
-    ZA_AUTO2 sa, sb
-    ZA_AUTO 4, sp
-    ZA_AUTO1 sign
-    LDA sa+1 : EOR sb+1 : STA sign
-    LDA sa+1 : BPL a_pos
-    LDA #0 : SEC : SBC sa : STA sa
-    LDA #0 : SBC sa+1 : STA sa+1
-.a_pos
-    LDA sb+1 : BPL b_pos
-    LDA #0 : SEC : SBC sb : STA sb
-    LDA #0 : SBC sb+1 : STA sb+1
-.b_pos
-    LDA sa : LDY sb : JSR umul8
-    LDA umul8.up : STA sp
-    LDA umul8.up+1 : STA sp+1
-    STZ sp+2 : STZ sp+3
-    LDY sb+1 : BEQ no_b1
-    LDA sa : JSR umul8
-    LDA sp+1 : CLC : ADC umul8.up : STA sp+1
-    LDA sp+2 : ADC umul8.up+1 : STA sp+2
-.no_b1
-    LDA sa+1 : BEQ signed
-    LDY sb : JSR umul8
-    LDA sp+1 : CLC : ADC umul8.up : STA sp+1
-    LDA sp+2 : ADC umul8.up+1 : STA sp+2
-    BCC no_carry
-    INC sp+3
-.no_carry
-    LDY sb+1 : BEQ signed
-    LDA sa+1 : JSR umul8
-    LDA sp+2 : CLC : ADC umul8.up : STA sp+2
-    LDA sp+3 : ADC umul8.up+1 : STA sp+3
-.signed
-    BIT sign : BPL done
-    NEG4 sp
-.done
-    RTS
-}
-
-\ ===========================================================================
-\ The side planes: outcode, the model's, for a vertex at or beyond ZNEAR.
-
-\ OC_SIDE a, b, shi, gs: C set if a op > b oz (outcode's op and oz,
-\ unsigned 24-bit), by oc_side; and if so, code's OC_GUARD set if op >
-\ oz << gs, outside the guard band too
-MACRO OC_SIDE a, b, shi, gs
-    LDA #LO(a) : STA oc_exact.ka
-    LDA #HI(a) : STA oc_exact.ka+1
-    LDA #LO(b) : STA oc_exact.kb
-    LDA #HI(b) : STA oc_exact.kb+1
-    LDX #shi
-    JSR oc_side
-    BCC inside
-    LDX #gs
-    JSR oc_guard
-    SEC
-.inside
-ENDMACRO
-ASSERT OC_L_SLO = OC_L_SHI + 1 AND OC_R_SLO = OC_R_SHI + 1
-ASSERT OC_T_SLO = OC_T_SHI + 1 AND OC_B_SLO = OC_B_SHI + 1
-OC_GUARD = &80                      ; outcode's: outside the guard band (not a plane's bit)
-
-\ OC_CMP t: C set if outcode.op >= t (3 bytes)
-MACRO OC_CMP t
-    LDA outcode.op+0 : CMP t+0
-    LDA outcode.op+1 : SBC t+1
-    LDA outcode.op+2 : SBC t+2
-ENDMACRO
-
-\ oc_side: C set if ka op > kb oz (oc_exact's), w = oz >> X: outside from w
-\ on, inside below w/2 and below 5w/8, outside from 6w/8, each rounded down
-\ (tools/mkareas.py's outcode_shifts); between, the products decide.
-.oc_side
-{
-    ZA_AUTO 3, w
-    ZA_AUTO 3, w8
-    LDA outcode.oz+2 : STA w+2
-    LDA outcode.oz+1 : STA w+1
-    LDA outcode.oz+0 : STA w+0
-    CPX #0 : BEQ shifted
-.shift
-    LSR w+2 : ROR w+1 : ROR w+0
-    DEX : BNE shift
-.shifted
-    OC_CMP w : BCS done             ; (C set: outside)
-    LSR w+2 : ROR w+1 : ROR w+0     ; w/2
-    OC_CMP w : BCC done             ; (C clear: inside)
-    LDA w+2 : LSR A : STA w8+2
-    LDA w+1 : ROR A : STA w8+1
-    LDA w+0 : ROR A : STA w8+0
-    LSR w8+2 : ROR w8+1 : ROR w8+0  ; w/8, from w/2
-    LDA w+0 : CLC : ADC w8+0 : STA w+0
-    LDA w+1 : ADC w8+1 : STA w+1
-    LDA w+2 : ADC w8+2 : STA w+2    ; 5w/8
-    OC_CMP w : BCC done
-    LDA w+0 : CLC : ADC w8+0 : STA w+0
-    LDA w+1 : ADC w8+1 : STA w+1
-    LDA w+2 : ADC w8+2 : STA w+2    ; 6w/8
-    OC_CMP w : BCS done
-    JMP oc_exact
-.done
-    RTS
-}
-
-\ oc_guard: outcode's code gets OC_GUARD if op > oz << X (X > 0).
-.oc_guard
-{
-    ZA_AUTO 4, g
-    LDA outcode.oz+0 : STA g+0
-    LDA outcode.oz+1 : STA g+1
-    LDA outcode.oz+2 : STA g+2
-    STZ g+3
-.shift
-    ASL g+0 : ROL g+1 : ROL g+2 : ROL g+3
-    DEX : BNE shift
-    \ g - op borrows if op > g
-    LDA g+0 : CMP outcode.op+0
-    LDA g+1 : SBC outcode.op+1
-    LDA g+2 : SBC outcode.op+2
-    LDA g+3 : SBC #0
-    BCS inside
-    LDA #OC_GUARD : TSB outcode.code
-.inside
-    RTS
-}
-
-\ outcode: A = the planes vertex (ox, oy, oz) is outside (OC_*), oz at
-\ least ZNEAR, and OC_GUARD if it's outside the guard band (the model's
-\ outside_guard): a vertex inside a side's plane is well inside the band's
-\ (ASSERTed), so only one outside a plane is tested.
-.outcode
-{
-    ZA_AUTO 3, ox
-    ZA_AUTO 3, oy
-    ZA_AUTO 3, oz
-    ZA_AUTO 3, op
-    ZA_AUTO1 code
-    STZ code
-    LDA ox+2 : BMI x_neg
-    STA op+2
-    LDA ox+1 : STA op+1
-    LDA ox+0 : STA op+0
-    ORA op+1 : ORA op+2 : BEQ y_side
-    OC_SIDE OC_R_A, OC_R_B, OC_R_SHI, GUARD_XS
-    BCC y_side
-    LDA #OC_RIGHT : TSB code
-    BRA y_side
-.x_neg
-    LDA #0 : SEC : SBC ox+0 : STA op+0
-    LDA #0 : SBC ox+1 : STA op+1
-    LDA #0 : SBC ox+2 : STA op+2
-    OC_SIDE OC_L_A, OC_L_B, OC_L_SHI, GUARD_XS
-    BCC y_side
-    LDA #OC_LEFT : TSB code
-.y_side
-    LDA oy+2 : BMI y_neg
-    STA op+2
-    LDA oy+1 : STA op+1
-    LDA oy+0 : STA op+0
-    ORA op+1 : ORA op+2 : BEQ coded
-    OC_SIDE OC_T_A, OC_T_B, OC_T_SHI, GUARD_YS
-    BCC coded
-    LDA #OC_TOP : TSB code
-    BRA coded
-.y_neg
-    LDA #0 : SEC : SBC oy+0 : STA op+0
-    LDA #0 : SBC oy+1 : STA op+1
-    LDA #0 : SBC oy+2 : STA op+2
-    OC_SIDE OC_B_A, OC_B_B, OC_B_SHI, GUARD_YS
-    BCC coded
-    LDA #OC_BOTTOM : TSB code
-.coded
-    LDA code
-    RTS
-}
-\ Inside a side's plane (B z >= A p) is inside the guard band's (p <= z <<
-\ gs): B < A 2^gs.
-ASSERT OC_L_B < OC_L_A << GUARD_XS AND OC_R_B < OC_R_A << GUARD_XS
-ASSERT OC_T_B < OC_T_A << GUARD_YS AND OC_B_B < OC_B_A << GUARD_YS
-
-\ oc_exact: C set if ka op > kb oz (ka and kb 16-bit): the products in full.
-.oc_exact
-{
-    ZA_AUTO2 ka, kb
-    ZA_AUTO 5, lhs
-    LDA ka : STA umul32.mb+0
-    LDA ka+1 : STA umul32.mb+1
-    STZ umul32.mb+2 : STZ umul32.mb+3
-    LDA outcode.op+0 : STA umul32.ma+0
-    LDA outcode.op+1 : STA umul32.ma+1
-    LDA outcode.op+2 : STA umul32.ma+2
-    STZ umul32.ma+3
-    JSR umul32
-    FOR k = 0..4
-        LDA udiv.uu + k : STA lhs + k
-    NEXT
-    LDA kb : STA umul32.mb+0
-    LDA kb+1 : STA umul32.mb+1
-    STZ umul32.mb+2 : STZ umul32.mb+3
-    LDA outcode.oz+0 : STA umul32.ma+0
-    LDA outcode.oz+1 : STA umul32.ma+1
-    LDA outcode.oz+2 : STA umul32.ma+2
-    STZ umul32.ma+3
-    JSR umul32
-    \ rhs - lhs: a borrow (C clear) means lhs > rhs, outside
-    LDA udiv.uu+0 : CMP lhs+0
-    FOR k = 1..4
-        LDA udiv.uu + k : SBC lhs + k
-    NEXT
-    BCC outside
-    CLC
-    RTS
-.outside
-    SEC
-    RTS
-}
-
 \ ===========================================================================
 \ The near clip.
 
@@ -670,15 +455,177 @@ ASSERT OC_T_B < OC_T_A << GUARD_YS AND OC_B_B < OC_B_A << GUARD_YS
 }
 
 \ ===========================================================================
+\ Crossings (the model's crossing_t and lerp).
+
+\ frac16: ft = floor(2^16 fp / fd), fp (4 bytes, at least 0) below fd (4
+\ bytes): sixteen steps of a long division, the remainder in fp. Two bytes
+\ of remainder when fd is below 2^16, else four.
+.frac16
+{
+    ZA_AUTO 4, fp
+    ZA_AUTO 4, fd
+    ZA_AUTO2 ft
+    LDX #16
+    LDA fd+3 : ORA fd+2 : BNE wide
+.narrow
+    ASL fp : ROL fp+1
+    BCS narrow_take                 ; (past 16 bits: at least fd)
+    LDA fp : CMP fd
+    LDA fp+1 : SBC fd+1
+    BCC narrow_bit
+.narrow_take
+    LDA fp : SBC fd : STA fp        ; (C set either way)
+    LDA fp+1 : SBC fd+1 : STA fp+1
+    SEC
+.narrow_bit
+    ROL ft : ROL ft+1
+    DEX : BNE narrow
+    RTS
+.wide
+    ASL fp : ROL fp+1 : ROL fp+2 : ROL fp+3
+    BCS wide_take
+    LDA fp : CMP fd
+    LDA fp+1 : SBC fd+1
+    LDA fp+2 : SBC fd+2
+    LDA fp+3 : SBC fd+3
+    BCC wide_bit
+.wide_take
+    LDA fp : SBC fd : STA fp
+    LDA fp+1 : SBC fd+1 : STA fp+1
+    LDA fp+2 : SBC fd+2 : STA fp+2
+    LDA fp+3 : SBC fd+3 : STA fp+3
+    SEC
+.wide_bit
+    ROL ft : ROL ft+1
+    DEX : BNE wide
+    RTS
+}
+
+\ lerp: lr (3 bytes) = round half up of ld (32-bit signed) frac16.ft /
+\ 2^16, modulo 2^24 (the callers add it to a 24-bit coordinate, and the sum
+\ fits).
+.lerp
+{
+    ZA_AUTO 4, ld
+    ZA_AUTO 3, lr
+    ZA_AUTO1 neg
+    LDA ld+3 : STA neg : BPL positive
+    NEG4 ld
+.positive
+    FOR k = 0..3
+        LDA ld + k : STA umul32.ma + k
+    NEXT
+    LDA frac16.ft : STA umul32.mb
+    LDA frac16.ft+1 : STA umul32.mb+1
+    STZ umul32.mb+2 : STZ umul32.mb+3
+    JSR umul32
+    \ (|product| + 2^15) >> 16 rounds a positive one half up; for a negative
+    \ one it's -((|product| + 2^15 - 1) >> 16). So &7FFF plus C, with C set
+    \ for a positive product, then >> 16.
+    LDA neg : EOR #&80 : ASL A
+    LDA udiv.uu+0 : ADC #&FF
+    LDA udiv.uu+1 : ADC #&7F
+    LDA udiv.uu+2 : ADC #0 : STA lr+0
+    LDA udiv.uu+3 : ADC #0 : STA lr+1
+    LDA udiv.uu+4 : ADC #0 : STA lr+2
+    BIT neg : BPL done
+    LDA #0 : SEC : SBC lr+0 : STA lr+0
+    LDA #0 : SBC lr+1 : STA lr+1
+    LDA #0 : SBC lr+2 : STA lr+2
+.done
+    RTS
+}
+
+
+\ ===========================================================================
 \ The guard band (decision 17; the model's outside_guard and guard_clip).
 
-\ Whether a vertex is outside the band is found with its outcode
-\ (outcode's OC_GUARD, kept in vflag's VF_GOUT).
+\ vertex_guard: vertex Y against the planes beyond the view's sides and
+\ the guard band, once a vertex (vflag, vbc): A = which of x = -z, x = z,
+\ 2y = z, 2y = -z it's beyond (the model's beyond: OC_LEFT, OC_RIGHT,
+\ OC_TOP, OC_BOTTOM), and C set if it's outside the guard band (the
+\ model's outside_guard: |x| > z << GUARD_XS or |y| > z << GUARD_YS). Only
+\ a vertex beyond one of the planes can be outside the band. Y is kept.
+.vertex_guard
+{
+    ZA_AUTO 4, ga
+    ZA_AUTO 4, g
+    ZA_AUTO1 code
+    LDA vflag,Y : BIT #VF_GTEST : BEQ test
+    AND #VF_GOUT : CMP #1
+    LDA vbc,Y
+    RTS
+.test
+    ORA #VF_GTEST : STA vflag,Y
+    STZ code
+    \ |x| against z
+    STZ ga+3
+    LDA vx2,Y : BPL x_pos
+    LDA #0 : SEC : SBC vx0,Y : STA ga
+    LDA #0 : SBC vx1,Y : STA ga+1
+    LDA #0 : SBC vx2,Y : STA ga+2
+    LDA #OC_LEFT
+    BRA x_got
+.x_pos
+    STA ga+2
+    LDA vx1,Y : STA ga+1
+    LDA vx0,Y : STA ga
+    LDA #OC_RIGHT
+.x_got
+    LDX #GUARD_XS : JSR beyond
+    \ 2 |y| against z, and against z << (GUARD_YS + 1) for the band
+    LDA vy2,Y : BPL y_pos
+    LDA #0 : SEC : SBC vy0,Y : STA ga
+    LDA #0 : SBC vy1,Y : STA ga+1
+    LDA #0 : SBC vy2,Y : STA ga+2
+    LDA #OC_BOTTOM
+    BRA y_got
+.y_pos
+    STA ga+2
+    LDA vy1,Y : STA ga+1
+    LDA vy0,Y : STA ga
+    LDA #OC_TOP
+.y_got
+    STZ ga+3
+    ASL ga : ROL ga+1 : ROL ga+2 : ROL ga+3
+    LDX #GUARD_YS + 1 : JSR beyond
+    LDA code : STA vbc,Y
+    LDA vflag,Y : AND #VF_GOUT : CMP #1
+    LDA code
+    RTS
+\ beyond: if ga > (vertex Y's z), code gets A, and if ga > z << X too,
+\ vflag's VF_GOUT is set
+.beyond
+    PHA
+    LDA vz0,Y : CMP ga
+    LDA vz1,Y : SBC ga+1
+    LDA vz2,Y : SBC ga+2
+    LDA #0 : SBC ga+3
+    PLA
+    BCS done                        ; (ga <= z)
+    TSB code
+    LDA vz0,Y : STA g
+    LDA vz1,Y : STA g+1
+    LDA vz2,Y : STA g+2
+    STZ g+3
+.shift
+    ASL g : ROL g+1 : ROL g+2 : ROL g+3
+    DEX : BNE shift
+    \ g - ga borrows if ga > g
+    LDA g : CMP ga
+    LDA g+1 : SBC ga+1
+    LDA g+2 : SBC ga+2
+    LDA g+3 : SBC ga+3
+    BCS done
+    LDA vflag,Y : ORA #VF_GOUT : STA vflag,Y
+.done
+    RTS
+}
 ASSERT GUARD_XS > 0 AND GUARD_YS > 0
 
-\ guard_f: gf*,X = plane's f for vertex Y, g z - s v (guard_clip's plane:
-\ 0 x <= 16 z, 1 -x <= 16 z, 2 y <= 8 z, 3 -y <= 8 z), 32-bit. X and Y are
-\ kept.
+\ guard_f: gf*,X = guard_clip.plane's f for vertex Y, g z - s v (the model's
+\ GUARD_PLANES: 0 x <= 16 z, 1 -x <= 16 z, 2 y <= 8 z, 3 -y <= 8 z), 32-bit.
+\ X and Y are kept.
 .guard_f
 {
     ZA_AUTO 4, f
@@ -720,92 +667,81 @@ ASSERT GUARD_XS > 0 AND GUARD_YS > 0
     RTS
 }
 
-\ GP_AXIS a0, a1, a2: guard_point's new vertex on one axis (its arrays
-\ a0-a2): a + round_div((b - a) fa, fa - fb)
+\ GP_AXIS a0, a1, a2: guard_point's new vertex on one axis (its arrays):
+\ P + lerp(Q - P)
 MACRO GP_AXIS a0, a1, a2
-    LDX guard_point.ia : LDY guard_point.ib
-    LDA a2,X : ASL A : SEXT : STA guard_point.sa
-    LDA a2,Y : ASL A : SEXT : PHA
-    LDA a0,Y : SEC : SBC a0,X : STA guard_point.e+0
-    LDA a1,Y : SBC a1,X : STA guard_point.e+1
-    LDA a2,Y : SBC a2,X : STA guard_point.e+2
-    PLA : SBC guard_point.sa : STA guard_point.e+3
-    JSR guard_point.cut
-    LDY next_new : LDX guard_point.ia
-    LDA udiv.uu+0 : CLC : ADC a0,X : STA a0,Y
-    LDA udiv.uu+1 : ADC a1,X : STA a1,Y
-    LDA udiv.uu+2 : ADC a2,X : STA a2,Y
+    LDX guard_point.ip : LDY guard_point.iq
+    LDA a2,X : ASL A : SEXT : STA guard_point.sp
+    LDA a2,Y : ASL A : SEXT : STA guard_point.sq
+    LDA a0,Y : SEC : SBC a0,X : STA lerp.ld+0
+    LDA a1,Y : SBC a1,X : STA lerp.ld+1
+    LDA a2,Y : SBC a2,X : STA lerp.ld+2
+    LDA guard_point.sq : SBC guard_point.sp : STA lerp.ld+3
+    JSR lerp
+    LDY next_new : LDX guard_point.ip
+    LDA lerp.lr+0 : CLC : ADC a0,X : STA a0,Y
+    LDA lerp.lr+1 : ADC a1,X : STA a1,Y
+    LDA lerp.lr+2 : ADC a2,X : STA a2,Y
 ENDMACRO
 
-\ guard_point: vertex next_new = where the edge from fq_idx's entry X to
-\ entry Y crosses guard_clip's plane (the model's _plane_point(a, b, fa,
-\ fb), f in gf*): a + round_div((b - a) fa, fa - fb) on each axis.
+\ guard_point: vertex next_new = the crossing (the model's crossing) of the
+\ edge from fq_idx's entry X, inside the plane (gf >= 0), to entry Y,
+\ outside it.
 .guard_point
 {
-    ZA_AUTO1 ia, ib, sa, sfd
-    ZA_AUTO 4, fa
-    ZA_AUTO 4, dd
-    ZA_AUTO 4, e
-    LDA fq_idx,X : STA ia
-    LDA fq_idx,Y : STA ib
-    LDA gf0,X : STA fa+0
-    LDA gf1,X : STA fa+1
-    LDA gf2,X : STA fa+2
-    LDA gf3,X : STA fa+3
-    LDA fa+0 : SEC : SBC gf0,Y : STA dd+0
-    LDA fa+1 : SBC gf1,Y : STA dd+1
-    LDA fa+2 : SBC gf2,Y : STA dd+2
-    LDA fa+3 : SBC gf3,Y : STA dd+3
-    \ their signs EORed, and their sizes
-    LDA fa+3 : EOR dd+3 : STA sfd
-    LDA fa+3 : BPL fa_pos
-    NEG4 fa
-.fa_pos
-    LDA dd+3 : BPL dd_pos
-    NEG4 dd
-.dd_pos
+    ZA_AUTO1 ip, iq, sp, sq
+    LDA fq_idx,X : STA ip
+    LDA fq_idx,Y : STA iq
+    LDA gf0,X : STA frac16.fp+0
+    SEC : SBC gf0,Y : STA frac16.fd+0
+    LDA gf1,X : STA frac16.fp+1
+    SBC gf1,Y : STA frac16.fd+1
+    LDA gf2,X : STA frac16.fp+2
+    SBC gf2,Y : STA frac16.fd+2
+    LDA gf3,X : STA frac16.fp+3
+    SBC gf3,Y : STA frac16.fd+3
+    JSR frac16
     GP_AXIS vx0, vx1, vx2
     GP_AXIS vy0, vy1, vy2
     GP_AXIS vz0, vz1, vz2
     LDY next_new
     LDA #0 : STA vflag,Y
     RTS
-\ cut: udiv.uu = round_div(e fa, dd)
-.cut
-    LDA e+3 : EOR sfd : STA rdiv.neg
-    LDA e+3 : BPL e_pos
-    NEG4 e
-.e_pos
-    FOR k = 0..3
-        LDA e + k : STA umul32.ma + k
-        LDA fa + k : STA umul32.mb + k
-    NEXT
-    JSR umul32
-    FOR k = 0..3
-        LDA dd + k : STA udiv.uv + k
-    NEXT
-    JMP rdiv
 }
 
+\ GUARD_CUT: a guard_point from entry X (inside) to entry Y into fg_idx
+MACRO GUARD_CUT
+    JSR guard_point
+    LDY guard_clip.m : LDA next_new : STA fg_idx,Y
+    INC guard_clip.m : INC next_new
+ENDMACRO
+
 \ guard_clip: fq_idx's A vertices, all at or beyond ZNEAR, clipped to the
-\ guard band's four planes (the model's guard_clip: x <= 16 z, -x <= 16 z,
-\ y <= 8 z, -y <= 8 z, in that order; a line as a segment), back into
-\ fq_idx: the count left in A (Z set if none).
+\ guard band's four planes in turn (the model's guard_clip; a line as a
+\ segment), back into fq_idx: the count left in A (Z set if none). A plane
+\ with every vertex inside leaves the polygon as it is.
 .guard_clip
 {
-    ZA_AUTO1 plane, n, i, m, ib
+    ZA_AUTO1 plane, n, i, m, ib, out
     STA n
     STZ plane
 .plane_loop
     LDA n : BNE planed
     JMP done
 .planed
+    STZ out
     LDX #0
 .f
     LDY fq_idx,X
     JSR guard_f
+    LDA gf3,X : TSB out             ; (bit 7: one's outside)
     INX : CPX n : BNE f
-    LDA n : CMP #2 : BEQ segment
+    BIT out : BMI clip
+    JMP next_plane
+.clip
+    LDA n : CMP #2 : BNE polygon
+    JMP segment
+.polygon
     STZ m
     STZ i
 .edge
@@ -817,12 +753,15 @@ ENDMACRO
     LDX i
     LDA gf3,X : BMI a_out
     LDY m : LDA fq_idx,X : STA fg_idx,Y : INC m
+    LDY ib
+    LDA gf3,Y : BPL next            ; both in
+    GUARD_CUT                       ; (X = i, Y = ib)
+    BRA next
 .a_out
     LDY ib
-    LDA gf3,X : EOR gf3,Y : BPL next
-    JSR guard_point
-    LDY m : LDA next_new : STA fg_idx,Y
-    INC m : INC next_new
+    LDA gf3,Y : BMI next            ; both out
+    TXA : LDX ib : TAY
+    GUARD_CUT                       ; (from ib to i)
 .next
     INC i : LDA i : CMP n : BNE edge
     LDX m : STX n
@@ -834,16 +773,18 @@ ENDMACRO
     BRA next_plane
 .segment
     LDA gf3 : AND gf3+1 : BMI empty         ; both outside: nothing
-    LDA gf3 : ORA gf3+1 : BPL next_plane    ; both inside
-    LDX #0 : LDY #1
-    JSR guard_point
+    STZ m
     LDA gf3 : BMI a_cut
-    LDA next_new : STA fq_idx+1             ; [a, cut]
-    BRA cut_in
+    \ [a, crossing from a to b]
+    LDX #0 : LDY #1
+    GUARD_CUT
+    LDA fg_idx : STA fq_idx+1
+    BRA next_plane
 .a_cut
-    LDA next_new : STA fq_idx               ; [cut, b]
-.cut_in
-    INC next_new
+    \ [crossing from b to a, b]
+    LDX #1 : LDY #0
+    GUARD_CUT
+    LDA fg_idx : STA fq_idx
     BRA next_plane
 .empty
     STZ n
@@ -856,42 +797,11 @@ ENDMACRO
 }
 
 \ ===========================================================================
-\ Each vertex's outcode and projection, once for the faces that share it.
-
-\ vertex_outcode: A = vertex Y's outcode. Y is kept.
-.vertex_outcode
-{
-    LDA vflag,Y : AND #VF_CODED : BEQ code
-    LDA voc,Y
-    RTS
-.code
-    LDA vx0,Y : STA outcode.ox+0
-    LDA vx1,Y : STA outcode.ox+1
-    LDA vx2,Y : STA outcode.ox+2
-    LDA vy0,Y : STA outcode.oy+0
-    LDA vy1,Y : STA outcode.oy+1
-    LDA vy2,Y : STA outcode.oy+2
-    LDA vz0,Y : STA outcode.oz+0
-    LDA vz1,Y : STA outcode.oz+1
-    LDA vz2,Y : STA outcode.oz+2
-    PHY
-    JSR outcode
-    PLY
-    \ the guard band's bit to vflag, the planes' to voc
-    ASL A : PHP
-    LSR A : STA voc,Y
-    LDA #VF_CODED OR VF_GTEST : ORA vflag,Y
-    PLP : BCC in_band
-    ORA #VF_GOUT
-.in_band
-    STA vflag,Y
-    LDA voc,Y
-    RTS
-}
-ASSERT OC_GUARD = &80
+\ The projection, once a vertex, with its outcode against the view's
+\ rectangle (the model's outcode2d).
 
 \ vertex_project: vertex Y's projection (the maths' project) into vsx and
-\ vsy. Y is kept.
+\ vsy, its outcode into voc. Y is kept.
 .vertex_project
 {
     LDA vflag,Y : AND #VF_PROJ : BEQ project_it
@@ -913,29 +823,52 @@ ASSERT OC_GUARD = &80
     LDA proj_sx+1 : STA vsxh,Y
     LDA proj_sy : STA vsyl,Y
     LDA proj_sy+1 : STA vsyh,Y
+    \ the outcode: sx < 0 or > CLIP_W, sy < 0 or > CLIP_H (a non-negative
+    \ coordinate compared unsigned)
+    LDX #0
+    LDA proj_sx+1 : BPL x_right
+    LDX #OC_LEFT
+    BRA x_done
+.x_right
+    LDA #LO(CLIP_W) : CMP proj_sx
+    LDA #HI(CLIP_W) : SBC proj_sx+1
+    BCS x_done                      ; (no borrow: sx <= CLIP_W)
+    LDX #OC_RIGHT
+.x_done
+    TXA
+    LDX proj_sy+1 : BPL y_down
+    ORA #OC_TOP
+    BRA y_done
+.y_down
+    TAX
+    LDA #LO(CLIP_H) : CMP proj_sy
+    LDA #HI(CLIP_H) : SBC proj_sy+1
+    TXA
+    BCS y_done                      ; (no borrow: sy <= CLIP_H)
+    ORA #OC_BOTTOM
+.y_done
+    STA voc,Y
     LDA #VF_PROJ : ORA vflag,Y : STA vflag,Y
     RTS
 }
+ASSERT CLIP_W < &8000 AND CLIP_H < &8000
 
 \ ===========================================================================
-\ In two dimensions: the polygon in pa_* (p_n vertices, 24-bit signed view
+\ In two dimensions: the polygon in pa_* (p_n vertices, 16-bit signed view
 \ coordinates).
 
-\ ADDK a0, a1, a2, k: the 24-bit coordinate a0-a2,X plus k (signed, small)
-MACRO ADDK a0, a1, a2, k
-    LDA a0,X : CLC : ADC #LO(k) : STA a0,X
-    LDA a1,X : ADC #HI(k) : STA a1,X
-    LDA a2,X : ADC #(k >> 16) AND &FF : STA a2,X
+\ ADDK al, ah, k: pa's 16-bit coordinate al/ah,X plus k (signed, small)
+MACRO ADDK al, ah, k
+    LDA al,X : CLC : ADC #LO(k) : STA al,X
+    LDA ah,X : ADC #HI(k) : STA ah,X
 ENDMACRO
 
-\ COPY2D from, to: pa's vertex from (X) copied to vertex to (Y)
+\ COPY2D: pa's vertex X copied to vertex Y
 MACRO COPY2D
-    LDA pa_x0,X : STA pa_x0,Y
-    LDA pa_x1,X : STA pa_x1,Y
-    LDA pa_x2,X : STA pa_x2,Y
-    LDA pa_y0,X : STA pa_y0,Y
-    LDA pa_y1,X : STA pa_y1,Y
-    LDA pa_y2,X : STA pa_y2,Y
+    LDA pa_xl,X : STA pa_xl,Y
+    LDA pa_xh,X : STA pa_xh,Y
+    LDA pa_yl,X : STA pa_yl,Y
+    LDA pa_yh,X : STA pa_yh,Y
 ENDMACRO
 
 \ line_quad: the line from vertex 0 to vertex 1 as the polygon a one-pixel
@@ -943,23 +876,25 @@ ENDMACRO
 \ major axis.
 .line_quad
 {
-    ZA_AUTO 3, dx
-    ZA_AUTO 3, dy
-    LDA pa_x0+1 : SEC : SBC pa_x0 : STA dx+0
-    LDA pa_x1+1 : SBC pa_x1 : STA dx+1
-    LDA pa_x2+1 : SBC pa_x2 : STA dx+2
+    ZA_AUTO2 dx, dy
+    \ |b - a| on each axis: the difference has 17 bits, its sign N EOR V
+    LDA pa_xl+1 : SEC : SBC pa_xl : STA dx
+    LDA pa_xh+1 : SBC pa_xh : STA dx+1
+    BVC dx_signed
+    EOR #&80
+.dx_signed
     BPL dx_pos
-    LDA #0 : SEC : SBC dx+0 : STA dx+0
+    LDA #0 : SEC : SBC dx : STA dx
     LDA #0 : SBC dx+1 : STA dx+1
-    LDA #0 : SBC dx+2 : STA dx+2
 .dx_pos
-    LDA pa_y0+1 : SEC : SBC pa_y0 : STA dy+0
-    LDA pa_y1+1 : SBC pa_y1 : STA dy+1
-    LDA pa_y2+1 : SBC pa_y2 : STA dy+2
+    LDA pa_yl+1 : SEC : SBC pa_yl : STA dy
+    LDA pa_yh+1 : SBC pa_yh : STA dy+1
+    BVC dy_signed
+    EOR #&80
+.dy_signed
     BPL dy_pos
-    LDA #0 : SEC : SBC dy+0 : STA dy+0
+    LDA #0 : SEC : SBC dy : STA dy
     LDA #0 : SBC dy+1 : STA dy+1
-    LDA #0 : SBC dy+2 : STA dy+2
 .dy_pos
     \ vertices 2 and 3 are b and a again
     LDX #1 : LDY #2
@@ -968,22 +903,22 @@ ENDMACRO
     COPY2D
     LDA #4 : STA p_n
     \ |dx| >= |dy|: across is y
-    LDA dx+0 : CMP dy+0
+    LDA dx : CMP dy
     LDA dx+1 : SBC dy+1
-    LDA dx+2 : SBC dy+2
     BCC steep
-    LDX #0 : ADDK pa_y0, pa_y1, pa_y2, -HALF
-    LDX #1 : ADDK pa_y0, pa_y1, pa_y2, -HALF
-    LDX #2 : ADDK pa_y0, pa_y1, pa_y2, HALF
-    LDX #3 : ADDK pa_y0, pa_y1, pa_y2, HALF
+    LDX #0 : ADDK pa_yl, pa_yh, -HALF
+    LDX #1 : ADDK pa_yl, pa_yh, -HALF
+    LDX #2 : ADDK pa_yl, pa_yh, HALF
+    LDX #3 : ADDK pa_yl, pa_yh, HALF
     RTS
 .steep
-    LDX #0 : ADDK pa_x0, pa_x1, pa_x2, -HALF
-    LDX #1 : ADDK pa_x0, pa_x1, pa_x2, -HALF
-    LDX #2 : ADDK pa_x0, pa_x1, pa_x2, HALF
-    LDX #3 : ADDK pa_x0, pa_x1, pa_x2, HALF
+    LDX #0 : ADDK pa_xl, pa_xh, -HALF
+    LDX #1 : ADDK pa_xl, pa_xh, -HALF
+    LDX #2 : ADDK pa_xl, pa_xh, HALF
+    LDX #3 : ADDK pa_xl, pa_xh, HALF
     RTS
 }
+ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
 
 \ point_square: vertex 0 as the square round the pixel it's in (the
 \ model's point_square).
@@ -994,133 +929,107 @@ ENDMACRO
     LDY #2 : COPY2D
     LDY #3 : COPY2D
     LDA #4 : STA p_n
-    LDX #0 : ADDK pa_x0, pa_x1, pa_x2, -HALF
-    ADDK pa_y0, pa_y1, pa_y2, -HALF
-    LDX #1 : ADDK pa_x0, pa_x1, pa_x2, HALF
-    ADDK pa_y0, pa_y1, pa_y2, -HALF
-    LDX #2 : ADDK pa_x0, pa_x1, pa_x2, HALF
-    ADDK pa_y0, pa_y1, pa_y2, HALF
-    LDX #3 : ADDK pa_x0, pa_x1, pa_x2, -HALF
-    ADDK pa_y0, pa_y1, pa_y2, HALF
+    LDX #0 : ADDK pa_xl, pa_xh, -HALF
+    ADDK pa_yl, pa_yh, -HALF
+    LDX #1 : ADDK pa_xl, pa_xh, HALF
+    ADDK pa_yl, pa_yh, -HALF
+    LDX #2 : ADDK pa_xl, pa_xh, HALF
+    ADDK pa_yl, pa_yh, HALF
+    LDX #3 : ADDK pa_xl, pa_xh, -HALF
+    ADDK pa_yl, pa_yh, HALF
     RTS
 }
 
-\ clip_cut: r = ao + round_div((bo - ao) (bound - aa), ba - aa): where the
-\ edge from a to b (each its coordinate on the pass's axis, then the other,
-\ 24-bit) crosses the bound (the model's _clip_edge).
+\ clip_cut: r = the crossing's other coordinate, P's + lerp(Q's - P's) by
+\ t from fp >= 0 at P and fq < 0 at Q (16-bit signed each, so fp - fq fits
+\ 16 bits unsigned).
 .clip_cut
 {
-    ZA_AUTO 3, aa
-    ZA_AUTO 3, ao
-    ZA_AUTO 3, ba
-    ZA_AUTO 3, bo
-    ZA_AUTO2 bound
-    ZA_AUTO 3, r
-    ZA_AUTO 4, t
-    ZA_AUTO 4, d
-    ZA_AUTO 4, e
-    ZA_AUTO1 sgn
-    \ t = bound - aa, d = ba - aa, e = bo - ao, 32-bit
-    LDA aa+2 : ASL A : SEXT : STA sgn
-    LDA bound : SEC : SBC aa+0 : STA t+0
-    LDA bound+1 : SBC aa+1 : STA t+1
-    LDA #0 : SBC aa+2 : STA t+2
-    LDA #0 : SBC sgn : STA t+3
-    LDA ba+2 : ASL A : SEXT : PHA
-    LDA ba+0 : SEC : SBC aa+0 : STA d+0
-    LDA ba+1 : SBC aa+1 : STA d+1
-    LDA ba+2 : SBC aa+2 : STA d+2
-    PLA : SBC sgn : STA d+3
-    LDA ao+2 : ASL A : SEXT : STA sgn
-    LDA bo+2 : ASL A : SEXT : PHA
-    LDA bo+0 : SEC : SBC ao+0 : STA e+0
-    LDA bo+1 : SBC ao+1 : STA e+1
-    LDA bo+2 : SBC ao+2 : STA e+2
-    PLA : SBC sgn : STA e+3
-    LDA e+3 : EOR t+3 : EOR d+3 : STA rdiv.neg
-    LDA e+3 : BPL e_pos
-    NEG4 e
-.e_pos
-    LDA t+3 : BPL t_pos
-    NEG4 t
-.t_pos
-    LDA d+3 : BPL d_pos
-    NEG4 d
-.d_pos
-    FOR k = 0..3
-        LDA e + k : STA umul32.ma + k
-        LDA t + k : STA umul32.mb + k
-    NEXT
-    JSR umul32
-    FOR k = 0..3
-        LDA d + k : STA udiv.uv + k
-    NEXT
-    JSR rdiv
-    LDA ao+0 : CLC : ADC udiv.uu+0 : STA r+0
-    LDA ao+1 : ADC udiv.uu+1 : STA r+1
-    LDA ao+2 : ADC udiv.uu+2 : STA r+2
+    ZA_AUTO2 fp, fq, po, qo, r
+    LDA fp : STA frac16.fp
+    SEC : SBC fq : STA frac16.fd
+    LDA fp+1 : STA frac16.fp+1
+    SBC fq+1 : STA frac16.fd+1
+    STZ frac16.fp+2 : STZ frac16.fp+3
+    STZ frac16.fd+2 : STZ frac16.fd+3
+    JSR frac16
+    \ Q's - P's, 17 bits signed, as lerp's 32
+    LDA qo : SEC : SBC po : STA lerp.ld
+    LDA qo+1 : SBC po+1 : STA lerp.ld+1
+    \ (the sign from the 17th bit: V gives it with N)
+    LDA #0 : BVC no_overflow
+    LDA #&FF
+.no_overflow
+    EOR lerp.ld+1 : ASL A           ; C = the true sign
+    SEXT : STA lerp.ld+2 : STA lerp.ld+3
+    JSR lerp
+    LDA lerp.lr : CLC : ADC po : STA r
+    LDA lerp.lr+1 : ADC po+1 : STA r+1
     RTS
 }
 
-\ CLIP_PASS sa0-sa2, so0-so2, da0-da2, do0-do2, bound, below: one side of the
-\ view's rectangle (the model's _clip_edge), from the source buffer (its
+\ CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below: one side of
+\ the view's rectangle (the model's _clip_edge), from the source buffer (its
 \ arrays on the side's axis, then the other) to the destination: keep the
-\ axis's coordinate <= bound if below, else >= bound (which is 0).
-MACRO CLIP_PASS sa0, sa1, sa2, so0, so1, so2, da0, da1, da2, do0, do1, do2, bound, below
+\ axis's coordinate <= bound if below, else >= bound (which is 0); a
+\ crossing from the edge's inside end.
+MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
     LDX #0
-.flag
+.f
     IF below
-        LDA #LO(bound) : CMP sa0,X
-        LDA #HI(bound) : SBC sa1,X
-        LDA #0 : SBC sa2,X
-        EOR #&80                        ; bit 7 set: inside
+        LDA #LO(bound) : SEC : SBC sal,X : STA p_fl,X
+        LDA #HI(bound) : SBC sah,X : STA p_fh,X
     ELSE
         ASSERT bound = 0
-        LDA sa2,X : EOR #&80
+        LDA sal,X : STA p_fl,X
+        LDA sah,X : STA p_fh,X
     ENDIF
-    STA p_in,X
-    INX : CPX p_n : BNE flag
-    LDA p_in : STA p_in,X               ; the first again after the last
+    INX : CPX p_n : BNE f
+    LDA p_fl : STA p_fl,X               ; the first again after the last
+    LDA p_fh : STA p_fh,X
     STZ clip2d.m
     LDX #0
 .vertex
     STX clip2d.i
-    LDA p_in,X : BPL out
+    LDA p_fh,X : BMI a_out
     LDY clip2d.m
-    LDA sa0,X : STA da0,Y
-    LDA sa1,X : STA da1,Y
-    LDA sa2,X : STA da2,Y
-    LDA so0,X : STA do0,Y
-    LDA so1,X : STA do1,Y
-    LDA so2,X : STA do2,Y
+    LDA sal,X : STA dal,Y
+    LDA sah,X : STA dah,Y
+    LDA sol,X : STA dol,Y
+    LDA soh,X : STA doh,Y
     INC clip2d.m
-.out
-    LDA p_in,X : EOR p_in+1,X : BPL next
-    LDA sa0,X : STA clip_cut.aa+0
-    LDA sa1,X : STA clip_cut.aa+1
-    LDA sa2,X : STA clip_cut.aa+2
-    LDA so0,X : STA clip_cut.ao+0
-    LDA so1,X : STA clip_cut.ao+1
-    LDA so2,X : STA clip_cut.ao+2
+    LDA p_fh+1,X : BPL next             ; both in
+    \ the crossing from a (X) to b
+    STX clip2d.ip
     INX : CPX p_n : BNE b_set
     LDX #0
 .b_set
-    LDA sa0,X : STA clip_cut.ba+0
-    LDA sa1,X : STA clip_cut.ba+1
-    LDA sa2,X : STA clip_cut.ba+2
-    LDA so0,X : STA clip_cut.bo+0
-    LDA so1,X : STA clip_cut.bo+1
-    LDA so2,X : STA clip_cut.bo+2
-    LDA #LO(bound) : STA clip_cut.bound
-    LDA #HI(bound) : STA clip_cut.bound+1
+    STX clip2d.iq
+    BRA cut
+.a_out
+    LDA p_fh+1,X : BMI next             ; both out
+    \ the crossing from b to a (X)
+    STX clip2d.iq
+    INX : CPX p_n : BNE p_set
+    LDX #0
+.p_set
+    STX clip2d.ip
+.cut
+    LDX clip2d.ip : LDY clip2d.iq
+    LDA p_fl,X : STA clip_cut.fp
+    LDA p_fh,X : STA clip_cut.fp+1
+    LDA p_fl,Y : STA clip_cut.fq
+    LDA p_fh,Y : STA clip_cut.fq+1
+    LDA sol,X : STA clip_cut.po
+    LDA soh,X : STA clip_cut.po+1
+    LDA sol,Y : STA clip_cut.qo
+    LDA soh,Y : STA clip_cut.qo+1
     JSR clip_cut
     LDY clip2d.m
-    LDA #LO(bound) : STA da0,Y
-    LDA #HI(bound) : STA da1,Y
-    LDA #0 : STA da2,Y
-    LDA clip_cut.r+0 : STA do0,Y
-    LDA clip_cut.r+1 : STA do1,Y
-    LDA clip_cut.r+2 : STA do2,Y
+    LDA #LO(bound) : STA dal,Y
+    LDA #HI(bound) : STA dah,Y
+    LDA clip_cut.r : STA dol,Y
+    LDA clip_cut.r+1 : STA doh,Y
     INC clip2d.m
 .next
     LDX clip2d.i : INX : CPX p_n : BEQ finished
@@ -1128,37 +1037,35 @@ MACRO CLIP_PASS sa0, sa1, sa2, so0, so1, so2, da0, da1, da2, do0, do1, do2, boun
 .finished
     LDA clip2d.m : STA p_n
 ENDMACRO
-ASSERT CLIP_W < &10000 AND CLIP_H < &10000
+ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 
 \ clip2d: the polygon clipped to the view's rectangle, [0, CLIP_W] x [0,
 \ CLIP_H] (the model's clip2d), then its repeats dropped.
 .clip2d
 {
-    ZA_AUTO1 m, i
-    CLIP_PASS pa_x0, pa_x1, pa_x2, pa_y0, pa_y1, pa_y2, pb_x0, pb_x1, pb_x2, pb_y0, pb_y1, pb_y2, 0, FALSE
+    ZA_AUTO1 m, i, ip, iq
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, 0, FALSE
     LDA p_n : BNE pass2
     RTS
 .pass2
-    CLIP_PASS pb_x0, pb_x1, pb_x2, pb_y0, pb_y1, pb_y2, pa_x0, pa_x1, pa_x2, pa_y0, pa_y1, pa_y2, CLIP_W, TRUE
+    CLIP_PASS pb_xl, pb_xh, pb_yl, pb_yh, pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
     LDA p_n : BNE pass3
     RTS
 .pass3
-    CLIP_PASS pa_y0, pa_y1, pa_y2, pa_x0, pa_x1, pa_x2, pb_y0, pb_y1, pb_y2, pb_x0, pb_x1, pb_x2, 0, FALSE
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, 0, FALSE
     LDA p_n : BNE pass4
     RTS
 .pass4
-    CLIP_PASS pb_y0, pb_y1, pb_y2, pb_x0, pb_x1, pb_x2, pa_y0, pa_y1, pa_y2, pa_x0, pa_x1, pa_x2, CLIP_H, TRUE
+    CLIP_PASS pb_yl, pb_yh, pb_xl, pb_xh, pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
     JMP dedupe
 }
 
 \ SAME2D: Z set if pa's vertices X and Y are the same point
 MACRO SAME2D
-    LDA pa_x0,X : CMP pa_x0,Y : BNE done
-    LDA pa_x1,X : CMP pa_x1,Y : BNE done
-    LDA pa_x2,X : CMP pa_x2,Y : BNE done
-    LDA pa_y0,X : CMP pa_y0,Y : BNE done
-    LDA pa_y1,X : CMP pa_y1,Y : BNE done
-    LDA pa_y2,X : CMP pa_y2,Y
+    LDA pa_xl,X : CMP pa_xl,Y : BNE done
+    LDA pa_xh,X : CMP pa_xh,Y : BNE done
+    LDA pa_yl,X : CMP pa_yl,Y : BNE done
+    LDA pa_yh,X : CMP pa_yh,Y
 .done
 ENDMACRO
 
@@ -1196,56 +1103,131 @@ ENDMACRO
     RTS
 }
 
-\ area_nonzero: Z clear if the polygon (p_n >= 3 vertices, inside the
-\ view) has an area (the model's _area2 isn't 0): the sum of the fan's
-\ cross products from vertex 0, 16-bit coordinates.
-.area_nonzero
+\ umul16: mp (4 bytes) = ma * mb, each unsigned 16-bit; a zero high byte
+\ costs nothing.
+.umul16
 {
-    ZA_AUTO 4, sum
-    ZA_AUTO1 i
-    ZA_AUTO2 dxa, dya, dxb, dyb
-    STZ sum : STZ sum+1 : STZ sum+2 : STZ sum+3
-    LDX #1
-    LDA pa_x0,X : SEC : SBC pa_x0 : STA dxb
-    LDA pa_x1,X : SBC pa_x1 : STA dxb+1
-    LDA pa_y0,X : SEC : SBC pa_y0 : STA dyb
-    LDA pa_y1,X : SBC pa_y1 : STA dyb+1
-.term
-    STX i
-    LDA dxb : STA dxa : LDA dxb+1 : STA dxa+1
-    LDA dyb : STA dya : LDA dyb+1 : STA dya+1
-    INX
-    LDA pa_x0,X : SEC : SBC pa_x0 : STA dxb
-    LDA pa_x1,X : SBC pa_x1 : STA dxb+1
-    LDA pa_y0,X : SEC : SBC pa_y0 : STA dyb
-    LDA pa_y1,X : SBC pa_y1 : STA dyb+1
-    \ sum += dxa dyb - dxb dya
-    LDA dxa : STA smul16.sa : LDA dxa+1 : STA smul16.sa+1
-    LDA dyb : STA smul16.sb : LDA dyb+1 : STA smul16.sb+1
-    JSR smul16
-    LDA sum+0 : CLC : ADC smul16.sp+0 : STA sum+0
-    LDA sum+1 : ADC smul16.sp+1 : STA sum+1
-    LDA sum+2 : ADC smul16.sp+2 : STA sum+2
-    LDA sum+3 : ADC smul16.sp+3 : STA sum+3
-    LDA dxb : STA smul16.sa : LDA dxb+1 : STA smul16.sa+1
-    LDA dya : STA smul16.sb : LDA dya+1 : STA smul16.sb+1
-    JSR smul16
-    LDA sum+0 : SEC : SBC smul16.sp+0 : STA sum+0
-    LDA sum+1 : SBC smul16.sp+1 : STA sum+1
-    LDA sum+2 : SBC smul16.sp+2 : STA sum+2
-    LDA sum+3 : SBC smul16.sp+3 : STA sum+3
-    LDX i : INX
-    INX : CPX p_n : BEQ summed
-    DEX
-    JMP term
-.summed
-    LDA sum : ORA sum+1 : ORA sum+2 : ORA sum+3
+    ZA_AUTO2 ma, mb
+    ZA_AUTO 4, mp
+    LDA ma : LDY mb : JSR umul8
+    LDA umul8.up : STA mp
+    LDA umul8.up+1 : STA mp+1
+    STZ mp+2 : STZ mp+3
+    LDY mb+1 : BEQ no_b1
+    LDA ma : JSR umul8
+    LDA mp+1 : CLC : ADC umul8.up : STA mp+1
+    LDA mp+2 : ADC umul8.up+1 : STA mp+2
+.no_b1
+    LDA ma+1 : BEQ done
+    LDY mb : JSR umul8
+    LDA mp+1 : CLC : ADC umul8.up : STA mp+1
+    LDA mp+2 : ADC umul8.up+1 : STA mp+2
+    BCC no_carry
+    INC mp+3
+.no_carry
+    LDY mb+1 : BEQ done
+    LDA ma+1 : JSR umul8
+    LDA mp+2 : CLC : ADC umul8.up : STA mp+2
+    LDA mp+3 : ADC umul8.up+1 : STA mp+3
+.done
     RTS
 }
 
-\ emit_face: the polygon as a drawn face of colour A: its vertices' low
-\ two bytes into out_v*, its record into tf_*. Nothing if they'd run out
-\ (out_over set).
+\ DIFF2D dst, arr_l, arr_h: dst = pa's coordinate at X less vertex 0's
+\ (16-bit; inside the view, so small)
+MACRO DIFF2D dst, arr_l, arr_h
+    LDA arr_l,X : SEC : SBC arr_l : STA dst
+    LDA arr_h,X : SBC arr_h : STA dst+1
+ENDMACRO
+
+\ ABS16 v: |v| (16-bit), and A = v's sign: &81 negative, 1 positive, 0 (Z
+\ set) zero. Two such signs EORed, ORed with 1, are their product's.
+MACRO ABS16 v
+    LDA v+1 : BPL positive
+    LDA #0 : SEC : SBC v : STA v
+    LDA #0 : SBC v+1 : STA v+1
+    LDA #&81
+    BRA done
+.positive
+    LDA v : ORA v+1 : BEQ done
+    LDA #1
+.done
+ENDMACRO
+
+\ PSIGN s: A = the sign (ABS16's) of the product of A's and s's
+MACRO PSIGN s
+    BEQ done                        ; (A zero: the product's zero)
+    LDX s : BEQ zero
+    EOR s : ORA #1
+    BRA done
+.zero
+    LDA #0
+.done
+ENDMACRO
+
+\ drawable: C set if the polygon (p_n vertices, its repeats dropped, inside
+\ the view) is drawn (the model's drawable): three or more vertices, one off
+\ the line through the first two. dx ey = dy ex is decided by the products'
+\ signs and zeros where it can be, else by the products.
+.drawable
+{
+    ZA_AUTO2 dx, dy, ex, ey
+    ZA_AUTO1 i, sa, sb, s
+    LDA p_n : CMP #3 : BCS enough
+    RTS                             ; (C clear)
+.enough
+    LDX #1
+    DIFF2D dx, pa_xl, pa_xh
+    DIFF2D dy, pa_yl, pa_yh
+    ABS16 dx : STA sa               ; (dx, dy kept as sizes, their signs here)
+    ABS16 dy : STA sb
+    LDA #2 : STA i
+.vertex
+    LDX i
+    DIFF2D ex, pa_xl, pa_xh
+    DIFF2D ey, pa_yl, pa_yh
+    ABS16 ey : PSIGN sa : STA s     ; dx ey's sign
+    ABS16 ex : PSIGN sb             ; dy ex's
+    CMP s : BNE off_line            ; (their signs or zeros differ)
+    CMP #0 : BEQ next               ; (both zero: on the line)
+    \ the same sign: the sizes decide
+    LDA dx : STA umul16.ma
+    LDA dx+1 : STA umul16.ma+1
+    LDA ey : STA umul16.mb
+    LDA ey+1 : STA umul16.mb+1
+    JSR umul16
+    LDA umul16.mp : PHA
+    LDA umul16.mp+1 : PHA
+    LDA umul16.mp+2 : PHA
+    LDA umul16.mp+3 : PHA
+    LDA dy : STA umul16.ma
+    LDA dy+1 : STA umul16.ma+1
+    LDA ex : STA umul16.mb
+    LDA ex+1 : STA umul16.mb+1
+    JSR umul16
+    PLA : CMP umul16.mp+3 : BNE pop3
+    PLA : CMP umul16.mp+2 : BNE pop2
+    PLA : CMP umul16.mp+1 : BNE pop1
+    PLA : CMP umul16.mp : BNE off_line
+.next
+    INC i : LDA i : CMP p_n : BEQ on_line
+    JMP vertex
+.on_line
+    CLC
+    RTS
+.pop3
+    PLA
+.pop2
+    PLA
+.pop1
+    PLA
+.off_line
+    SEC
+    RTS
+}
+
+\ emit_face: the polygon as a drawn face of colour A: its vertices into
+\ out_v*, its record into tf_*. Nothing if they'd run out (out_over set).
 .emit_face
 {
     ZA_AUTO1 col
@@ -1255,10 +1237,10 @@ ENDMACRO
     LDY out_vn
     LDX #0
 .vertex
-    LDA pa_x0,X : STA out_vxl,Y
-    LDA pa_x1,X : STA out_vxh,Y
-    LDA pa_y0,X : STA out_vyl,Y
-    LDA pa_y1,X : STA out_vyh,Y
+    LDA pa_xl,X : STA out_vxl,Y
+    LDA pa_xh,X : STA out_vxh,Y
+    LDA pa_yl,X : STA out_vyl,Y
+    LDA pa_yh,X : STA out_vyh,Y
     INY
     INX : CPX p_n : BNE vertex
     LDX tf_n
@@ -1293,48 +1275,56 @@ ENDMACRO
     PLY
     INY : INX : CPX n : BNE loop
     LDA #VMAX : STA next_new
-    LDA near : BEQ coded
+    LDA near : BEQ guard
     LDA n : JSR near_clip
     BNE near_kept
     RTS
 .near_kept
     STA n
-.coded
-    \ the side planes: none outside one for every vertex
+.guard
+    \ wholly beyond a plane outside the view's sides, it isn't drawn; with
+    \ a vertex outside the guard band, it's clipped to the band
     LDA #&FF : STA every
     STZ any
     STZ k
-.code
+.guard_test
     LDX k : LDY fq_idx,X
-    JSR vertex_outcode
-    TSB any
+    JSR vertex_guard
+    BCC in_band
+    LDX #1 : STX any                ; (outside the band)
+.in_band
     AND every : STA every
-    LDA vflag,Y : AND #VF_GOUT : TSB near     ; (near: now any outside the band)
-    INC k : LDA k : CMP n : BNE code
-    LDA every : BEQ seen
+    INC k : LDA k : CMP n : BNE guard_test
+    LDA every : BEQ visible
     RTS
-.seen
-    \ the guard band
-    LDA near : AND #VF_GOUT : BEQ projecting
+.visible
+    LDA any : BEQ projecting
     LDA n : JSR guard_clip
     BNE guarded
     RTS
 .guarded
     STA n
 .projecting
+    \ each vertex projected, and its outcode: none beyond one edge for every
+    \ vertex
+    LDA #&FF : STA every
+    STZ any
     STZ k
 .project_loop
     LDX k : LDY fq_idx,X
     JSR vertex_project
+    LDA voc,Y : TSB any
+    AND every : STA every
     LDX k
-    LDA vsxl,Y : STA pa_x0,X
-    LDA vsxh,Y : STA pa_x1,X
-    ASL A : SEXT : STA pa_x2,X
-    LDA vsyl,Y : STA pa_y0,X
-    LDA vsyh,Y : STA pa_y1,X
-    ASL A : SEXT : STA pa_y2,X
+    LDA vsxl,Y : STA pa_xl,X
+    LDA vsxh,Y : STA pa_xh,X
+    LDA vsyl,Y : STA pa_yl,X
+    LDA vsyh,Y : STA pa_yh,X
     INC k : LDA k : CMP n : BNE project_loop
     STA p_n
+    LDA every : BEQ seen
+    RTS
+.seen
     \ widened, a line or a point is always clipped
     LDX of_slot
     LDA ob_flags,X : BIT #F_LINE : BNE line
@@ -1350,8 +1340,7 @@ ENDMACRO
 .clip
     JSR clip2d
 .drawn
-    LDA p_n : CMP #3 : BCC rejected
-    JSR area_nonzero : BEQ rejected
+    JSR drawable : BCC rejected
     LDX face : LDA fa_col,X
     JMP emit_face
 .rejected

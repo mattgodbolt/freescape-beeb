@@ -110,10 +110,9 @@ const STAGES = [
     ["near_clip", "near"],
     ["guard_clip", "guard"],
     ["project", "project"],
-    ["outcode", "outcode"],
     ["clip2d", "clip2d"],
     ["dedupe", "clip2d"],
-    ["area_nonzero", "area"],
+    ["drawable", "drawable"],
     ["draw_object", "faces"],
     ["sort_objects", "sort"],
     ["emit_faces", "emit"],
@@ -159,6 +158,7 @@ m.tm.processor.debugInstruction.add((pc) => {
     const now = m.tm.elapsedCycles;
     if (lastPc >= 0) {
         tally[current] = (tally[current] || 0) + (now - lastCycles);
+        if (inFloor) floorTally[current] = (floorTally[current] || 0) + (now - lastCycles);
         if (profile) {
             const r = routineOf(lastPc);
             profile.set(r, (profile.get(r) || 0) + (now - lastCycles));
@@ -174,13 +174,22 @@ m.tm.processor.debugInstruction.add((pc) => {
     if (w) w();
     const k = callees.get(pc);
     if (k) calls[k] = (calls[k] || 0) + 1;
+    // each candidate's cycles, from its turn in objects_frame's loop to the
+    // next's: the floor's apart (decision 8a)
+    if (pc === candidateAt) inFloor = floorSlot !== null && arr("cd_obj", cpu.x) === floorSlot;
+    else if (pc === sortAt) inFloor = false;
     return false;
 });
+let inFloor = false;
+let floorTally = {};
+let floorSlot = null;
+const candidateAt = has("of_candidate") ? S("of_candidate") : -1;
+const sortAt = has("of_sort") ? S("of_sort") : -1;
 
 // The calls a frame makes of the arithmetic's routines, for the cost model
 // (docs/research/objects.md): each counted as its first instruction runs.
-const CALLEES = ["rdiv", "umul32", "oc_exact", "near_point", "guard_point", "clip_cut", "project",
-                 "smul16", "fill_point", "fill_edge", "transform_fill"];
+const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point", "clip_cut", "project",
+                 "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
 for (const c of CALLEES) if (has(c)) callees.set(S(c), c);
 let calls = {};
@@ -188,13 +197,15 @@ let calls = {};
 async function counted(entry) {
     tally = {};
     calls = {};
+    floorTally = {};
+    inFloor = false;
     stack.length = 0;
     lastPc = -1;
     const r = await m.call(entry, { secs: 30 });
     if (lastPc >= 0) tally[current] = (tally[current] || 0) + (m.tm.elapsedCycles - lastCycles);
     const t = tally;
     tally = null;
-    return { total: r.total, stages: t, calls };
+    return { total: r.total, stages: t, calls, floor: floorTally };
 }
 
 // --- Stage 1: the matrices.
@@ -247,7 +258,8 @@ for (const view of views) {
         });
     }
     badWrites.length = 0;
-    const { total, stages, calls: made } = await counted(S(full ? "check_frame" : "check_pass"));
+    floorSlot = view.floor ?? null;
+    const { total, stages, calls: made, floor } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
 
@@ -319,7 +331,7 @@ for (const view of views) {
             fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
     }
     if (verbose) console.log(name, total, JSON.stringify(stages));
-    results.push({ name, total, stages, calls: made, entrance: /^a\d+-e\d+$/.test(name) });
+    results.push({ name, total, stages, calls: made, floor, entrance: /^a\d+-e\d+$/.test(name) });
 }
 
 // --- The cycles.
@@ -341,6 +353,18 @@ const report = (label, rows) => {
     if (rows[0].calls) {
         console.log(`  calls a view, median / max:`);
         for (const c of CALLEES) line(` ${c}`, rows.map((r) => (r.calls && r.calls[c]) || 0));
+    }
+    if (args.includes("--floor") && rows[0].floor) {
+        console.log(`  the floor's share (decision 8a): median / max of its cycles, and of the stage's`);
+        for (const st of STAGE_NAMES) {
+            const f = rows.map((r) => r.floor[st] || 0);
+            const all = rows.map((r) => r.stages[st] || 0);
+            const share = all.reduce((a, b) => a + b, 0) ? f.reduce((a, b) => a + b, 0) / all.reduce((a, b) => a + b, 0) : 0;
+            console.log(`  ${st.padEnd(10)} ${String(median(f)).padStart(8)} ${String(Math.max(...f)).padStart(8)}  ${(100 * share).toFixed(0)}%`);
+        }
+        const ft = rows.map((r) => Object.values(r.floor).reduce((a, b) => a + b, 0));
+        const share = ft.reduce((a, b) => a + b, 0) / rows.map((r) => r.total).reduce((a, b) => a + b, 0);
+        console.log(`  ${"total".padEnd(10)} ${String(median(ft)).padStart(8)} ${String(Math.max(...ft)).padStart(8)}  ${(100 * share).toFixed(0)}%`);
     }
 };
 report("entrance views, each a turn (the cache refilled)", results.filter((r) => r.entrance));

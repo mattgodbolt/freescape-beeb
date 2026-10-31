@@ -88,6 +88,14 @@ def face_colours(area, object_id):
     return None
 
 
+def floor(area):
+    """The id of the object the ground stands for (colours.floor), or None
+    (the stand-in palette has none)."""
+    if hasattr(colours, "floor"):
+        return colours.floor(area)
+    return None
+
+
 def ground(area):
     return colours.ground(area)
 

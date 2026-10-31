@@ -41,14 +41,9 @@ class View:
     order: list = field(default_factory=list)      # object ids, farthest first
     vertices: list = field(default_factory=list)   # (world vertex, (sx, sy)) projected
     lines: list = None
+    horizon: tuple = None                          # the rasteriser's, or None
     bytes: bytes = None
     counts: dict = field(default_factory=dict)
-
-
-def _area2(poly):
-    """Twice the polygon's signed area."""
-    return sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1]
-               for i in range(len(poly)))
 
 
 def draw_faces(cand, m, c, tally, check=False):
@@ -85,13 +80,11 @@ def draw_faces(cand, m, c, tally, check=False):
             if not poly:
                 tally["faces_rejected"] += 1
                 continue
-        codes = [clip.outcode(v) for v in poly]
-        every_code = 0xFF
-        any_code = 0
-        for k in codes:
-            every_code &= k
-            any_code |= k
-        if every_code:
+        # Wholly beyond a plane outside the view's sides, it can't be seen.
+        every_beyond = 0xFF
+        for v in poly:
+            every_beyond &= clip.beyond(v)
+        if every_beyond:
             tally["faces_rejected"] += 1
             continue
         if any(clip.outside_guard(v) for v in poly):
@@ -102,6 +95,17 @@ def draw_faces(cand, m, c, tally, check=False):
                 tally["faces_rejected"] += 1
                 continue
         flat = [project(v) for v in poly]
+        # Wholly beyond one of the view's edges, the face isn't drawn; beyond
+        # any, it's clipped (clip.outcode2d).
+        every_code = 0xFF
+        any_code = 0
+        for p in flat:
+            k = clip.outcode2d(p)
+            every_code &= k
+            any_code |= k
+        if every_code:
+            tally["faces_rejected"] += 1
+            continue
         if s.line:
             # Widened, a line can reach past the view even when its ends don't.
             flat = clip.line_quad(flat[0], flat[1])
@@ -109,7 +113,7 @@ def draw_faces(cand, m, c, tally, check=False):
             flat = clip.point_square(flat[0])
         widened = s.line or s.point
         out = clip.clip2d(flat) if any_code or widened else clip.dedupe(flat)
-        if len(out) < 3 or not _area2(out):
+        if not clip.drawable(out):
             tally["faces_rejected"] += 1
             continue
         if near:
@@ -120,6 +124,70 @@ def draw_faces(cand, m, c, tally, check=False):
     tally["vertices_projected"] += len(projected)
     world = {cs[i]: s.vertices[i] for i in used}
     return drawn, [(world[v], p) for v, p in projected.items() if v in world]
+
+
+HORIZON_MAX = 30000         # the rasteriser's |hx|, |hy| at most (src/raster.6502's RS_HMAX)
+
+
+def horizon(m):
+    """The floor's horizon (decision 8a as amended): where an infinite
+    horizontal plane below the eye meets the sky, from the matrix alone. A
+    view ray (X / FX, -Y / FY, 1), X and Y from the view's centre, is level
+    when it's square to the camera's up, M's second column (m01, m11, m21):
+    with FY = 2 FX that's 2 m01 X - m11 Y + m21 FY = 0, sky where it's
+    positive. As the rasteriser takes it (raster.Horizon): a point, on the
+    centre line across the line's steeper axis, and the direction (m11, 2
+    m01), sky to its left, halved if it doesn't fit signed bytes; or None
+    for sky everywhere, and a level horizon off the top for ground
+    everywhere, when the line misses the view by more than the rasteriser
+    takes."""
+    from tools.model.view import FY, XC, YC
+    m01, m11, m21 = m[0][1], m[1][1], m[2][1]
+    a, b, c = 2 * m01, -m11, m21 * FY
+    dx, dy = -b, a
+    if not -128 <= dy <= 127:
+        dx, dy = dx >> 1, dy >> 1
+    if abs(b) >= abs(a) and b:
+        x, y = 0, clip.round_div(-c, b)
+    elif a:
+        x, y = clip.round_div(-c, a), 0
+    else:
+        x = y = HORIZON_MAX         # (up is along the view: one side everywhere)
+    if abs(x + XC) > HORIZON_MAX or abs(y + YC) > HORIZON_MAX:
+        if c > 0:
+            return None
+        return ((XC, -HORIZON_MAX), (1, 0))
+    return ((XC + x, YC + y), (dx, dy))
+
+
+# The floor as the horizon: measured, and not taken (docs/research/objects.md,
+# "The floor as the horizon"): it shows ground where the original shows the
+# void past the platform's edge, and the objects a thick floor hides.
+FLOOR_AS_HORIZON = False
+
+
+def floor_slot(area, objs):
+    """The index in objs of the area's floor (colours.floor), or None."""
+    fid = parts.floor(area)
+    if fid is None:
+        return None
+    for i, o in enumerate(objs):
+        if o["id"] == fid and o["type"] != 0:
+            return i
+    return None
+
+
+def floor_as_horizon(area, objs, m):
+    """The objects with the area's floor not drawn, and the horizon that
+    stands for it (decision 8a as amended): the ground below the horizon
+    is the floor's top face's pattern (colours.ground). Without a floor,
+    the objects as they are and no horizon (sky everywhere)."""
+    i = floor_slot(area, objs) if FLOOR_AS_HORIZON else None
+    if i is None:
+        return objs, None
+    objs = list(objs)
+    objs[i] = dict(objs[i], initially_invisible=True)
+    return objs, horizon(m)
 
 
 def recolour(area, objs):
@@ -154,6 +222,7 @@ def render(db, area, camera, state=None, cull=True, check=False, followed=True):
     objs = area["objects"] + db["globals"]
     if followed:
         objs = recolour(area, objs)
+    objs, sky_ground = floor_as_horizon(area, objs, m)
     cands = objects.object_pass(objs, m, c, state, cull, tally)
     drawn = []
     for cand in cands:
@@ -171,7 +240,8 @@ def render(db, area, camera, state=None, cull=True, check=False, followed=True):
     tally["faces_drawn"] = len(v.faces)
     raster_in = [(parts.pattern(area, f.colour), f.poly) for f in v.faces]
     stats = {}
-    v.lines = parts.rasterise(raster_in, parts.sky(area), parts.ground(area), None, stats)
+    v.horizon = sky_ground
+    v.lines = parts.rasterise(raster_in, parts.sky(area), parts.ground(area), sky_ground, stats)
     v.bytes = parts.write(v.lines)
     v.counts = counts.finish(tally, v, stats)
     return v
