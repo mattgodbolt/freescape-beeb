@@ -115,17 +115,39 @@ def draw_faces(cand, m, c, tally, check=False):
     return drawn, [(world[v], p) for v, p in projected.items() if v in world]
 
 
-def render(db, area, camera, state=None, cull=True, check=False):
+def recolour(area, objs):
+    """The objects with each face's colour index from the version the colours
+    follow (decision 8): every version recoloured its faces, so the ZX's
+    indices can't be mapped across (docs/research/colour.md). An object the
+    followed version has no colours for keeps the ZX's."""
+    out = []
+    for obj in objs:
+        c = parts.face_colours(area, obj["id"])
+        if c is None:
+            out.append(obj)
+        elif obj.get("sensor") is not None:
+            out.append(dict(obj, sensor=dict(obj["sensor"], colour=c[0])))
+        else:
+            out.append(dict(obj, colours=c))
+    return out
+
+
+def render(db, area, camera, state=None, cull=True, check=False, followed=True):
     """The view from camera in area. state maps object ids to shown or not
     (default: the area's start); cull=False skips the coarse cull (to check
     it culls nothing that's drawn); check=True checks the transform's cached
     and corner-and-edge forms against the direct one. The object pass takes
-    the area's objects, then the globals, as the original does."""
+    the area's objects, then the globals, as the original does.
+    followed: colour the faces from the version decision 8 follows (the
+    ST's), not the database's (the ZX's)."""
     m = matrix.rotation(camera, db["tables"])
     c = camera.position
     v = View(area, camera, m)
     tally = {k: 0 for k in counts.KEYS}
-    cands = objects.object_pass(area["objects"] + db["globals"], m, c, state, cull, tally)
+    objs = area["objects"] + db["globals"]
+    if followed:
+        objs = recolour(area, objs)
+    cands = objects.object_pass(objs, m, c, state, cull, tally)
     drawn = []
     for cand in cands:
         faces, projected = draw_faces(cand, m, c, tally, check)

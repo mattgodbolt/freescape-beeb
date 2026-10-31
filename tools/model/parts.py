@@ -76,6 +76,14 @@ def sky(area):
     return colours.sky(area)
 
 
+def face_colours(area, object_id):
+    """The object's colour nibbles in the version the colours follow, or None
+    to keep the database's (the stand-in palette has no versions)."""
+    if hasattr(colours, "face_colours"):
+        return colours.face_colours(area, object_id)
+    return None
+
+
 def ground(area):
     return colours.ground(area)
 

@@ -79,15 +79,35 @@ build derives the disc's data from the fetched copies.
 Driller first, with the loader kept general (Dark Side and Total Eclipse
 share its layout).
 
-## 8. Where the colours come from
+## 8. Where the colours come from (2026-10-31, autonomous)
 
-Open: the colour study (`docs/research/colour.md`) proposes it.
+**The Atari ST's colours, shown by MODE 2 patterns of up to three of the
+BBC's eight colours, chosen to look right on an RGB monitor and on a PAL
+television** (`docs/research/colour.md`).
 
-## 8a. The background
+- The ST's per-area palettes give each face's colour index its colour (16
+  colours an area from 4,096). Every colour version recoloured the faces
+  for its own palette, so each face's colour index comes from the ST's
+  database, object by object, and the geometry from the ZX's (decision 1).
+- Each colour is a 2 × 4 pattern anchored to the screen, chosen by OKLab
+  distance with penalties for texture, crawl through PAL, clashing hues
+  and hue shifts; colours an area tells apart get different patterns.
+- Why: the most colours of any version, each area its own. The PC's EGA
+  colours are the fallback if the ST's darkest shades, which become
+  sparse dots, look wrong in play (one constant, `CHOSEN` in
+  `tools/colour/design.py`).
 
-Open, with decision 8: the ZX clears the view to its paper colour and has
-no ground; the colour versions are being read for a sky and a ground. The
-rasteriser takes a horizon either way (`docs/engine.md`, section 9).
+Matt asked for PAL to be used where it can (2026-10-31): jsbeeb's PAL
+television blurs a dither as a real one does, and the patterns were chosen
+through a port of its shader (`tools/pal.py`), checked against the shader
+itself.
+
+## 8a. The background (2026-10-31, autonomous)
+
+The view is cleared to the sky, which is black in every area of the ST's
+version, and the ground is the area's floor object's top face, drawn like
+any other face. So the rasteriser's horizon goes unused for Driller, and
+stays for games that need it.
 
 ## 9. Where the screen sits (2026-10-31, autonomous)
 

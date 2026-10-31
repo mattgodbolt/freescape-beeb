@@ -95,3 +95,27 @@ percentile, maximum): objects drawn 10, 15, 19; vertices transformed 63,
 92, 121; vertices projected 43, 70, 99; faces drawn 14, 25, 36;
 face-lines 249, 521, 878; runs written 302, 495, 951; bytes where two
 runs meet 94, 173, 424.
+
+## 2026-10-31: the colours (track C)
+
+`make fetch` takes Driller's DOS, CPC, ST and Amiga discs; DOS, CPC and ST
+match ScummVM's md5s. `tools/colour/` reads each version's database and
+colours, and `make colours` designs the BBC's patterns
+(`docs/research/colour.md`). Found that day:
+
+- Every version recoloured the faces: all 669 records match the ZX's by
+  id, but 30-45% of face colour indices differ, and 23-33 faces are drawn
+  in one version and not the other. So colours come from the followed
+  version object by object.
+- The EGA uses one fixed 16-colour table; the ST and Amiga 16 colours an
+  area from 4,096; the CPC four inks an area. The sky is black everywhere
+  but the CPC's Stores; the ground is the floor object's top face.
+- Mean and worst error (OKLab × 100) with patterns of up to three colours
+  chosen for both displays: the ST 6.1 and 24.4 on an RGB monitor, 4.2 and
+  15.8 through PAL; the EGA 3.9 and 6.4, 3.7 and 6.8.
+- PAL changes the choice: of the ST's 310 colours, 247 take a different
+  pattern when chosen for PAL than for RGB, and the patterns chosen for
+  both serve both.
+- `tools/pal.py`, the NumPy port of jsbeeb's PAL shader, differs from the
+  shader itself (run in headless Chrome) by at most 1/255, in under 1% of
+  bytes.

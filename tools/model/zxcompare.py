@@ -77,7 +77,9 @@ def zx_bit(buf, x, y):
 def compare_view(db, area, record, buf):
     c = record["camera"]
     camera = cam.Camera(c["x"], c["y"], c["z"], c["yaw"], c["pitch"], c["roll"])
-    view = render.render(db, area, camera)
+    # The ZX's own colour indices: which faces it draws is part of what's
+    # compared (decision 8 colours the engine's from the ST's).
+    view = render.render(db, area, camera, followed=False)
     idx = index_map(view)
     shades = db["shades"]
     compared = agree = 0

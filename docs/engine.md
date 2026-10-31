@@ -80,8 +80,8 @@ which owns the machine and makes no OS call.
   means "not drawn").
 - **Each index is a pattern: four bytes, one for each value of
   `line AND 3`.** Each byte is two pixels, so a pattern is a 2 × 4 ordered
-  dither of up to two of the BBC's eight colours (9 levels between a
-  pair), or a solid colour. Patterns are anchored to the screen, not the
+  dither of up to three of the BBC's eight colours, or a solid colour
+  (decision 8). Patterns are anchored to the screen, not the
   face.
 - The table of patterns, and where its colours come from, is the colour
   study's (`docs/research/colour.md`, decision 8). Until then the model's
