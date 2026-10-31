@@ -58,9 +58,10 @@ TEXTURE = 0.35   # dE of mean colour that a dE of texture costs
 CLASH = 1.0      # dE of mean colour that a dE of clash costs
 CRAWL = 0.35     # and a dE of PAL's crawl, on top of its share of texture
 
-# The display the model's patterns are chosen for: "rgb", "pal", or
-# "both" (the mean of the two scores: right on either).
-DISPLAY = "both"
+# The display a score is for when none is named: "rgb", "pal", or "both"
+# (the mean of the two scores: right on either). The build makes a table
+# for each (design.py); PAL is the default the model shows.
+DISPLAY = "pal"
 # The decoded block: lines and MODE 2 pixels, and the fields it is seen in.
 PAL_LINES = 16
 PAL_PIXELS = 16

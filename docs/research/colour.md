@@ -34,10 +34,13 @@ are Driller's and so stay out of the repository. ScummVM references are
   3.1 through PAL and 9.1 on RGB, with 247 of 310 colours on a different
   pattern. Chosen for both at once: 6.1 on RGB, 4.2 through PAL.
 - **Recommended: the Atari ST's per-area palettes, in 2 × 4 tiles of up
-  to three colours, chosen to look right on both displays.** The EGA is
-  shown more faithfully (3.9 and 3.7 dE) but has a fixed palette; the ST
-  has the most colours (11 an area at the median, 218 across the game),
-  each area its own, and is byte-exact to ScummVM's supported release.
+  to three colours.** The EGA is shown more faithfully (3.9 and 3.7 dE,
+  chosen for both displays) but has a fixed palette; the ST has the most
+  colours (11 an area at the median, 218 across the game), each area its
+  own, and is byte-exact to ScummVM's supported release.
+- **A table for each display**, RGB, PAL and both, switched at area entry
+  or by a key, costs 1,740 bytes a table; PAL is the default, as Matt
+  prefers (section 7).
 
 ## 1. What was fetched, and from where
 
@@ -267,8 +270,9 @@ both, they stay black and white, red and white. Area by area, each area
 needs one pattern per colour its faces use, 4-14 (`study.md` has every
 area for every version).
 
-**Looking at the swatches** (`build/colour/swatches/st-both/` and the
-others: source, RGB monitor, PAL TV, magnified at MODE 2's aspect):
+**Looking at the swatches** (`build/colour/swatches/both/`, `pal/`,
+`rgb/` and the others: source, RGB monitor, PAL TV, magnified at MODE
+2's aspect):
 mid and light colours come out well on both; a checkerboard of two
 colours reads as their mix on either display. The weak spot is dark
 colours: below one lit pixel in eight (a grey of about #636363 on RGB)
@@ -289,16 +293,49 @@ through it, its worst.
 | D. CPC | 9 mixes of 4 inks | 2.0 / 4.0 | 11.1 / 11.9 | The original development machine; its two-pen patterns land well | Four colours an area, not "many colours" |
 
 Within any option: *triple* over *pair* (lower error, fewer hue shifts,
-no more texture), and choose for both displays unless the project fixes
-one (a one-line switch, `patterns.DISPLAY`; `bbc-st-pal.json` and
-`bbc-st-rgb.json` are built too).
+no more texture).
 
-**Recommended: A, in *triple*, chosen for both displays.** The brief is
-many colours, and the ST's per-area palettes are the version of Driller
-with the most of them; the BBC holds them to a mean of 4-6 dE, against
-the EGA's 4, at the cost of more visible dithering in dark areas. If
-that texture looks wrong in the running game, C is the fallback with
-the same code: only `CHOSEN` in `design.py` changes.
+**Recommended: A, in *triple*.** The brief is many colours, and the ST's
+per-area palettes are the version of Driller with the most of them; the
+BBC holds them to a mean of 3-6 dE, against the EGA's 3-4, at the cost
+of more visible dithering in dark areas. If that texture looks wrong in
+the running game, C is the fallback with the same code: only `CHOSEN`
+in `design.py` changes.
+
+### A table for each display, switched at run time
+
+Matt asked (2026-10-31) whether PAL against RGB could be chosen from
+outside: it can, because the display changes only the patterns, not the
+colours or the faces. `make colours` builds three tables from the ST,
+each the patterns its display's scoring picks (`make colour-check`
+proves it): `build/colour/bbc-rgb.json` for an RGB monitor,
+`bbc-pal.json` for jsbeeb's PAL TV and a television, and
+`bbc-both.json`, right on either. Their face colours are the same.
+
+What carrying all three costs (`study.md`, "Carrying a table for each
+display", 2026-10-31): 15 patterns, a sky and a ground of four bytes for
+each of the 29 areas is 1,972 bytes a table, 5,916 for three. The sky is
+black in every area and the ground is its floor index's pattern
+(decision 8a draws the floor as a face), so 15 patterns an area carry
+it all: 1,740 bytes a table, 5,220 for three, in sideways RAM with the
+area records. The tables differ in most entries (RGB and PAL in 322 of
+the 435), so they don't share much as tables, but their patterns do:
+the three hold 251 distinct ones, and a pool of those with a byte an
+index is 2,309 bytes for all three, if space is short.
+
+How a switch works: the row writer indexes one live table of 15
+patterns (60 bytes) for the current area. On entering an area, the
+engine copies that area's patterns for the selected display into it; a
+key that changes the display selects another table, re-copies the
+current area's and redraws. Nothing else changes, and nothing in the
+frame's work does.
+
+The disc's default: **PAL**, as Matt prefers. The README's jsbeeb link
+shows the game through the PAL TV, a BBC on a television is PAL, and
+the PAL table is the best there (3.1 dE against `both`'s 4.2). A BBC on
+an RGB monitor wants the RGB table (4.8 against PAL's 9.1, where PAL's
+complementary mixes show as coloured noise), one key press away; `both`
+is the one to keep if the engine ever carries only one.
 
 ## 8. Decision 8, as proposed
 
@@ -322,13 +359,27 @@ the same code: only `CHOSEN` in `design.py` changes.
 >   6.1 dE on an RGB monitor and 4.2 through jsbeeb's PAL TV, against the
 >   EGA's 3.9 and 3.7 with one fixed palette (docs/research/colour.md).
 
+And for the display, an addition to propose:
+
+> **A table of patterns for each display: an RGB monitor, a PAL
+> television (and jsbeeb's PAL TV), and both at once. The engine carries
+> all three, copies the selected one's into the live table at area entry,
+> and a key changes the selection. PAL is the default** (Matt's
+> preference, and the README's jsbeeb link). Why: the best pattern for a
+> colour depends on the display, and choosing for one costs the other
+> (the ST's PAL table is 3.1 dE through PAL and 9.1 on RGB); three tables
+> are 5,220 bytes of sideways RAM.
+
 ## 9. For the other tracks
 
-- `tools/model/colours.py` (reads `build/colour/bbc.json`; run `make
-  colours`, which needs `make fetch`):
-  - `pattern(area, index)`, `sky(area)`, `ground(area)`: `bytes` of
-    four, one for each value of `line AND 3`. `area` is an id or a
-    record with an `"id"`. `index` 1-15; 0 raises.
+- `tools/model/colours.py` (reads `build/colour/bbc-{rgb,pal,both}.json`;
+  run `make colours`, which needs `make fetch`):
+  - `pattern(area, index, display=None)`, `sky(area, display=None)`,
+    `ground(area, display=None)`: `bytes` of four, one for each value of
+    `line AND 3`. `area` is an id or a record with an `"id"`. `index`
+    1-15; 0 raises. `display` is `"rgb"`, `"pal"` or `"both"`; without
+    one, `colours.DISPLAY`, which `FREESCAPE_DISPLAY` in the environment
+    sets and is `"pal"` otherwise.
   - `face_colours(area, object_id)`: the object's colour nibbles in the
     ST's database, in the database's face order, or `None`. **The data
     and model tracks should draw faces with these, not the ZX's**, and
