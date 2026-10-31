@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "model"))
 
 from raster import (VIEW_W, VIEW_H, SUB, HALF, Background, Horizon,  # noqa: E402
                     edge_crossings, edge_crossings_exact,
-                    spans, reference)
+                    spans, painter, reference)
 import writer  # noqa: E402
 
 XMAX, YMAX = SUB * VIEW_W, SUB * VIEW_H
@@ -37,13 +37,14 @@ MAX_VERTICES = 16
 def _raster_constant(name):
     """A constant of src/raster.6502, where the 6502's limits are set."""
     src = (Path(__file__).resolve().parents[1] / "src" / "raster.6502").read_text()
-    m = re.search(rf"^{name}\s*=\s*(\d+)", src, re.M)
+    m = re.search(rf"^\s*{name}\s*=\s*(\d+)", src, re.M)
     return int(m.group(1))
 
 
 # The 6502's pools' size, and its horizon: a point within HMAX of 0 and a
 # direction in signed bytes.
 POOL_NODES = _raster_constant("POOL_NODES")
+PAINTER_POOL = _raster_constant("POOL_HELD")     # the painter build's (its first)
 PATTERNS = _raster_constant("RS_PATTERNS")
 HMAX, DMAX = _raster_constant("RS_HMAX"), 127
 
@@ -399,8 +400,14 @@ def build(s):
                     raise SystemExit(f"{s['name']}: an edge's DDA is {p - exact[k]} pixels out on line {k}")
             if exact:
                 raise SystemExit(f"{s['name']}: an edge's DDA misses lines {sorted(exact)}")
-    # What the 6502 draws, its pools as big as they are.
+    # What the 6502 draws, its pools as big as they are; and the painter
+    # build's, with its own counts (and its own view where the span
+    # buffer's pools overflowed, which the painter's never do).
     lines, counts = spans(faces, bg, POOL_NODES)
+    plines, pcounts = painter(faces, bg, PAINTER_POOL)
+    pview = [row.hex() for row in writer.view_bytes(plines)]
+    if pview != [row.hex() for row in writer.view_bytes(spans(faces, bg)[0])]:
+        raise SystemExit(f"{s['name']}: the painter's view isn't the span buffer's")
     return {
         "name": s["name"],
         "sky": s["sky"],
@@ -409,6 +416,10 @@ def build(s):
         "faces": [{"pattern": list(p), "vertices": [list(v) for v in vs]} for p, vs in faces],
         "view": [row.hex() for row in writer.view_bytes(lines)],
         "counts": {**counts.__dict__, "runs": counts.runs, "bytes": counts.bytes},
+        "painter": {
+            "counts": {**pcounts.__dict__, "runs": pcounts.runs, "bytes": pcounts.bytes},
+            **({"view": pview} if counts.overflow else {}),
+        },
     }
 
 

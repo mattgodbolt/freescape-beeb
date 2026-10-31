@@ -67,6 +67,11 @@ const VIEW_ADDR = S("VIEW_ADDR");
 const SCREEN = S("SCREEN");
 const SCREEN_ROW = S("SCREEN_ROW");
 const ACCCON_X = S("ACCCON_X");
+// The painter build has its own counts, and its own view where the span
+// buffer's pools overflowed (tools/rasterscenes.py).
+const PAINTER = Boolean(S("RASTER_PAINTER"));
+const countsOf = (s) => (PAINTER ? s.painter.counts : s.counts);
+const viewOf = (s) => (PAINTER && s.painter.view ? s.painter.view : s.view);
 const addr = (y, c) => VIEW_ADDR + Math.floor(y / 8) * SCREEN_ROW + 8 * c + (y % 8);
 
 // Where the frame may write: its zero page, the stack, its own sections
@@ -95,6 +100,7 @@ const BUCKETS = [
     ["run", "put_run"],
     ["join", "put_bnd"],
     ["frame", "writer_init"],
+    ...(PAINTER ? [0, 1, 2, 3].map((k) => ["paint", `paint${k}`]) : []),
     ["face", "raster_face"],
     ["face", "seg_end"],
     // the line loop's copies: which chain is left, the insertion, the
@@ -179,7 +185,7 @@ function writeScene(s) {
 // written must be the model's).
 async function frame(s, shadow, fresh) {
     writeScene(s);
-    const want = s.view.map((row) => Buffer.from(row, "hex"));
+    const want = viewOf(s).map((row) => Buffer.from(row, "hex"));
     const space = shadow ? "shadow" : "main";
     const other = shadow ? "main" : "shadow";
     m.poke(S("check_acccon"), shadow ? ACCCON_X : 0);
@@ -246,8 +252,9 @@ async function frame(s, shadow, fresh) {
     }
     if (strays.length) problems.push(`wrote outside its memory: ${strays.map((a) => "&" + a.toString(16)).join(" ")}`);
     const overflow = m.peek(S("rs_overflow")) !== 0;
-    if (overflow !== s.counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${s.counts.overflow}`);
-    if (fresh && counts.bytes !== s.counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${s.counts.bytes}`);
+    const want_counts = countsOf(s);
+    if (overflow !== want_counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${want_counts.overflow}`);
+    if (fresh && counts.bytes !== want_counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${want_counts.bytes}`);
     return { cycles, prof, counts, problems };
 }
 
@@ -272,7 +279,7 @@ for (const [i, s] of scenes.entries()) {
     const r = await frame(s, i % 2 === 1, true);
     report(s.name, r);
     for (const [k, v] of Object.entries(r.prof)) totals[k] = (totals[k] || 0) + v;
-    results.push({ name: s.name, cycles: r.cycles, profile: r.prof, measured: r.counts, counts: s.counts, ok: !r.problems.length });
+    results.push({ name: s.name, cycles: r.cycles, profile: r.prof, measured: r.counts, counts: countsOf(s), ok: !r.problems.length });
 }
 const sum = results.reduce((t, r) => t + r.cycles, 0);
 console.log(`${results.length - failures}/${results.length} scenes match the model; ` +
@@ -294,7 +301,7 @@ for (const q of sequences) {
         written.push(r.counts.bytes);
     }
     if (failures > before) seqFailures++;
-    seqResults.push({ name: q.name, cycles, written, alone: q.frames.map((s) => s.counts.bytes) });
+    seqResults.push({ name: q.name, cycles, written, alone: q.frames.map((s) => countsOf(s).bytes) });
     console.log(`  ${q.name.padEnd(10)} cycles ${cycles.join(" ")}; bytes written ${written.join(" ")}`);
 }
 console.log(`${sequences.length - seqFailures}/${sequences.length} sequences match the model frame by frame`);
