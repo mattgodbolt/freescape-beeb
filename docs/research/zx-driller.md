@@ -86,6 +86,84 @@ by a check.
   step first splits by pitch, `y −= ⌊step · sin(pitch) / 64⌋` and the
   horizontal step is `⌊step · |cos(pitch)| / 64⌋` (`$A364`) [read].
 
+## The draw list and the sort
+
+- An object joins the draw list only if one of its faces survives (a
+  non-zero colour, in front, and something left after the clip). Its
+  entry (`($8A9D)`, 4 bytes) points at its projected data (`($8A99)`:
+  its id; a face count, bit 7 set if a face covers the whole view; then
+  per face a byte `colour << 4 | points` and the points' (x, y) bytes)
+  and at its box relative to the camera (12 bytes: x min, x max, y min,
+  y max, z min, z max, 16-bit world units: `64·cell − camera`). The
+  count is `$8918` [read].
+- **The list starts with the area's objects in the database's order,
+  then the globals** (`$6B3D`, then `$6B48`). Castle Master II, and
+  ScummVM after it, put the globals first. In the entrance views the
+  globals (the rig and the skanner) are all invisible, so it doesn't
+  show there [read].
+- **The sort** (`$767E`) is Castle Master II's, and ScummVM's
+  `compareBoundingBoxAxis` and `sortObjectsForRendering` case for case
+  (`area.cpp:321-375`) [read]: up to `n − 1` bubble passes over adjacent
+  pairs (P, Q), stopping after a pass with no swap. Per axis (x, then y,
+  then z), on the camera-relative boxes:
+  - the boxes overlap (`P.min < Q.max` and `Q.min < P.max`): no verdict;
+  - P straddles the camera (`min < 0 ≤ max`): P is nearer; else if Q
+    does, Q is;
+  - they're on opposite sides of the camera: no verdict;
+  - else the one whose min is nearer zero is nearer (if the mins are
+    equal, the maxes decide: with both sides positive, P is nearer when
+    `Q.max ≥ P.max`; with both negative, when `Q.max < P.max`).
+  - The pair keeps its order only if Q is nearer on some axis and P on
+    none; otherwise it swaps, even with no verdict on any axis.
+  - Every comparison is a 16-bit subtraction's sign.
+- **The draw** (`$7803`) paints the list in order, far to near. Each
+  face is scanned (`$83FC`; a two-point face, a line, by `$85FF`) and
+  filled (`$80C0`) at once, in its object's face order.
+  - If any object has a face covering the whole view (a four-point face
+    on the four corners (0, 0), (0, 104), (208, 104), (208, 0)), drawing
+    starts at the last such object in the list and the buffer isn't
+    cleared.
+  - Otherwise the buffer's 104 shown rows are cleared to 0 first, if the
+    area's flags are non-zero.
+
+## The fill
+
+Transcribed in `tools/zx_arith.py` (`scan`, `fill`) [measured: 5,000
+random convex polygons of 1-6 points, on and inside the view's edges,
+each equal byte for byte to `$83FC` then `$80C0` drawing into the same
+random buffer]:
+
+- **Screen to pixels.** A screen point `(x, y)`, `x` 0-208 and `y` 0-104
+  with `y` up, covers pixel column `x − 1` and buffer row `104 − y`.
+  `x = 0` is off the view's left edge, `y = 0` is the hidden row 104.
+- **Edges** (`$83FC`), in order and closing back to the first point, each
+  walked from its lower end for the rows `[y_low, y_high)` (the upper
+  end's row isn't written), one x a row into a table of 3 bytes a row
+  (`($8A9F)`: a count and up to two x):
+  - a vertical edge: its x;
+  - a steep edge (`|dy| ≥ |dx|`): Bresenham with the error starting at
+    `|dy| >> 1`; write x, add `|dx|`, and step x once when the error
+    reaches `|dy|`;
+  - a shallow edge: the error starts at `|dx| >> 1`; write the row's
+    first x, then step x, adding `|dy|` each step, until the error
+    reaches `|dx|`, which moves to the next row;
+  - a row keeps the first two distinct x values written to it;
+  - a horizontal edge counts only on the polygon's top or bottom row,
+    and overwrites that row with its two ends.
+- **Spans** (`$80C0`), from the top row down: each row from its lower x
+  to its higher x inclusive (one pixel for a row with one x), written
+  opaquely, ink and paper: the face's pattern byte for `y AND 3` (the
+  screen y, so `(104 − row) AND 3`) through left and right masks
+  (`$80B2`), the row's table entry cleared as it goes. The patterns are
+  the database's 15 four-byte shades (`($891D)`, database `+$0A`), colour
+  `c` at `4·(c − 1)`.
+- So the top vertex's row is drawn only through a horizontal top edge,
+  and a polygon's spans are the original's integer edge walk, not pixel
+  centres: the model's fill rule (`docs/engine.md`, section 9) will
+  differ from the ZX at edges unless this is transcribed.
+- A line (`$85FF`) writes one x a row when steep and the whole run a row
+  when shallow [read; not yet checked].
+
 ## The view oracle
 
 `make zxviews` draws every entrance view with the original's own code

@@ -11,9 +11,10 @@ behaviour. The check calls the original's own routines in the snapshot
     the matrix       $6EE4 (via $7896)  against matrix()
     the transform    $6E25 then $7915   against transform()
     the projection   $7C9D (via $910E, $91F1) against project()
+    the fill         $83FC then $80C0   against fill() (scan())
 
-The tables (the sine table, the scaling diagonal, the projection centre)
-are read from the snapshot, never written here (decision 6).
+The tables (the sine table, the scaling diagonal, the projection centre,
+the patterns) are read from the snapshot, never written here (decision 6).
 """
 import argparse
 import os
@@ -22,7 +23,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import zx  # noqa: E402
-from skoolkit.simutils import PC, SP  # noqa: E402
+from skoolkit.simutils import PC, SP, IXh, IXl  # noqa: E402
 
 SENT = 0x0008  # a sentinel return address no routine here reaches
 
@@ -40,6 +41,13 @@ VERTS_OUT = 0x5E9F   # in camera space, likewise
 TRANSFORM = 0x7915
 PROJECT = 0x7C9D
 PROJECTED = 0x8A6B   # x, y bytes a vertex
+SCAN = 0x83FC        # a polygon's edges into the edge table (IX: its points)
+FILL_SPANS = 0x80C0  # the edge table's rows into the buffer
+EDGE_TABLE = 0x8A9F  # the address of the edge table: 3 bytes a row, 105 rows
+COLOUR = 0x8917      # the face's colour, 1-15
+PATTERNS = 0x891D    # the address of the 15 patterns, 4 bytes each
+BUFFER = 0x5CBC
+FACE_SCRATCH = 0x6766  # the draw list's space, free outside a redraw
 
 
 def sb(v):
@@ -118,6 +126,92 @@ def project(tab, x, y, z):
     return _proj1(tab.xc, x, z), _proj1(tab.yc, y, z)
 
 
+def scan(points):
+    """$83FC: the edge table for a polygon of screen points (x, y), y up:
+    {y: (flag, x1, x2)}, flag 1 for one x, 2 for two.
+
+    Each edge, in order and closing back to the first point, is walked
+    from its lower end for the rows [y_low, y_high), one x a row: a
+    vertical edge's x; otherwise Bresenham with the error starting at
+    half the major delta, the steep case writing then stepping x at most
+    once a row, the shallow case writing the row's first x then stepping
+    x until the error carries into the next row. A row keeps the first
+    two distinct x values written to it. A horizontal edge counts only on
+    the polygon's top or bottom row, and overwrites that row with both
+    its ends."""
+    n = len(points)
+    ys = [p[1] for p in points]
+    ytop, ybottom = max(ys), min(ys)
+    table = {}
+
+    def write(y, x):
+        e = table.get(y)
+        if e is None:
+            table[y] = (1, x, 0)
+        elif e[0] == 1 and e[1] != x:
+            table[y] = (2, e[1], x)
+
+    for i in range(n):
+        (x0, y0), (x1, y1) = points[i], points[(i + 1) % n]
+        if y0 == y1:
+            if (y0 == ytop or y0 == ybottom) and x0 != x1:
+                table[y0] = (2, x0, x1)
+            continue
+        if x0 == x1:
+            for y in range(min(y0, y1), max(y0, y1)):
+                write(y, x0)
+            continue
+        step = 1 if x1 > x0 else -1
+        adx, ady = abs(x1 - x0), abs(y1 - y0)
+        if y1 < y0:  # walk from the lower end
+            step, x, y = -step, x1, y1
+        else:
+            x, y = x0, y0
+        if ady >= adx:
+            err = ady >> 1
+            for _ in range(ady):
+                write(y, x)
+                err += adx
+                if err >= ady:
+                    err -= ady
+                    x += step
+                y += 1
+        else:
+            err = adx >> 1
+            for _ in range(ady):
+                write(y, x)
+                while True:
+                    x += step
+                    err += ady
+                    if err >= adx:
+                        err -= adx
+                        break
+                y += 1
+    return table, ytop, ybottom
+
+
+def fill(points, pattern, buf):
+    """$83FC then $80C0: a polygon into a view buffer (bytearray, 26 bytes
+    a row, 105 rows), in pattern (four bytes, by y AND 3). Screen x
+    covers pixel column x - 1 (x = 0 is off the view's left); screen y
+    is buffer row 104 - y. A row's span is x1..x2 inclusive (one pixel
+    for a flag-1 row), written opaquely: the pattern's ink and paper."""
+    table, ytop, ybottom = scan(points)
+    for y in range(ytop, ybottom - 1, -1):
+        e = table.get(y)
+        if e is None:
+            continue
+        flag, a, b = e
+        lo, hi = (a, a) if flag == 1 else (min(a, b), max(a, b))
+        row = 104 - y
+        byte = pattern[y & 3]
+        for x in range(max(lo, 1), hi + 1):
+            px = x - 1
+            mask = 0x80 >> (px & 7)
+            i = row * 26 + (px >> 3)
+            buf[i] = (buf[i] & ~mask & 0xFF) | (byte & mask)
+
+
 class Original:
     """The original's routines, called in the snapshot with a sentinel
     return address."""
@@ -164,6 +258,23 @@ class Original:
         self.call(PROJECT)
         return [(self.mem[PROJECTED + 2 * v], self.mem[PROJECTED + 2 * v + 1]) for v in range(len(vs))]
 
+    def fill(self, points, colour, buf):
+        """The polygon through the original's $83FC and $80C0 into a
+        buffer (its contents first), returned."""
+        m = self.mem
+        m[BUFFER:BUFFER + len(buf)] = buf
+        edges = self.peek16(EDGE_TABLE) & 0xFFFF
+        m[edges:edges + 3 * 105] = bytes(3 * 105)
+        for i, (x, y) in enumerate(points):
+            m[FACE_SCRATCH + 2 * i], m[FACE_SCRATCH + 2 * i + 1] = x, y
+        m[NVERTS] = len(points)
+        m[COLOUR] = colour
+        r = self.spec.regs
+        r[IXh], r[IXl] = FACE_SCRATCH >> 8, FACE_SCRATCH & 0xFF
+        self.call(SCAN)
+        self.call(FILL_SPANS)
+        return bytearray(m[BUFFER:BUFFER + len(buf)])
+
 
 def check(snap, cases, seed=1):
     rng = random.Random(seed)
@@ -206,9 +317,45 @@ def check(snap, cases, seed=1):
             want = project(tab, *v)
             if got != want:
                 differ("project", tuple(v), got, want)
+    patterns = orig.peek16(PATTERNS) & 0xFFFF
+    n_fill = 0
+    for _ in range(cases):
+        points = _convex(rng)
+        if rng.random() < 0.5:
+            points.reverse()
+        colour = rng.randint(1, 15)
+        pattern = [orig.mem[patterns + 4 * (colour - 1) + i] for i in range(4)]
+        before = bytearray(rng.randrange(256) for _ in range(26 * 105))
+        got = orig.fill(points, colour, before)
+        want = bytearray(before)
+        fill(points, pattern, want)
+        n_fill += 1
+        if got != want:
+            differ("fill", (points, colour), f"{sum(a != b for a, b in zip(got, want))} bytes off", "")
     print(f"zx_arith: {len(angles)} matrices, {n_vert} vertices transformed, "
-          f"{n_proj} projected: {failures} differ")
+          f"{n_proj} projected, {n_fill} polygons filled: {failures} differ")
     return failures == 0
+
+
+def _convex(rng):
+    """A random convex polygon of 1-6 screen points, in order, sometimes
+    on the view's edges."""
+    def coord(top):
+        return rng.choice([0, top, rng.randint(0, top), rng.randint(0, top), rng.randint(0, top)])
+    pts = sorted({(coord(208), coord(104)) for _ in range(rng.randint(1, 8))})
+    if len(pts) < 3:
+        return pts
+
+    def half(ps):
+        out = []
+        for p in ps:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                                     - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])) <= 0:
+                out.pop()
+            out.append(p)
+        return out
+    hull = half(pts)[:-1] + half(pts[::-1])[:-1]
+    return hull[:6]
 
 
 def main():
