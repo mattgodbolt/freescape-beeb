@@ -83,11 +83,10 @@ make check      # every check
 
 ## Rights
 
-Driller is Incentive Software's, and it isn't ours to give away. The
-build reads it from copies you fetch, and nothing of it is committed:
-not its data, its graphics or anything made from them. So the public disc
-shows the engine on scenes of its own, and Driller's views stay on the
-machine that built them.
+*Driller* is Incentive Software's. The disc is a tech demo of the engine,
+shown on Driller's scenes with that attribution on the disc; it isn't a
+release of the game. Nothing else of Driller's is committed: the build
+reads it from copies `make fetch` downloads.
 
 ## Credits
 

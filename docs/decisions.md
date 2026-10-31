@@ -65,10 +65,14 @@ engine, and Matt plays on a real Master.
 The build reads Driller from fetched copies (`make fetch`, into
 `originals/`, git-ignored) and commits nothing of it.
 
-**The public disc, `freescape.ssd`, carries nothing of Driller's either**
-(Matt asked for it to follow the work, 2026-10-31). It shows the engine on
-scenes of its own; Driller's areas are rendered and timed only on the
-machine that fetched them, until the rights allow otherwise.
+**The public disc, `freescape.ssd`, is a tech demo that shows Driller's
+scenes, attributed** (Matt, 2026-10-31: "I think it's fair use to show
+driller scenes -- we aren't misrepresenting driller here, we'd attribute
+accordingly (much as the other earlier work). this is a tech demo only
+though"). The disc says on it that Driller is Incentive Software's, and
+it's a demonstration of the engine, not a release of the game. The
+repository still commits nothing of Driller's beyond that disc: the
+build derives the disc's data from the fetched copies.
 
 ## 7. Scope (2026-10-31)
 

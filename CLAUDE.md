@@ -48,7 +48,8 @@ checked against the original (`docs/engine.md`, "Checking").
 ## Rights
 
 Driller is not ours. Nothing of the original (its tape, discs, data,
-graphics or anything derived from them) is ever committed: `make fetch`
+graphics or anything derived from them) is ever committed, but for the
+tech-demo disc (decision 6): `make fetch`
 downloads the originals into `originals/` (git-ignored), and the build
 derives everything from there into `build/` (git-ignored).
 
@@ -61,9 +62,10 @@ from Python run with `-I`.
 Matt follows the work through `README.md` and `freescape.ssd`, which the
 README's jsbeeb link boots (`github:mattgodbolt/freescape-beeb/freescape.ssd`).
 Keep the README's "Where it's up to" true, and commit and push a new disc
-whenever something visible lands. **The committed disc never carries
-anything of Driller's** (decision 6): it shows the engine on scenes of its
-own.
+whenever something visible lands. The disc is a tech demo: it may show
+Driller's scenes, attributed to Incentive on the disc itself (decision 6),
+but it isn't a release of the game, and nothing else of Driller's is
+committed.
 
 ## Commands
 
