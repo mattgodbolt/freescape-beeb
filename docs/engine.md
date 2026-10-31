@@ -186,3 +186,37 @@ come with it, to see where the cycles go.
 
 The tracks size these as they go, and `make memory` reports what each
 region holds.
+
+## 9. The interfaces between the stages
+
+The model's, which the 6502 mirrors. Tracks working at once code to these;
+a change is agreed and recorded here first.
+
+- **View coordinates**: x right, y down, relative to the view's top left,
+  in **sixteenths of a pixel** (`SUB = 16`), as integers. Pixel `(px, py)`
+  has its centre at `(16·px + 8, 16·py + 8)`.
+- **The fill rule**: a polygon covers a pixel when the pixel's centre is
+  inside it. A centre exactly on an edge counts for top and left edges
+  and not for bottom and right ones.
+- **`maths.project(X, Y, Z)`** (`tools/model/maths.py`): camera-space
+  24-bit signed integers (stage 3's), `Z >= ZNEAR`, to `(sx, sy)` in view
+  coordinates, which may lie far outside the view. The focal lengths and
+  centre are parameters (`FX`, `FY`, `XC`, `YC`, in sixteenths).
+- **The rasteriser's input** (`tools/model/raster.py`):
+  - the background: a sky pattern, a ground pattern, and the horizon as
+    a point and a direction in view coordinates, sky to the left of the
+    direction as seen on the screen; or no horizon, all sky;
+  - the faces, **nearest first**, each a pattern and a convex polygon
+    whose vertices are view coordinates inside `[0, 16·VIEW_W] ×
+    [0, 16·VIEW_H]` (after the 2D clip), in either winding;
+  - a pattern is four bytes, one for each value of `line AND 3`, each
+    the MODE 2 byte for the two pixels it covers.
+- **The rasteriser's output**: for each line `0 .. VIEW_H − 1`, its runs
+  `(x0, x1, pattern)` in pixels, in order, covering `[0, VIEW_W)`
+  exactly.
+- **The writer** (`tools/model/writer.py`): the lines' runs to the view's
+  bytes, in the screen's layout: line `y`, byte column `c` is at
+  `VIEW_ADDR + (y DIV 8)·SCREEN_ROW + 8·c + (y MOD 8)` (`src/defs.6502`).
+- **Patterns from colours** (`tools/model/colours.py`):
+  `pattern(area, index)` for a face's colour index, and `sky(area)` and
+  `ground(area)`, each four bytes.

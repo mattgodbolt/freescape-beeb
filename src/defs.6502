@@ -47,6 +47,15 @@ ASSERT VIEW_W MOD 2 = 0
 ASSERT VIEW_H MOD 8 = 0
 ASSERT VIEW_BYTES <= SCREEN_COLS
 
+\ The view's top left: a whole character row down, centred across.
+VIEW_ROW0   = 1
+VIEW_COL0   = (SCREEN_COLS - VIEW_BYTES) DIV 2
+VIEW_ADDR   = SCREEN + VIEW_ROW0 * SCREEN_ROW + VIEW_COL0 * 8
+ASSERT VIEW_ROW0 + VIEW_H DIV 8 <= SCREEN_ROWS
+
+\ Sixteenths of a pixel: the view coordinates (docs/engine.md, section 9).
+SUB         = 16
+
 \ The bits of a MODE 2 byte that hold its left and right pixels.
 PIX_LEFT    = &AA
 PIX_RIGHT   = &55
