@@ -79,18 +79,22 @@ const writable = (a) => viewAddrs.has(a) || allowed.some(([lo, hi]) => a >= lo &
 // labels at or below it.
 const BUCKETS = [
     ["check", "check_init"],
-    ["line", "line_setup"],
+    ["row", "row_setup"],
     ["run", "put_run"],
     ["join", "put_bnd"],
-    ["init", "writer_init"],
-    ["frame", "raster_frame"],
+    ["frame", "writer_init"],
     ["face", "raster_face"],
-    ["edge", "chain_a"],
-    ["insert", "ins0"],
+    ["face", "seg_end"],
+    // the line loop's copies: the span, the chains' steps, the insertion
+    ...[0, 1, 2, 3].flatMap((k) => [
+        ["span", `loop${k}`],
+        ["step", `sa${k}`],
+        ["insert", `sb_end${k}`],
+        ["next", `next${k}`],
+    ]),
+    ["edge", "patch_steps"],
     ["bg", "raster_background"],
-    ["horizon", "raster_background.level"],
-    ["bg", "raster_background.fill"],
-    ["horizon", "sext32"],
+    ["horizon", "horizon_split"],
     ["bytes", "rr_rows"],
 ];
 const marks = BUCKETS.map(([b, l]) => [S(l), b]).sort((p, q) => p[0] - q[0]);
@@ -251,5 +255,47 @@ const sum = results.reduce((t, r) => t + r.cycles, 0);
 console.log(`${results.length - failures}/${results.length} scenes match the model; ` +
     `${sum} cycles in all, by part: ` +
     Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(100 * v / sum).toFixed(1)}%`).join(", "));
-if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ results }, null, 1) + "\n");
+
+// The cost model: cycles against the model's counts, by least squares over
+// the scenes that didn't overflow.
+const TERMS = [
+    ["lines", (c) => VIEW_H - c.full_lines],    // lines the background fills
+    ["face-lines", (c) => c.face_lines],
+    ["runs", (c) => c.runs],
+    ["bytes", (c) => c.whole],                  // whole bytes, through the row runs
+    ["joins", (c) => c.joins],                  // bytes two runs share
+    ["edges", (c) => c.edges],
+];
+const fit = (rows) => {
+    const n = TERMS.length;
+    const A = Array.from({ length: n }, () => new Array(n + 1).fill(0));
+    for (const r of rows) {
+        const x = TERMS.map(([, f]) => f(r.counts));
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) A[i][j] += x[i] * x[j];
+            A[i][n] += x[i] * r.cycles;
+        }
+    }
+    for (let i = 0; i < n; i++) {
+        let p = i;
+        for (let k = i + 1; k < n; k++) if (Math.abs(A[k][i]) > Math.abs(A[p][i])) p = k;
+        [A[i], A[p]] = [A[p], A[i]];
+        for (let k = 0; k < n; k++) {
+            if (k === i || A[i][i] === 0) continue;
+            const f = A[k][i] / A[i][i];
+            for (let j = i; j <= n; j++) A[k][j] -= f * A[i][j];
+        }
+    }
+    const coef = A.map((row, i) => row[n] / row[i]);
+    const errs = rows.map((r) => {
+        const x = TERMS.map(([, f]) => f(r.counts));
+        return (x.reduce((t, v, i) => t + v * coef[i], 0) - r.cycles) / r.cycles;
+    });
+    const rms = Math.sqrt(errs.reduce((t, e) => t + e * e, 0) / errs.length);
+    return { coef, rms, worst: Math.max(...errs.map(Math.abs)) };
+};
+const fitted = fit(results.filter((r) => !r.counts.overflow));
+console.log("cost model: cycles = " + TERMS.map(([name], i) => `${fitted.coef[i].toFixed(1)} ${name}`).join(" + ") +
+    ` (rms error ${(100 * fitted.rms).toFixed(1)}%, worst ${(100 * fitted.worst).toFixed(1)}%)`);
+if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify({ terms: TERMS.map(([t]) => t), fit: fitted, results }, null, 1) + "\n");
 process.exit(failures ? 1 : 0);

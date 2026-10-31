@@ -24,7 +24,7 @@ define RASTER_CHECK_6502
 INCLUDE "../../src/defs.6502"
 ZA_POOL &00..&8F
 
-SECTION RasterCode, org = &1000, guard = &2400, filename = "RCODE", cmos = TRUE
+SECTION RasterCode, org = &1600, guard = &3000, filename = "RCODE", cmos = TRUE
 .check_init
     ZA_ENTRY
     JMP raster_init
@@ -40,7 +40,7 @@ SECTION RasterCode, org = &1000, guard = &2400, filename = "RCODE", cmos = TRUE
 .check_acccon
     EQUB ACCCON_Y
 ENDSECTION
-SECTION RasterIn, org = &2400, guard = &3000, virtual = TRUE
+SECTION RasterIn, org = &0E00, guard = &1600, virtual = TRUE
 ENDSECTION
 SECTION RasterRuns, org = &C000, guard = &CD00, filename = "RRUNS", cmos = TRUE
 ENDSECTION
