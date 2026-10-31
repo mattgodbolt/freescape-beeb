@@ -55,6 +55,25 @@
 }
 ASSERT ZX_N_GLOBALS > 0 AND ZX_AREAS_MOST + ZX_N_GLOBALS < IX_MAX     ; (and a byte after the last, where touch stops)
 
+\ shown_flags: each indexed object's flags byte (its record's +0: bit 6
+\ invisible, bit 5 destroyed, the low nibble its type) into ix_flags, in
+\ the index's order, for the renderer, which runs with its own bank in:
+\ the area's objects from 0 (AreaObjects of them), then the globals.
+.shown_flags
+{
+    ZA_AUTO2 p
+    LDX #0
+    BRA test
+.object
+    LDA ix_pl,X : STA p
+    LDA ix_ph,X : STA p+1
+    LDA (p) : STA ix_flags,X
+    INX
+.test
+    CPX ix_n : BNE object
+    RTS
+}
+
 \ answer: object X of the index is entered. If it's visible, a rectangle,
 \ a line or a polygon is the answer (C set, A its id) and any other is
 \ remembered in HitRemembered (C clear); invisible, C clear. Keeps X.

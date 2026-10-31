@@ -27,6 +27,19 @@
     LDA #LOGIC_BANK : STA romsel
     JMP index_objects
 
+\ logic_go_colours: the screen takes the area's colours (the original's
+\ $A77A, which its redraw runs when AreaChanged is set): ScreenColours,
+\ the sensors' flash counters, and AreaChanged cleared.
+.logic_go_colours
+    LDA #LOGIC_BANK : STA romsel
+    JMP screen_update
+
+\ logic_go_shown: each of the area's objects' and the globals' flags into
+\ ix_flags, for the renderer (shown_flags).
+.logic_go_shown
+    LDA #LOGIC_BANK : STA romsel
+    JMP shown_flags
+
 \ far_events: the events (LOGIC_BANK), from the pass (LOGIC_CODE_BANK).
 .far_events
     LDA #LOGIC_BANK : STA romsel

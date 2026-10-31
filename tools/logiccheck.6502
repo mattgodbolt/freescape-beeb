@@ -52,6 +52,11 @@ INCLUDE "../src/logic/hooks.6502"
     JSR logic_go_minute
     RTS
 
+.chk_shown
+    ZA_ENTRY
+    JSR logic_go_shown
+    RTS
+
 .chk_fcl
     ZA_ENTRY
     LDA #LOGIC_BANK : STA romsel

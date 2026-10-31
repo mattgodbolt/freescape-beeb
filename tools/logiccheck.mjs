@@ -98,6 +98,30 @@ function compare() {
     return diffs;
 }
 
+// The renderer's view of the objects (logic_go_shown): ix_flags, in the
+// index's order, must be the flags of the records the original walks, the
+// area's (from AreaObjPtr) and then the globals, and the index's records
+// those records.
+const IX_N = sym("ix_n"), IX_FLAGS = sym("ix_flags"), IX_PL = sym("ix_pl"), IX_PH = sym("ix_ph");
+const toZX = (b) => (b >= LOGIC_DB ? b - DB_MOVE : b - zxv + ZXV_ORG);
+async function shown(where) {
+    await m.call(sym("chk_shown"));
+    const word = (a) => exp[a] | (exp[a + 1] << 8);
+    const recs = [];
+    let p = word(0x8864);
+    for (let i = 0; i < exp[0x8863]; i++, p += exp[p + 8]) recs.push(p);
+    p = 0x87a5;
+    for (let i = 0; i < exp[0x890f]; i++, p += exp[p + 8]) recs.push(p);
+    const n = m.peek(IX_N);
+    if (n !== recs.length) return fail(`${where}: ${n} objects indexed, not ${recs.length}`);
+    for (let i = 0; i < n; i++) {
+        const z = toZX(m.peek(IX_PL + i) | (m.peek(IX_PH + i) << 8));
+        if (z !== recs[i]) return fail(`${where}: object ${i} indexed at ZX ${hex(z, 4)}, not ${hex(recs[i], 4)}`);
+        if (m.peek(IX_FLAGS + i) !== exp[z]) return fail(`${where}: object ${i}'s flags ${hex(m.peek(IX_FLAGS + i))}, not ${hex(exp[z])}`);
+    }
+    return true;
+}
+
 function report(where, diffs) {
     const lines = [`${where}: ${diffs.length} bytes differ (transcription, 6502):`];
     for (const [a, e, g] of diffs.slice(0, 16)) {
@@ -239,8 +263,13 @@ for (const r of trace.runs) {
         }
         for (const [a, v] of rec.changes) exp[a] = v;
         diffs = compare();
+        const where = `${rec.line} (${rec.names?.join(" ") ?? (rec.fcl ? "fcl" : "poke")})`;
         if (diffs.length) {
-            report(`${rec.line} (${rec.names?.join(" ") ?? (rec.fcl ? "fcl" : "poke")})`, diffs);
+            report(where, diffs);
+            ok = false;
+            break;
+        }
+        if ((await shown(where)) !== true) {
             ok = false;
             break;
         }

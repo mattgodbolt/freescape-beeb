@@ -87,6 +87,7 @@ IX_MAX = 48
 .ix_zo          SKIP IX_MAX
 .ix_ze          SKIP IX_MAX
 .ix_id          SKIP IX_MAX
+.ix_flags       SKIP IX_MAX             ; the records' flags as logic_go_shown last copied them, for the renderer
 .ix_pl          SKIP IX_MAX
 .ix_ph          SKIP IX_MAX
 ENDSECTION
