@@ -95,14 +95,20 @@ NEXT
 \ row's plant is put back where it's kept.
 .row_setup
 {
-    LDY r_row : LDA r_pcur : STA rr_planted,Y
-    TXA : LSR A : LSR A : LSR A : STA r_row
+    TXA : LSR A : LSR A : LSR A
+    CMP r_row : BEQ row_same
     TAY
+    LDA r_pcur
+    PHY : LDY r_row : STA rr_planted,Y : PLY
+}
+\ row_load: row Y's plant and pointers, as row r_row.
+.row_load
+    STY r_row
     LDA rr_planted,Y : STA r_pcur
     LDA row_scr,Y : STA r_bp0+1 : INC A : STA r_bp1+1
     TYA : CLC : ADC #HI(rr_rows) : STA r_rr+1 : STA put_run.jsr+2
+.row_same
     RTS
-}
 
 \ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
 \ pattern byte A. Keeps X. It jumps into the row's run, whose planted RTS
@@ -164,10 +170,9 @@ NEXT
 
 \ writer_begin: a frame's first row, before any row_setup (raster_frame).
 .writer_begin
-    STZ r_row
-    LDA rr_planted : STA r_pcur
     STZ r_rr : STZ r_bp0 : STZ r_bp1
-    RTS
+    LDY #0
+    JMP row_load
 
 \ writer_end: the last row's plant put back.
 .writer_end

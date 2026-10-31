@@ -89,6 +89,7 @@ SECTION RasterState
     ALIGN 256
 .bg_was     SKIP 256
 .bg_sig     SKIP 16
+.f_dir      SKIP 1                  ; the way the last face's left chain walked
 ENDSECTION
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * 256
@@ -229,8 +230,10 @@ SECTION RasterCode
     CMP f_kbot : BCC lines
     RTS
 .lines
+    \ Chain 0 walks the way the last face's left chain did: faces of one
+    \ winding then needn't swap.
     LDA ch_i : STA ch_i+1
-    STZ ch_dir : LDA #&FF : STA ch_dir+1
+    LDA f_dir : STA ch_dir : EOR #&FF : STA ch_dir+1
     LDX r_y : JSR row_setup
     LDX #0 : JSR chain_next
     LDX #1 : JSR chain_next
@@ -244,14 +247,17 @@ SECTION RasterCode
 \ copies stop asking.
 .decide
 {
-    BCC decided
+    BCS swap
+    LDA #CHK_SKIP
+    JMP patch_checks
+.swap
     FOR v = {ch_p, ch_e, ch_eh, ch_b, ch_bh, ch_dy, ch_dyh, ch_a, ch_a1, ch_i, ch_end, ch_dir}
         LDA v : LDY v + 1 : STA v + 1 : STY v
     NEXT
+    LDA ch_dir : STA f_dir
     LDA sa0 + 1 : LDY sb0 + 1
     STY sa0 + 1 : STY sa1 + 1 : STY sa2 + 1 : STY sa3 + 1
     STA sb0 + 1 : STA sb1 + 1 : STA sb2 + 1 : STA sb3 + 1
-.decided
     LDA #CHK_SKIP
 }
 \ patch_checks: the copies' tests of which chain is left, A one of CHK_*.
