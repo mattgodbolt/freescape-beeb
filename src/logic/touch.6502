@@ -45,7 +45,7 @@ ZA_AUTO1 tc
 {
     ZA_AUTO1 tf                                 ; the face's cell, for a crossing on one axis
     STZ HitRemembered
-    LDA tc
+    LDA tc : BEQ remembered                     ; crossing nothing, nothing's entered
     CMP #X_MOVES OR X_UP : BEQ x_up
     CMP #X_MOVES : BEQ x_down
     CMP #Z_MOVES OR Z_UP : BEQ z_up
@@ -71,22 +71,39 @@ ZA_AUTO1 tc
 .y_down
     LDA CellY : STA tf
     JMP scan_ye
+.remembered
+    LDA HitRemembered : CMP #1                  ; C set for any id but 0
+    RTS
 
-    \ FACE_SCAN faces, w1, w2: the objects whose face (the array faces
-    \ holds tf there) the crossing is, and which hold the current cell on
-    \ the other two axes (w1, w2), in the original's order.
+    \ FACE_SCAN faces, w1, w2: the objects whose face the crossing is (the
+    \ array faces holds tf there), and which hold the current cell on the
+    \ other two axes (w1, w2), in the original's order. tf goes into the
+    \ compares, and after the last object, where it stops the loop.
 MACRO FACE_SCAN faces, w1, w2
+    LDA tf : STA c1+1 : STA c2+1
+    LDX ix_n : STA faces,X                      ; (the stop)
     LDX #0
 .object
-    LDA faces,X : CMP tf : BEQ face
-.next
-    INX : CPX ix_n : BNE object
-    JMP remembered
+    LDA faces,X
+.c1
+    CMP #0 : BEQ face
+    INX
+    LDA faces,X
+.c2
+    CMP #0 : BEQ face
+    INX
+    BRA object
 .face
+    CPX ix_n : BEQ done
     JSR w1 : BNE next
     JSR w2 : BNE next
     JSR far_answer : BCC next
     RTS
+.next
+    INX
+    BRA object
+.done
+    JMP remembered
 ENDMACRO
 .scan_xo
     FACE_SCAN ix_xo, within_y, within_z
@@ -103,10 +120,33 @@ ENDMACRO
 
     \ Any other crossing: each object as the original tests it ($A5CE,
     \ $A64E, $A6CE): through a face on one axis, holding the other two or
-    \ crossing into the object on them at the same time.
+    \ crossing into the object on them at the same time. Each of those
+    \ needs the object's face on an axis that moves, so the loop first
+    \ compares each moving axis's face array with its face's cell (filter
+    \ patches them into f0-f2 and t0-t2), and the first slot's stops it
+    \ after the last object.
 .any
+    JSR filter
     LDX #0
 .each
+.f0
+    LDA ix_xo,X
+.t0
+    CMP #0 : BEQ test
+.f1
+    LDA ix_xo,X
+.t1
+    CMP #0 : BEQ test
+.f2
+    LDA ix_xo,X
+.t2
+    CMP #0 : BEQ test
+    INX
+    BRA each
+.test
+    CPX ix_n : BNE x_face
+    JMP remembered
+.x_face
     JSR face_x : BNE y_face
     JSR within_y : BEQ x_z
     JSR face_y : BNE y_face
@@ -142,10 +182,63 @@ ENDMACRO
     JSR far_answer : BCC miss
     RTS
 .miss
-    INX : CPX ix_n : BNE each
-.remembered
-    LDA HitRemembered : CMP #1                  ; C set for any id but 0
+    INX
+    JMP each
+
+    \ filter: each moving axis's face array (going up, the objects' first
+    \ cells, against the next cell; going down, their ends, against this
+    \ cell) into a slot of the loop, the first slot again in those left
+    \ over, and the first slot's value after the last object.
+.filter
+{
+    LDY #0
+    LDA tc : AND #X_MOVES : BEQ y
+    LDX #0 : JSR slot
+.y
+    LDA tc : AND #Y_MOVES : BEQ z
+    LDX #1 : JSR slot
+.z
+    LDA tc : AND #Z_MOVES : BEQ fill
+    LDX #2 : JSR slot
+.fill
+    CPY #3 * SLOT : BEQ last
+    LDA f0+1 : STA f0+1,Y
+    LDA f0+2 : STA f0+2,Y
+    LDA t0+1 : STA t0+1,Y
+    TYA : CLC : ADC #SLOT : TAY
+    BRA fill
+.last
+    LDA f0+1 : STA stop+1
+    LDA f0+2 : STA stop+2
+    LDX ix_n : LDA t0+1
+.stop
+    STA ix_xo,X
     RTS
+    \ slot: axis X (0 x, 1 y, 2 z) into the slot at f0 + Y, and Y on to the
+    \ next
+.slot
+    LDA tc : AND up_bit,X : BEQ down
+    LDA o_lo,X : STA f0+1,Y
+    LDA o_hi,X : STA f0+2,Y
+    LDA CellX,X : INC A
+    BRA target
+.down
+    LDA e_lo,X : STA f0+1,Y
+    LDA e_hi,X : STA f0+2,Y
+    LDA CellX,X
+.target
+    STA t0+1,Y
+    TYA : CLC : ADC #SLOT : TAY
+    RTS
+.up_bit EQUB X_UP, Y_UP, Z_UP
+.o_lo   EQUB LO(ix_xo), LO(ix_yo), LO(ix_zo)
+.o_hi   EQUB HI(ix_xo), HI(ix_yo), HI(ix_zo)
+.e_lo   EQUB LO(ix_xe), LO(ix_ye), LO(ix_ze)
+.e_hi   EQUB HI(ix_xe), HI(ix_ye), HI(ix_ze)
+}
+SLOT = f1 - f0
+ASSERT f2 - f1 = SLOT AND t0 - f0 = 3 AND t1 - f1 = 3
+ASSERT CellY = CellX + 1 AND CellZ = CellX + 2
 
     \ within_x, _y, _z: Z set if the current cell is in object X on that
     \ axis, o <= cur < o + s, as the original tests it: the sign of cur - o,

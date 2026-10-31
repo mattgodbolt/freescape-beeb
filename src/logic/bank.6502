@@ -45,8 +45,9 @@ INCLUDE "touch.6502"
 INCLUDE "arith.6502"
     \ the original's tables (tools/mklogicdata.py)
 .SinCos     EQUB ZX_SINCOS                      ; 72 (sin, cos) pairs, signed, 1.0 = 64
-.KeyTable   EQUB ZX_KEY_TABLE                   ; key, action, shooting action; then key, action
 .KeyCodes   EQUB ZX_KEY_CODES                   ; a code for each key, five a half-row
-ASSERT LEN(ZX_KEY_TABLE) = 3 * ZX_KEYS3 + 2 * ZX_KEYS2
+.KeyActions EQUB ZX_ACTIONS                     ; each code's action, from the key table ...
+.KeyShootActions EQUB ZX_SHOOT_ACTIONS          ; ... and in shooting mode
+ASSERT LEN(ZX_ACTIONS) = 128 AND MAX(ZX_KEY_CODES) < 128
 .logic_code_end
 ENDSECTION

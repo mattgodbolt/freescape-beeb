@@ -51,7 +51,7 @@
     DEC n : BNE records
     RTS
 }
-ASSERT ZX_N_GLOBALS > 0 AND ZX_AREAS_MOST + ZX_N_GLOBALS <= IX_MAX
+ASSERT ZX_N_GLOBALS > 0 AND ZX_AREAS_MOST + ZX_N_GLOBALS < IX_MAX     ; (and a byte after the last, where touch stops)
 
 \ answer: object X of the index is entered. If it's visible, a rectangle,
 \ a line or a polygon is the answer (C set, A its id) and any other is

@@ -83,56 +83,67 @@
 }
 
 \ run ($B320): the n bytes of FCL at ip, for a shot if ShotFlag is set,
-\ else for a collision or a condition.
+\ else for a collision or a condition. Y is the instruction's offset from
+\ ip, and the bytes left are n less it (the original's count, which ends
+\ the script at 0 or when its bit 7 is set: an offset past 255 isn't
+\ reached). The executed instructions' operands go into a1, a2 and a3.
+\ FclOp is the last instruction's opcode as the script ends, as the
+\ original leaves it.
 .run
 {
     ZA_AUTO2 ip
-    ZA_AUTO1 n, op, skip_by
+    ZA_AUTO1 n, op, kind, at
+    LDA ShotFlag : BEQ mask
+    LDA #&80                                    ; a shot's script: its instructions have bit 7
+.mask
+    STA kind
+    LDY #0
 .instruction
-    LDA (ip) : AND #&7F : STA op : STA FclOp
-    LDA ShotFlag : BEQ collision
-    LDA (ip) : BPL skip                         ; a shot's script: shots' instructions only
-    BRA go
-.collision
-    LDA (ip) : BMI skip
-.go
-    JSR execute : BCC done
-.skip
-    LDX op : LDA FclLengths,X : STA skip_by
-    LDA ip : CLC : ADC skip_by : STA ip
-    BCC same
-    INC ip+1
-.same
-    LDA n : SEC : SBC skip_by : STA n
-    BEQ done : BMI done
-    BRA instruction
+    LDA (ip),Y : EOR kind : BMI other           ; (bit 7 set: another kind's)
+    STA op                                      ; (bit 7 clear: the opcode)
+    STY at
+    INY : LDA (ip),Y : STA a1
+    INY : LDA (ip),Y : STA a2
+    INY : LDA (ip),Y : STA a3
+    JSR execute : BCC ended
+    LDY at
+    LDX op
+    BRA next
+.other
+    AND #&7F : TAX
+.next
+    TYA : CLC : ADC FclLengths,X : TAY
+    EOR #&FF : SEC : ADC n                      ; the bytes left
+    BEQ done : BPL instruction
 .done
+    STX FclOp
+    RTS
+.ended
+    LDA op : STA FclOp
     RTS
 }
 
-\ execute: the instruction at run.ip, opcode run.op. C clear when it ends
-\ the script.
-ZA_AUTO1 a1, a2
+\ execute: the instruction of opcode run.op, operands a1, a2, a3. C clear
+\ when it ends the script.
+ZA_AUTO1 a1, a2, a3
 .execute
 {
-    LDY #1 : LDA (run.ip),Y : STA a1
-    INY : LDA (run.ip),Y : STA a2
     LDA run.op : CMP #(ops_end - ops) DIV 2 : BCS stop
     ASL A : TAX
     JMP (ops,X)
-    ZA_CANJUMP fcl_stop, fcl_score, fcl_energy, fcl_here, fcl_there, fcl_var, fcl_bit, fcl_sound, fcl_goto, fcl_shield, fcl_swapjet, fcl_spfx, fcl_redraw, fcl_delay, fcl_syncsnd
+    ZA_CANJUMP fcl_stop, fcl_score, fcl_energy, fcl_here, fcl_there, fcl_inc, fcl_dec, fcl_ifvar, fcl_setvar, fcl_set, fcl_clear, fcl_ifbit, fcl_togbit, fcl_sound, fcl_goto, fcl_shield, fcl_swapjet, fcl_spfx, fcl_redraw, fcl_delay, fcl_syncsnd
 .stop
     CLC
     RTS
 .ops
     EQUW fcl_stop, fcl_score, fcl_energy, fcl_here              ; 0-3
     EQUW fcl_here, fcl_here, fcl_there, fcl_there               ; 4-7
-    EQUW fcl_there, fcl_var, fcl_var, fcl_var                   ; 8-&0B
-    EQUW fcl_bit, fcl_bit, fcl_bit, fcl_sound                   ; &0C-&0F
+    EQUW fcl_there, fcl_inc, fcl_dec, fcl_ifvar                 ; 8-&0B
+    EQUW fcl_set, fcl_clear, fcl_ifbit, fcl_sound               ; &0C-&0F
     EQUW fcl_here, fcl_there, fcl_goto, fcl_shield              ; &10-&13
-    EQUW fcl_var, fcl_swapjet, fcl_stop, fcl_stop               ; &14-&17
+    EQUW fcl_setvar, fcl_swapjet, fcl_stop, fcl_stop            ; &14-&17
     EQUW fcl_stop, fcl_spfx, fcl_redraw, fcl_delay              ; &18-&1B
-    EQUW fcl_syncsnd, fcl_bit, fcl_here, fcl_here               ; &1C-&1F
+    EQUW fcl_syncsnd, fcl_togbit, fcl_here, fcl_here            ; &1C-&1F
     EQUW fcl_there, fcl_there                                   ; &20-&21
 .ops_end
 }
@@ -144,8 +155,7 @@ ZA_AUTO1 a1, a2
 \ 1, ADDSCORE: 24 bits, clamped at 0 and &7FFFFF by the third byte's sign.
 .fcl_score
 {
-    ZA_AUTO1 a3, mid
-    LDY #3 : LDA (run.ip),Y : STA a3
+    ZA_AUTO1 mid
     LDA Score : CLC : ADC a1 : TAX
     LDA Score+1 : ADC a2 : STA mid
     LDA Score+2 : ADC a3 : BPL put
@@ -278,34 +288,62 @@ ZA_AUTO1 a1, a2
 \ 9 += 1, &0A -= 1, &14 = a2, &0B on only if = a2: FCL variable a1, at
 \ FclVars + (a1 - 1 AND 255), which for a1 past 32 or of 0 is another of
 \ the original's variables.
-.fcl_var
-{
-    LDX a1 : DEX
-    LDA run.op
-    CMP #9 : BNE not_inc
-    INC FclVars,X
-    BRA on
-.not_inc
-    CMP #&0A : BNE not_dec
-    DEC FclVars,X
-    BRA on
-.not_dec
-    CMP #&14 : BNE test
-    LDA a2 : STA FclVars,X
-    BRA on
-.test
-    LDA FclVars,X : CMP a2 : BEQ on
-    CLC
-    RTS
-.on
+.fcl_inc
+    LDX a1 : DEX : INC FclVars,X
     SEC
     RTS
-}
+.fcl_dec
+    LDX a1 : DEX : DEC FclVars,X
+    SEC
+    RTS
+.fcl_setvar
+    LDX a1 : DEX : LDA a2 : STA FclVars,X
+    SEC
+    RTS
+.fcl_ifvar
+    LDX a1 : DEX : LDA FclVars,X : CMP a2 : BEQ on  ; (C set if equal)
+    CLC
+.on
+    RTS
 ASSERT FclVars + 255 < zxv + ZXV_LEN
 
-\ &0C set, &0D clear, &1D toggle, &0E on only if = a2: FCL bit a1 ($B595):
-\ a byte of FclBits, and a mask, 0 for a bit past the byte's 8.
-.fcl_bit
+\ &0C set, &0D clear, &1D toggle, &0E on only if = a2: FCL bit a1
+\ (bit_of).
+.fcl_set
+    JSR bit_of
+    ORA FclBits,X : STA FclBits,X
+    SEC
+    RTS
+.fcl_clear
+    JSR bit_of
+    EOR #&FF : AND FclBits,X : STA FclBits,X
+    SEC
+    RTS
+.fcl_togbit
+    JSR bit_of
+    STA bit_of.mask
+    AND FclBits,X : BNE bit_was                 ; set: cleared, else set
+    LDA bit_of.mask : ORA FclBits,X : STA FclBits,X
+    SEC
+    RTS
+.bit_was
+    LDA bit_of.mask : EOR #&FF : AND FclBits,X : STA FclBits,X
+    SEC
+    RTS
+.fcl_ifbit
+    JSR bit_of
+    AND FclBits,X : BEQ is_clear
+    LDA #1
+.is_clear
+    CMP a2 : BEQ on_bit                         ; (C set if equal)
+    CLC
+.on_bit
+    RTS
+
+\ bit_of ($B595): FCL bit a1's byte, FclBits + X, and its mask in A: 0
+\ for a bit past the byte's 8, which the original reaches for a bit from 33
+\ on, or of 0.
+.bit_of
 {
     ZA_AUTO1 mask
     LDA a1 : DEC A
@@ -315,37 +353,14 @@ ASSERT FclVars + 255 < zxv + ZXV_LEN
     SEC : SBC #8
     INX : CPX #3 : BNE byte
 .found
-    TAY
-    LDA #0 : CPY #8 : BCS put
-    LDA #1
-    CPY #0 : BEQ put
-.shift
-    ASL A
-    DEY : BNE shift
-.put
-    STA mask
-    LDA run.op
-    CMP #&1D : BNE not_toggle
-    LDA FclBits,X : AND mask : BNE clear
-    BRA set
-.not_toggle
-    CMP #&0C : BEQ set
-    CMP #&0D : BEQ clear
-    LDA FclBits,X : AND mask                    ; &0E
-    BEQ is_clear
-    LDA #1
-.is_clear
-    CMP a2 : BEQ on
-    CLC
+    CMP #8 : BCS none
+    TAY : LDA masks,Y
     RTS
-.set
-    LDA FclBits,X : ORA mask : STA FclBits,X
-    BRA on
-.clear
-    LDA mask : EOR #&FF : AND FclBits,X : STA FclBits,X
-.on
-    SEC
+.none
+    LDA #0
     RTS
+.masks
+    EQUB 1, 2, 4, 8, &10, &20, &40, &80
 }
 
 \ &0F SOUND: now. &1C SYNCSND: after the copy, if one's due.

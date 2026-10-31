@@ -104,32 +104,22 @@
 }
 
 \ action_of ($99EF-$9A1B): A = key code A's action from the key table (in
-\ shooting mode, the first table's second action), &7F if none. Keeps X.
+\ shooting mode, the first table's second action), &7F if none: the
+\ original's search of it, done as the build makes the tables
+\ (tools/mklogicdata.py), by code. Keeps X.
 .action_of
 {
-    ZA_AUTO1 code, n
-    STA code
-    LDY #0
-    LDA KeyTable3 : STA n                       ; (0 is 256)
-.three
-    LDA KeyTable,Y : CMP code : BEQ found3
-    INY : INY : INY
-    DEC n : BNE three
-    LDA KeyTable2 : STA n
-.two
-    LDA KeyTable,Y : CMP code : BEQ found2
-    INY : INY
-    DEC n : BNE two
-    LDA #&7F
+    TAY
+    LDA ShootMode : BNE shooting
+    LDA KeyActions,Y
     RTS
-.found3
-    LDA ShootMode : BEQ found2
-    LDA KeyTable+2,Y
-    RTS
-.found2
-    LDA KeyTable+1,Y
+.shooting
+    LDA KeyShootActions,Y
     RTS
 }
+\ (the tables are from the key table as the counts in the workspace find
+\ it, and nothing changes those)
+ASSERT ZXI_KeyTable3[0] = ZX_KEYS3 AND ZXI_KeyTable2[0] = ZX_KEYS2
 
 \ read_keys ($943C): up to five keys held, in the keyboard's order (the
 \ ZX's half-rows, as src/input.6502's bitmap keys holds them), as codes in
@@ -141,14 +131,29 @@
 {
     ZA_AUTO1 mask
 .again
-    LDX #KEYS_BYTES - 1
-.copy
-    LDA keys,X : STA KeyRows,X
-    DEX : BPL copy
+    \ Each half-row read into KeyRows, and its keys taken: unrolled, as most
+    \ are empty.
     STZ KeyCount
-    LDX #0                                      ; the half-row
-    LDY #0                                      ; the key's code, five a half-row
-.row
+    FOR r = 0..KEYS_BYTES - 1
+        LDA keys + r : STA KeyRows + r : BEQ empty
+        LDX #r : JSR take : BCC empty
+        JMP rest + 6 * r                        ; five taken: the rows after it as read
+    .empty
+    NEXT
+    LDA KeyCount : BNE read
+    STZ LastKeyCount
+    CLC
+    RTS
+    \ rest: the rows after the one the fifth key was in, as read
+.rest
+    FOR r = 1..KEYS_BYTES - 1
+        LDA keys + r : STA KeyRows + r
+    NEXT
+    BRA read
+    \ take: half-row X's keys, lowest bit first, as codes in Keys, each
+    \ cleared in KeyRows once taken but the fifth; C set at the fifth.
+.take
+    LDY five,X                                  ; its first key's code
     LDA #1 : STA mask
 .bit
     LDA KeyRows,X : AND mask : BEQ up
@@ -156,17 +161,19 @@
     LDA KeyCodes,Y : LDY KeyCount : STA Keys,Y
     PLY
     INC KeyCount
-    LDA KeyCount : CMP #5 : BEQ read
+    LDA KeyCount : CMP #5 : BEQ full
     LDA mask : EOR #&FF : AND KeyRows,X : STA KeyRows,X   ; taken
+    BEQ none                                    ; (no more in the row)
 .up
     INY
     ASL mask
     LDA mask : CMP #&20 : BNE bit
-    INX : CPX #KEYS_BYTES : BNE row
-    LDA KeyCount : BNE read
-    STZ LastKeyCount
+.none
     CLC
+.full
     RTS
+.five
+    EQUB 0, 5, 10, 15, 20, 25, 30, 35
 .read
     LDA LastKeyCount : CMP KeyCount : BNE new
     TAX

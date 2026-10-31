@@ -86,8 +86,24 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     LDA #0 : SEC : SBC cd : STA cd
     LDA #0 : SBC cd+1 : STA cd+1
 .dpos
-    \ n = ct * cd, 16 by 16 bits, unsigned
     STZ n+2 : STZ n+3
+    LDA ct+1 : ORA cd+1 : BNE wide
+    \ n = ct * cd, both below 256 (most of the walk's): 8 by 8 bits, the
+    \ product's low byte shifted into ct as the multiplier comes out
+    LDA #0
+    LDX #8
+    LSR ct
+.m8
+    BCC m8_next
+    CLC : ADC cd
+.m8_next
+    ROR A : ROR ct
+    DEX : BNE m8
+    STA n+1
+    LDA ct : STA n
+    BRA multiplied
+.wide
+    \ n = ct * cd, 16 by 16 bits, unsigned
     LDX #16
 .mbit
     LSR cd+1 : ROR cd : BCC mnext
@@ -96,6 +112,7 @@ ZA_AUTO2 ct, cd, cD, cs, cres
 .mnext
     ROR n+3 : ROR n+2 : ROR n+1 : ROR n
     DEX : BNE mbit
+.multiplied
     \ the divisor's magnitude, and its sign
     LDA cD : ORA cD+1 : BNE divisor
     JMP by_zero
@@ -105,6 +122,24 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     LDA #0 : SBC cD+1 : STA cD+1
     LDA sign : EOR #&80 : STA sign
 .Dpos
+    \ A dividend below 65536, a divisor below 256 and a quotient below 256
+    \ (most of the walk's): the dividend's high byte is the remainder so
+    \ far, and its low byte's 8 bits are the quotient's.
+    LDA n+3 : ORA n+2 : ORA cD+1 : BNE long
+    LDA n+1 : CMP cD : BCS long
+    LDX #8
+.d8
+    ASL n : ROL A : BCS d8_less                 ; (past 255: more than the divisor)
+    CMP cD : BCC d8_next
+.d8_less
+    SBC cD
+    INC n
+.d8_next
+    DEX : BNE d8
+    STA rem : STZ rem+1
+    STZ n+1
+    BRA divided
+.long
     \ n / cD, restoring, from the dividend's first non-zero byte: the
     \ quotient in n, the remainder in rem. (|cD| <= &8000, so the remainder
     \ doubled and a bit fits 16 bits.)
@@ -127,6 +162,7 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     INC n
 .dnext
     DEY : BNE divide
+.divided
     \ rounded up if rem - half is positive, as a 16-bit difference
     LDA cD+1 : CMP #&80 : ROR A : STA half+1
     LDA cD : ROR A : STA half
