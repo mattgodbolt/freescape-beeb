@@ -1,0 +1,250 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the maths' check build (make maths;
+\ tools/mathscheck.mjs drives it)
+\
+\ src/maths.6502 and src/project.6502 with the tables in HAZEL, as in the
+\ engine, and entries for the harness: each takes its cases from a buffer
+\ of records in main RAM (free here: there's no screen) and writes the
+\ results into them. The *1 entries take the buffer's first record and
+\ have labels round their call, for the harness to time it.
+\ ***************************************************************************
+
+INCLUDE "../src/defs.6502"
+INCLUDE "../build/maths/consts.6502"
+
+ZA_POOL &10..&8F
+ZA_AUTO2 chk_p                      ; the record
+ZA_AUTO2 chk_left                   ; records to go
+
+SECTION Hazel, org = &C000, filename = "HAZEL", guard = &E000
+INCLUDE "../build/maths/tables.6502"
+ENDSECTION
+
+CHK_BUF = &3000                     ; the records, up to CHK_TOP
+CHK_TOP = &8000
+
+\ mul records: m, v (2) in; macc (3) out
+CHK_MUL = 6
+\ dot3 records: m0-m2, v0-v2 (2 each) in; macc (3) out
+CHK_DOT = 12
+\ project records: X, Y, Z (3 each) in; sx, sy (2 each) out
+CHK_PROJ = 13
+
+SECTION Code, org = &1900, filename = "CODE", guard = &3000, cmos = TRUE
+.chk_code
+
+INCLUDE "../src/maths.6502"
+INCLUDE "../src/project.6502"
+
+.chk_count  SKIP 2                  ; how many records, set by the harness
+
+MACRO CHK_BEGIN
+    LDA #ACCCON_Y : TSB acccon      ; HAZEL
+    LDA #LO(CHK_BUF) : STA chk_p
+    LDA #HI(CHK_BUF) : STA chk_p+1
+    LDA chk_count : STA chk_left
+    LDA chk_count+1 : STA chk_left+1
+ENDMACRO
+
+\ CHK_NEXT n, loop: on to the next record of n bytes, and round again if
+\ there's one.
+MACRO CHK_NEXT n, loop
+    LDA chk_p : CLC : ADC #n : STA chk_p
+    BCC same
+    INC chk_p+1
+.same
+    LDA chk_left : BNE low
+    DEC chk_left+1
+.low
+    DEC chk_left
+    LDA chk_left : ORA chk_left+1
+    BNE loop
+ENDMACRO
+
+\ --- mul -------------------------------------------------------------------
+
+.chk_mul
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_mul_loop
+    JSR chk_mul_in
+    JSR mul_set
+    JSR mul
+    JSR chk_mul_out
+    CHK_NEXT CHK_MUL, chk_mul_loop
+    RTS
+
+\ chk_mulv: one coefficient (chk_m) by many coordinates: records of v (2)
+\ in, macc (3) out.
+CHK_MULV = 5
+.chk_m      SKIP 1
+.chk_mulv
+    ZA_ENTRY
+    CHK_BEGIN
+    LDA chk_m : JSR mul_set
+.chk_mulv_loop
+    LDY #0 : LDA (chk_p),Y : STA mv0
+    INY : LDA (chk_p),Y : STA mv0+1
+    JSR mul
+    LDY #2
+    LDA macc : STA (chk_p),Y : INY
+    LDA macc+1 : STA (chk_p),Y : INY
+    LDA macc+2 : STA (chk_p),Y
+    CHK_NEXT CHK_MULV, chk_mulv_loop
+    RTS
+
+.chk_mul1
+    ZA_ENTRY
+    CHK_BEGIN
+    JSR chk_mul_in
+.chk_mul1_set
+    JSR mul_set
+.chk_mul1_go
+    JSR mul
+.chk_mul1_done
+    JSR chk_mul_out
+    RTS
+
+\ A = m, mv0 = v
+.chk_mul_in
+    LDY #1 : LDA (chk_p),Y : STA mv0
+    INY : LDA (chk_p),Y : STA mv0+1
+    LDA (chk_p)
+    RTS
+
+.chk_mul_out
+    LDY #3
+    LDA macc : STA (chk_p),Y : INY
+    LDA macc+1 : STA (chk_p),Y : INY
+    LDA macc+2 : STA (chk_p),Y
+    RTS
+
+\ --- dot3 ------------------------------------------------------------------
+
+.chk_dot
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_dot_loop
+    JSR chk_dot_in
+    JSR dot_set
+    JSR dot3
+    JSR chk_dot_out
+    CHK_NEXT CHK_DOT, chk_dot_loop
+    RTS
+
+.chk_dot1
+    ZA_ENTRY
+    CHK_BEGIN
+    JSR chk_dot_in
+.chk_dot1_set
+    JSR dot_set
+.chk_dot1_go
+    JSR dot3
+.chk_dot1_done
+    JSR chk_dot_out
+    RTS
+
+.chk_dot_in
+    LDY #0 : LDA (chk_p),Y : STA mrow
+    INY : LDA (chk_p),Y : STA mrow+1
+    INY : LDA (chk_p),Y : STA mrow+2
+    INY : LDA (chk_p),Y : STA mv0
+    INY : LDA (chk_p),Y : STA mv0+1
+    INY : LDA (chk_p),Y : STA mv1
+    INY : LDA (chk_p),Y : STA mv1+1
+    INY : LDA (chk_p),Y : STA mv2
+    INY : LDA (chk_p),Y : STA mv2+1
+    RTS
+
+.chk_dot_out
+    LDY #9
+    LDA macc : STA (chk_p),Y : INY
+    LDA macc+1 : STA (chk_p),Y : INY
+    LDA macc+2 : STA (chk_p),Y
+    RTS
+
+\ --- project ---------------------------------------------------------------
+
+.chk_proj
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_proj_loop
+    JSR chk_proj_in
+    JSR project
+    JSR chk_proj_out
+    CHK_NEXT CHK_PROJ, chk_proj_loop
+    RTS
+
+.chk_proj1
+    ZA_ENTRY
+    CHK_BEGIN
+    JSR chk_proj_in
+.chk_proj1_go
+    JSR project
+.chk_proj1_done
+    JSR chk_proj_out
+    RTS
+
+.chk_proj_in
+    LDY #8
+    ZA_DISCARD proj_v                   ; (the loop rebuilds it, indexed)
+.in
+    LDA (chk_p),Y : STA proj_v,Y : ZA_INDEXEDBY 0..8
+    DEY : BPL in
+    RTS
+
+.chk_proj_out
+    LDY #9
+    LDA proj_sx : STA (chk_p),Y : INY
+    LDA proj_sx+1 : STA (chk_p),Y : INY
+    LDA proj_sy : STA (chk_p),Y : INY
+    LDA proj_sy+1 : STA (chk_p),Y
+    RTS
+
+\ --- the real divide, for docs/research/maths.md's comparison ---------------
+\
+\ div_q: dv_n (40 bits) / dv_d (24 bits) to a 16-bit quotient in dv_n's
+\ low two bytes, for dv_n < dv_d << 16: what a projection by division
+\ needs a coordinate, after FX |X|. Restoring, a bit at a time.
+ZA_AUTO 8, dv                        ; dv_n then dv_d
+dv_n = dv
+dv_d = dv + 5
+.div_q
+{
+    LDX #16
+.bit
+    ASL dv_n : ROL dv_n+1                   ; the next bit up into the remainder
+    ROL dv_n+2 : ROL dv_n+3 : ROL dv_n+4
+    BCS take                                ; past 24 bits: more than dv_d
+    LDA dv_n+2 : CMP dv_d
+    LDA dv_n+3 : SBC dv_d+1
+    LDA dv_n+4 : SBC dv_d+2
+    BCC next
+.take
+    LDA dv_n+2 : SBC dv_d : STA dv_n+2      ; (C = 1 both ways here)
+    LDA dv_n+3 : SBC dv_d+1 : STA dv_n+3
+    LDA dv_n+4 : SBC dv_d+2 : STA dv_n+4
+    INC dv_n                                ; the quotient's bit
+.next
+    DEX : BNE bit
+    RTS
+}
+
+.chk_div1
+    ZA_ENTRY
+    LDX #7
+.div_in
+    LDA CHK_BUF,X : STA dv,X : ZA_INDEXEDBY 0..7
+    DEX : BPL div_in
+.chk_div1_go
+    JSR div_q
+.chk_div1_done
+    LDA dv_n : STA CHK_BUF+8
+    LDA dv_n+1 : STA CHK_BUF+9
+    RTS
+
+\ What the build takes, for docs/research/maths.md's figures.
+maths_code_size = maths_end - mul_set
+proj_code_size = proj_end - project
+PRINT "maths: tables ", maths_tables_end - sq_lo, " bytes; mul and dot3 ", maths_code_size, " bytes; project ", proj_code_size, " bytes"
+ENDSECTION

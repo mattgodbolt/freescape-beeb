@@ -139,10 +139,12 @@ In order. Formats are the model's; the 6502 matches them exactly.
      own vertices the same way.
 4. **Near clip.** A face with any vertex nearer than `ZNEAR` is clipped
    against that plane in 3D. There is no far plane.
-5. **Project.** `x = XC + FX · X / Z` and `y = YC − FY · Y / Z`, to whole
-   pixels, by tables (log and antilog, or a reciprocal and products: the
-   maths track chooses, and the model uses the same tables). Each
-   projected vertex is kept for the faces that share it.
+5. **Project.** `x = XC + FX · X / Z` and `y = YC − FY · Y / Z`, in
+   sixteenths of a pixel (section 9), by a normalised reciprocal of Z
+   times quarter-square products (`src/project.6502`,
+   `docs/research/maths.md`); `ZNEAR` and the focal lengths are
+   `tools/model/maths.py`'s. Each projected vertex is kept for the faces
+   that share it.
 6. **2D clip** of each face against the view's rectangle, so every vertex
    the rasteriser sees is a byte inside the view.
 7. **Order.** The original's sort (ScummVM's `area.cpp` reproduces it) over
