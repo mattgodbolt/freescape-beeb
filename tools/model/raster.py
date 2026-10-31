@@ -211,7 +211,10 @@ def rasterise(faces, sky, ground, horizon=None, stats=None):
                     None if horizon is None else Horizon(*horizon[0], *horizon[1]))
     lines, counts = spans([(tuple(p), [tuple(v) for v in vs]) for p, vs in faces], bg)
     if stats is not None:
-        stats.update(counts.__dict__, runs=counts.runs, bytes=counts.bytes)
+        stats.update(counts.__dict__, runs=counts.runs, bytes=counts.bytes,
+                     # the stand-in's names for three of them (counts.py)
+                     face_lines_open=counts.face_lines, face_runs=counts.pieces,
+                     lines_full=counts.full_lines)
     return lines
 
 

@@ -18,6 +18,16 @@ CHECKS += raster
 .PHONY: raster
 raster: build/raster/RCODE build/raster/scenes.json
 	node tools/rastercheck.mjs build/raster
+	$(RASTER_DRILLER)
+
+# Driller's own entrance views, once the whole-view model is in the tree:
+# derived from the originals (make data), so built, never committed.
+ifneq ($(wildcard tools/model/render.py),)
+RASTER_DRILLER = node tools/rastercheck.mjs build/raster --scenes build/raster/driller.json
+raster: build/raster/driller.json
+build/raster/driller.json: build/data/driller.json tools/rasterscenes.py $(wildcard tools/model/*.py) | build/raster
+	$(PYTHON) -I tools/rasterscenes.py --driller $< $@
+endif
 
 define RASTER_CHECK_6502
 \ The rasteriser's check build (mk/raster.mk, tools/rastercheck.mjs).

@@ -3,20 +3,25 @@
 // 6502 (src/raster.6502, src/writer.6502), headless, its view's bytes against
 // the model's (tools/model/raster.py, writer.py) exactly.
 //
-//   node tools/rastercheck.mjs BUILD [--scene TEXT] [--json OUT] [--verbose]
+//   node tools/rastercheck.mjs BUILD [--scenes FILE] [--scene TEXT] [--json OUT] [--verbose]
 //
 // BUILD holds the check build (RCODE, RRUNS, symbols.json) and scenes.json
-// (mk/raster.mk). For each scene it writes the faces, patterns and horizon
-// into rs_*, fills the screen with bytes the frame must change (the view's
-// with each expected byte's complement), calls check_frame, and checks:
-//   - the view's bytes are the model's, in the screen ACCCON's X chose;
+// (mk/raster.mk); --scenes names another scene file. For each scene it
+// writes the faces, patterns and horizon into rs_*, forgets what the screens
+// held, fills the screen with bytes the frame must change (the view's with
+// each expected byte's complement), calls check_frame, and checks:
+//   - the view's bytes are the model's, in the screen ACCCON's X chose, and
+//     as many were written as the model's counts say;
 //   - nothing else of either screen changed;
 //   - nothing was written outside the rasteriser's own memory (its zero
 //     page, the stack, its sections) and the view;
 //   - rs_overflow is set exactly when the model's pools overflowed.
-// It reports each scene's cycles, split by what ran (an instruction-level
-// profile over the routines' labels), and with --json writes them with the
-// model's counts, for the cost model (docs/research/raster.md).
+// Then each sequence of frames goes into alternate screens without
+// forgetting, each frame checked the same way: what the 6502 leaves alone
+// must be what's wanted. It reports each scene's cycles, split by what ran
+// (an instruction-level profile over the routines' labels), and the cost
+// model fitted to them; --json writes them with the model's counts
+// (docs/research/raster.md).
 //
 // Exits non-zero when any scene disagrees.
 import fs from "node:fs";
@@ -40,7 +45,7 @@ const symFile = `${dir}/symbols.json`;
 const sections = {};
 for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
     for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
-const all = JSON.parse(fs.readFileSync(`${dir}/scenes.json`, "utf8"));
+const all = JSON.parse(fs.readFileSync(opt("--scenes") || `${dir}/scenes.json`, "utf8"));
 const scenes = all.scenes.filter((s) => !only || s.name.includes(only));
 const sequences = (all.sequences || []).filter((q) => !only || q.name.includes(only));
 

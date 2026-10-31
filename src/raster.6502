@@ -651,35 +651,39 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
 .some
     STA e_k1
     SBC r_y : STA e_n                   ; (C = 1)
-    LDA rs_vxl,Y : STA e_dx : LDA rs_vxh,Y : STA e_dx+1
-    LDA rs_vyl,Y : STA e_dy : LDA rs_vyh,Y : STA e_dy+1
-    LDA e_u : CLC : ADC f_v0 : TAY
-    \ dy = y1 - y0, dx = x1 - x0
-    SEC
-    LDA e_dy : SBC rs_vyl,Y : STA e_dy
-    LDA e_dy+1 : SBC rs_vyh,Y : STA e_dy+1
-    SEC
-    LDA e_dx : SBC rs_vxl,Y : STA e_dx
-    LDA e_dx+1 : SBC rs_vxh,Y : STA e_dx+1
-    \ t0 = (8 - y0) AND 15
-    LDA #SUB DIV 2 : SEC : SBC rs_vyl,Y : AND #SUB - 1 : STA e_t0
-    \ x0 + 8 = 16 (U + 1) + w
-    LDA rs_vxl,Y : CLC : ADC #SUB DIV 2 : TAX
-    AND #SUB - 1 : STA e_wf
-    LDA rs_vxh,Y : ADC #0
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,X
-    DEC A : STA e_ux
+    LDA e_u : CLC : ADC f_v0 : TAX
+    \ A vertical edge (the commonest, for a level camera's boxes): its
+    \ boundary is ceil((x - 8) / 16) = (x + 7) >> 4 on every line.
+    LDA rs_vxl,Y : CMP rs_vxl,X : BNE sloped
+    LDA rs_vxh,Y : CMP rs_vxh,X : BNE sloped
+    LDA rs_vxl,X : ADC #SUB DIV 2 - 2   ; (C = 1 from the CMP: + 7)
+    TAY
+    LDA rs_vxh,X : ADC #0
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
     LDX e_c
-    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
-    LDA e_dx : ORA e_dx+1 : BNE sloped
-    \ Vertical: p = U + (w > 0), the same on every line.
-    LDA e_wf : CMP #1
-    LDA e_ux : ADC #0
     STA ch_p,X : ZA_INDEXEDBY 0..1
+    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
     LDA #STEP_NONE : JSR patch_steps
     SEC
     RTS
 .sloped
+    \ dy = y1 - y0, dx = x1 - x0 (Y the end vertex, X the start)
+    SEC
+    LDA rs_vyl,Y : SBC rs_vyl,X : STA e_dy
+    LDA rs_vyh,Y : SBC rs_vyh,X : STA e_dy+1
+    SEC
+    LDA rs_vxl,Y : SBC rs_vxl,X : STA e_dx
+    LDA rs_vxh,Y : SBC rs_vxh,X : STA e_dx+1
+    \ t0 = (8 - y0) AND 15
+    LDA #SUB DIV 2 : SEC : SBC rs_vyl,X : AND #SUB - 1 : STA e_t0
+    \ x0 + 8 = 16 (U + 1) + w
+    LDA rs_vxl,X : CLC : ADC #SUB DIV 2 : TAY
+    AND #SUB - 1 : STA e_wf
+    LDA rs_vxh,X : ADC #0
+    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
+    DEC A : STA e_ux
+    LDX e_c
+    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
     \ |dx| divmod dy, then a, b = floor divmod(dx, dy): for dx < 0,
     \ a = -q and b = 0 when the remainder is 0, else a = -q - 1, b = dy - r.
     STZ e_neg

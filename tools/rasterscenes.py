@@ -2,6 +2,7 @@
 """The rasteriser's test scenes, with the model's bytes for each.
 
     rasterscenes.py OUT.json
+    rasterscenes.py --driller DB.json OUT.json    Driller's entrance views
 
 Random convex polygons in sixteenths, scenes shaped like Driller's (boxes
 with vertical sides seen by a level camera), and the edge cases: slivers,
@@ -398,7 +399,32 @@ def build(s):
     }
 
 
+def driller_views(db_path, out):
+    """Every Driller entrance view's faces, from the whole-view model
+    (tools/model/render.py), as scenes: what the rasteriser gets in the
+    game. The model has no horizon yet, so a level camera's goes through the
+    view's centre. Derived from the originals, so built, never committed."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.model import camera as cam, parts, render, view
+
+    db = json.loads(Path(db_path).read_text())
+    scenes = []
+    for area, entrance, camera in cam.entrance_views(db):
+        v = render.render(db, area, camera)
+        level = getattr(camera, "pitch", 0) == 0 and getattr(camera, "roll", 0) == 0
+        scenes.append(build({
+            "name": render.name(area, entrance),
+            "sky": list(parts.sky(area)), "ground": list(parts.ground(area)),
+            "horizon": [view.XC, view.YC, 64, 0] if level else None,
+            "faces": [(list(parts.pattern(area, f.colour)), [list(p) for p in f.poly]) for f in v.faces],
+        }))
+    Path(out).write_text(json.dumps({"scenes": scenes}) + "\n")
+    print(f"{len(scenes)} of Driller's entrance views, each the same as the model's brute force")
+
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--driller":
+        return driller_views(sys.argv[2], sys.argv[3])
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
     def built(s):
