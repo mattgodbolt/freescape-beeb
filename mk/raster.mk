@@ -25,7 +25,7 @@ raster: build/raster/RCODE build/raster/scenes.json
 ifneq ($(wildcard tools/model/render.py),)
 RASTER_DRILLER = node tools/rastercheck.mjs build/raster --scenes build/raster/driller.json
 raster: build/raster/driller.json
-build/raster/driller.json: build/data/driller.json tools/rasterscenes.py $(wildcard tools/model/*.py) | build/raster
+build/raster/driller.json: build/data/driller.json $(COLOUR_MODEL) tools/rasterscenes.py $(wildcard tools/model/*.py) | build/raster
 	$(PYTHON) -I tools/rasterscenes.py --driller $< $@
 endif
 
