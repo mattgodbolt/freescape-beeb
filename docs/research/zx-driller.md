@@ -86,6 +86,62 @@ by a check.
   step first splits by pitch, `y −= ⌊step · sin(pitch) / 64⌋` and the
   horizontal step is `⌊step · |cos(pitch)| / 64⌋` (`$A364`) [read].
 
+## The view oracle
+
+`make zxviews` draws every entrance view with the original's own code
+(`tools/zx_views.py`, on `tools/zx.py`'s `render_view`), into
+`build/zx/views/`: for each, the view's 104 shown rows of 26 bytes (bit 7
+left, set = ink) as `a<area>_e<entrance>.bin`, a PNG, and a record in
+`views.json`. `tools/zx.py --view AREA:ENTRANCE [--camera
+x,y,z,pitch,yaw,roll]` draws one, from any camera.
+
+For each view, from the in-play snapshot:
+
+1. The area (`$8862`) and entrance (`$8911`) are poked and the game's
+   own placement called (`$9D1C`, which loads the area with `$BE18`);
+   the probe stays at the start's extension (`L = 2`).
+2. The buffer is zeroed, so the image is deterministic: the draw clears
+   the buffer only when the area's flags (`$889F`) are non-zero, and the
+   interiors' are 0 (areas 19, 21, 22, 23, 25, 27), their walls covering
+   the view.
+3. `$8920` bit 2 is set, as a step or turn sets it, and the redraw is
+   called with a sentinel return address. Stops at `$6B5C`, `$6B5F`,
+   `$6B72` and `$6B75` time its stages.
+
+What it checks (`make zxcheck`) [measured 2026-10-31]:
+
+- The start view equals, byte for byte, the buffer the game drew itself
+  at boot. Against the screen it differs only in the gun sight, which the
+  game draws over the view's centre after the copy.
+- Of the 65 entrances, the game places the camera at 63 exactly where
+  the formula above puts it. Two it can't reach: area 2's entrance 16
+  shares its id with a wall earlier in the area's list, and the lookup
+  (`$A8BA`: the globals, then the area's objects, the first with the id
+  of any type) finds the wall; area 127's entrance has id 0, which means
+  "keep the position". Those two are drawn from the formula's camera
+  (`"placed": "formula"` in the JSON).
+- Every view draws again identically, with and without contention.
+
+## What a redraw costs
+
+Measured 2026-10-31 over the 65 entrance views (`make zxviews`): T-states
+from the call to `$6B12` to its return, in SkoolKit's contention-modelling
+simulator (`CCMIOSimulator`) with the game's interrupt running, as a 48K
+runs it. The copy to the screen (`$9BF7`) isn't included.
+
+| | median | min | max |
+|---|---|---|---|
+| the redraw | 2,293,923 | 670,879 | 4,273,507 |
+| the same without contention or interrupts | 2,006,570 | 612,740 | 3,861,640 |
+| objects drawn | 10 | 2 | 19 |
+
+- That's 0.66 s for the median view at 3.5 MHz (33 frames) and 1.22 s at
+  the busiest (area 19's entrance 7), which matches "about one update a
+  second".
+- Of the 65 views' time together, projecting (cull, matrix, transform,
+  clip, project: to `$6B5C`) takes 63%, the sort 11% and drawing 26%.
+- Contention and the interrupt add a median 13.5%.
+
 ## Loading and the protection
 
 - The tape's first code block is a turbo loader at `$FE40`. It loads the

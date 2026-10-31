@@ -2,22 +2,28 @@
 #
 #   make zx        Driller loaded and booted to the main loop, in play at
 #                  the start (build/zx/driller.z80)
+#   make zxviews   every entrance view drawn by the original's own redraw
+#                  (build/zx/views/: a .bin and .png each, and views.json
+#                  with each camera and the redraw's T-states)
 #   make zxdisasm  the annotated listing (build/zx/driller.skool), from
 #                  disasm/*.ctl
 #   make zxcheck   the original's arithmetic against tools/zx_arith.py's
-#                  transcription
+#                  transcription; the start view against the frame the
+#                  game drew itself; every view drawn again identically
 #
 # Everything here reads Driller from originals/ and writes to build/zx/:
 # nothing of the original is committed (decision 6).
 
-ZXTAPE = originals/zx/Driller.tzx
-ZXSNAP = build/zx/driller.z80
+ZXTAPE  = originals/zx/Driller.tzx
+ZXSNAP  = build/zx/driller.z80
+ZXVIEWS = build/zx/views/views.json
 
-.PHONY: zx zxdisasm zxcheck
-ALL    += $(ZXSNAP)
+.PHONY: zx zxviews zxdisasm zxcheck
+ALL    += $(ZXSNAP) $(ZXVIEWS)
 CHECKS += zxcheck
 
 zx: $(ZXSNAP)
+zxviews: $(ZXVIEWS)
 zxdisasm: build/zx/driller.skool
 
 # The tape as a 48K loads it, the turbo loader simulated (SkoolKit's
@@ -30,10 +36,14 @@ build/zx/loaded.z80: $(ZXTAPE)
 $(ZXSNAP): build/zx/loaded.z80 tools/zx.py
 	$(PYTHON) -I tools/zx.py '>driller' build/zx/ --snap $< --boot > /dev/null
 
+$(ZXVIEWS): $(ZXSNAP) tools/zx.py tools/zx_views.py tools/research/fsdump.py
+	$(PYTHON) -I tools/zx_views.py --snap $(ZXSNAP) --out $(@D)
+
 build/zx/driller.skool: $(ZXSNAP) $(wildcard disasm/*.ctl)
 	rm -rf build/zx/ctl && mkdir -p build/zx/ctl
 	cp disasm/*.ctl build/zx/ctl/
 	$(PYTHON) -I .venv/bin/sna2skool.py -H -c build/zx/ctl $< > $@
 
-zxcheck: $(ZXSNAP)
+zxcheck: $(ZXSNAP) $(ZXVIEWS)
 	$(PYTHON) -I tools/zx_arith.py --snap $(ZXSNAP)
+	$(PYTHON) -I tools/zx_views.py --snap $(ZXSNAP) --out $(dir $(ZXVIEWS)) --check
