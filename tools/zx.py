@@ -393,7 +393,7 @@ def run_passes(snap, path):
             orig.poke(st.addr, st.values)
             continue
         if st.kind == "fcl":
-            s = State(orig.fcl(st.code))
+            s = State(orig.fcl(st.code, shot=st.shot))
         else:
             s = State(orig.run_pass(st.keys, st.tick))
             n += 1

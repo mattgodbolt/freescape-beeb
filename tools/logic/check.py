@@ -47,6 +47,21 @@ class OracleHooks(Hooks):
         return obj_id in self.drawn
 
 
+def expected(s, name):
+    """A variable for an expect: Name, or Name[i] for one of its bytes; a
+    run of bytes reads as a little-endian number."""
+    index = None
+    if name.endswith("]"):
+        name, _, i = name[:-1].partition("[")
+        index = int(i, 0)
+    v = getattr(s, name)
+    if index is not None:
+        return v[index]
+    if isinstance(v, bytes):
+        return int.from_bytes(v, "little")
+    return v
+
+
 def fmt(v):
     if isinstance(v, bytes):
         return v.hex(" ")
@@ -104,8 +119,8 @@ def run(steps, snap, verbose=False):
             break   # the game is over: the original goes to its end ($9AB7)
         if st.kind == "expect":
             want = st.value
-            got_o = getattr(State(last), st.name)
-            got_p = getattr(s, st.name)
+            got_o = expected(State(last), st.name)
+            got_p = expected(s, st.name)
             if got_o != want or got_p != want:
                 raise Mismatch(f"{st.line}: expected {st.name} = {want}: original {fmt(got_o)}, "
                                f"transcription {fmt(got_p)}")
@@ -120,9 +135,9 @@ def run(steps, snap, verbose=False):
             continue
         hooks = OracleHooks(orig.drawn())
         if st.kind == "fcl":
-            after = orig.fcl(st.code)
+            after = orig.fcl(st.code, shot=st.shot)
             s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
-            s.ShotFlag = 0
+            s.ShotFlag = 1 if st.shot else 0
             fcl.run(s, SCRIPT, len(st.code), hooks)
         else:
             try:
@@ -258,6 +273,8 @@ def main():
         bad += fuzz(args.snap, args.fuzz, args.seed, args.passes, args.keep)
     if SEEN:
         print("the original, in those passes: " + ", ".join(f"{k} {v}" for k, v in sorted(SEEN.items())))
+    if fcl.RUN:
+        print("FCL opcodes run: " + ", ".join(f"${op:02X} {n}" for op, n in sorted(fcl.RUN.items())))
     if REDRAWN[0]:
         print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
     if FROZE[0]:

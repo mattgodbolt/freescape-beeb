@@ -1,0 +1,108 @@
+# Every FCL instruction, run by the original's interpreter ($B320) and the
+# transcription from the same state, in area 1, with passes between so
+# what they change is walked into. A shot's instructions (opcode bit 7)
+# run only in a shot's script, the others only outside one.
+
+# The score: 24 bits, clamped at 0 and at $7FFFFF.
+fcl 01 10 27 00
+expect Score $002710
+fcl 01 FF FF FF
+fcl 01 00 00 80
+expect Score 0
+fcl 01 FF FF 7F
+fcl 01 FF FF 7F
+expect Score $7FFFFF
+# Energy and shield, up to 63.
+fcl 02 05
+fcl 02 40
+expect Energy 63
+fcl 13 FD
+fcl 13 50
+expect Shield 63
+
+# Showing, hiding, toggling and destroying area 1's objects: cube 9 (the
+# low block), rectangle 10 (hidden), cube 29 (hidden).
+fcl 05 09
+O
+fcl 04 09
+fcl 03 09
+fcl 03 09
+fcl 04 0A
+fcl 05 0A
+fcl 03 1D
+fcl 10 09
+fcl 03 09
+fcl 04 09
+O x2
+# The same in another area (2's cube 15), and in this one by its number.
+fcl 08 02 0F
+fcl 07 02 0F
+fcl 06 02 0F
+fcl 06 02 0F
+fcl 11 02 0F
+fcl 07 02 0F
+fcl 06 01 05
+fcl 06 01 05
+# Tests: go on only if shown ($1E), hidden ($1F), likewise elsewhere.
+fcl 1E 05 05 0A
+fcl 1F 05 05 0A
+fcl 1F 0A 04 0A
+fcl 20 01 05 04 0A
+fcl 21 01 05 05 0A
+fcl 21 01 0A 05 0A
+
+# Variables and bits.
+fcl 14 05 2A
+fcl 09 05
+fcl 0A 05
+fcl 0A 05
+expect FclVars[4] $29
+fcl 0B 05 29 09 06
+fcl 0B 05 00 09 06
+fcl 14 00 07
+fcl 0C 03
+fcl 0C 1A
+fcl 0C 20
+fcl 0D 03
+fcl 1D 03
+fcl 1D 03
+fcl 0E 1A 01 0C 04
+fcl 0E 1A 00 0C 05
+fcl 0C 00
+fcl 0C 21
+
+# Sounds, waits, the colours, a redraw.
+fcl 0F 05
+fcl 1C 05
+fcl 1B 03
+fcl 19 31
+fcl 19 12
+fcl 19 CC
+O
+fcl 1A
+fcl 05 05 1A 04 05
+O
+
+# A shot's instructions, in a collided script and in a shot's.
+fcl 85 0A 04 0A
+shot 85 0A 04 0A
+shot 84 0A 81 00 01 00
+expect Score $7FFFFF
+# An opcode the interpreter doesn't do, 0 among them, ends the script.
+fcl 00 05 05
+fcl 16 05 05
+fcl 2A 05 05
+
+# Into the jet and out, and GOTO.
+fcl 15
+expect InJet 1
+O
+fcl 15 15
+expect InJet 1
+fcl 15
+fcl 12 02 04 12 01 13
+expect AreaId 1
+O
+# Energy below 0 ends the game.
+fcl 02 C0
+expect GameOver 3

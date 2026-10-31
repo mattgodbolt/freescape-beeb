@@ -7,11 +7,14 @@ in-play snapshot (make zx: area 1, entrance 19, on the probe).
     tick              a pass in which a minute of the clock ends, no keys
     goto 2 4          FCL GOTO area 2, entrance 4 (the original's $9D1C)
     fcl 15            FCL bytes, hex, run by $B320 (15: SWAPJET)
+    shot 85 0A        FCL bytes run as a shot's (ShotFlag set)
     poke 8772 03      bytes at an address, hex, on both sides
     at 4640 160 5920  the camera's x, y, z (decimal)
     angles 0 34 0     its pitch, yaw, roll (decimal)
     expect AreaId 2   a variable's value after the last step (decimal or
-                      $hex), on both sides: a scenario says what it shows
+                      $hex), on both sides: a scenario says what it shows.
+                      Keys[0] is one byte of a run; a run alone reads as a
+                      little-endian number
 
 Keys are the ZX's names (tools/zx.py): A-Z, 0-9, SPACE, ENTER, CAPS, SYM.
 """
@@ -56,9 +59,9 @@ def parse(text, name="scenario"):
             for _ in range(repeat):
                 steps.append(Step("pass", where, keys=(), tick=True))
         elif w0 == "goto":
-            steps.append(Step("fcl", where, code=[0x12, int(words[1]), int(words[2])]))
-        elif w0 == "fcl":
-            steps.append(Step("fcl", where, code=[int(b, 16) for b in words[1:]]))
+            steps.append(Step("fcl", where, code=[0x12, int(words[1]), int(words[2])], shot=False))
+        elif w0 in ("fcl", "shot"):
+            steps.append(Step("fcl", where, code=[int(b, 16) for b in words[1:]], shot=w0 == "shot"))
         elif w0 == "poke":
             steps.append(Step("poke", where, addr=int(words[1], 16), values=[int(b, 16) for b in words[2:]]))
         elif w0 == "at":

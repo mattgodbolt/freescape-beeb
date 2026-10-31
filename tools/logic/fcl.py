@@ -12,8 +12,10 @@ original's table at $8939. A test that fails ends the script.
 """
 from .area import lookup, go_to_entrance, word, OBJECT_HEADER
 
+import collections
+
 LENGTHS = 0x8939
-DRAWN_COVERING = 0x8A6A   # the renderer's count of view-covering faces
+RUN = collections.Counter()   # opcodes run, for the checker's summary
 
 
 def _show_hide(s, ix, op, hooks):
@@ -77,6 +79,7 @@ def run(s, ix, n, hooks):
         op = b & 0x7F
         s.FclOp = op
         if bool(s.ShotFlag) == bool(b & 0x80):
+            RUN[op] += 1
             if _execute(s, ix, op, hooks) is False:
                 return
         e = m[LENGTHS + op]
