@@ -19,8 +19,10 @@ fields (25fps) and the busiest in three (16.7fps), measured in jsbeeb.
   row.** Moving down a character row adds 2 to an address's high byte.
 - **The screen is double-buffered in main and shadow RAM at one address.**
   ACCCON's X bit picks which one the CPU writes, and its D bit which one
-  the CRTC shows. They swap at VSync. Code and tables that run while
-  drawing never live in `&3000-&7FFF`, which X switches.
+  the CRTC shows. They swap as soon as a frame is done and the CRTC isn't
+  fetching the view's lines, mid-field. That works because everything
+  outside the view is the same in both buffers. Code and tables that run
+  while drawing never live in `&3000-&7FFF`, which X switches.
 - **The view is 104 × 104 pixels**: the ZX's 208 × 104 at half the width,
   with the ZX's field of view (decision 2). That's 52 bytes by 104 lines,
   13 character rows. Its left edge is on a byte. `VIEW_W`, `VIEW_H` and
@@ -40,39 +42,67 @@ which owns the machine and makes no OS call.
   (MODE 2's eight; 8-15 the same, steady), the ULA's `ULA_MODE2` and the
   CRTC's `CRTC_R0`-`CRTC_R13` (`src/defs.6502`). The screen sits where
   MOS 3.20 puts MODE 2 at `*TV 0,1`, whatever the CMOS says. Then
-  `irq_install`: IRQ1V taken, every VIA interrupt off but the vertical
-  sync's (anything else goes on to the OS's handler).
+  `irq_install`: IRQ1V taken, and every VIA interrupt off but two: the
+  vertical sync's, and User VIA T1's. Anything else goes on to the OS's
+  handler. T1 runs free with a field as its period, started in step with
+  the sync, so it times out at `FLIP_LINE` (just past the view) every
+  field. Its count says where the beam is, whatever any interrupt's
+  latency.
 - **The protocol** (`src/screen.6502`), which the renderer calls:
   - `frame_begin` waits while `frame_ready` is set (the frame last
     handed over isn't shown yet), then selects the buffer not shown with
     ACCCON's X; `draw_buffer` names it.
-  - `frame_end` sets `frame_ready`. At the next vertical sync the
-    interrupt (`src/irq.6502`) sets D to `draw_buffer` and clears it.
-  - Write the screen only between the two, and call `frame_begin` as
-    late as possible: stages 0-9 write nothing on the screen, so they run
+  - `frame_end` shows the frame at once (`flip`: D to `draw_buffer`) in
+    two cases: the frame shown now has had its view shown whole
+    (`view_shown`), and T1 puts the beam outside the view, at least
+    `FLIP_LEAD` lines short of its top. Otherwise it sets `frame_ready`,
+    and T1's interrupt (`src/irq.6502`) flips as the view's last line
+    goes. Either way every frame is shown whole at least once, and a
+    frame that takes 2.3 fields is shown every 2.3 fields, not every 3.
+  - Write the view only between the two, and call `frame_begin` as late
+    as possible: stages 0-9 write nothing on the screen, so they run
     while the last frame waits for its flip.
+  - **Outside the view, both buffers must hold the same at every flip**,
+    because a field can show those lines from either buffer. A change
+    there (the panel, text) goes into both buffers, X selecting each in
+    turn, before the frame that goes with it is handed over. The shown
+    buffer's copy shows at once. To keep it from showing half made for a
+    field, write it while T1's high byte is at most `HI(SAFE_T1)` (the
+    beam in or just above the view's lines). Or keep such a part in one
+    buffer and show it from there with D, set at the view's end and back
+    before its top: one more interrupt a field, and one copy to write.
   - X and D are changed only by `TSB` and `TRB`, which an interrupt
     can't split, so neither side undoes the other's bit.
-  - The flip lands `FLAG_TO_TOP` lines before the field's first line
-    shown. Nothing may hold interrupts off that long, or the flip lands
-    in the picture (a tear).
+  - Interrupts may be held off for anything short of a field: a late
+    interrupt only delays the flip, which reads T1 first and so never
+    lands in the view. A field or more misses a sync.
+  - `-D VSYNC_FLIP=TRUE` (`build/freescape-vsync.ssd`) builds the
+    simpler flip, by the vertical sync's interrupt in the vertical blank.
+    Interrupts may then be held off for no more than `FLAG_TO_TOP`
+    lines, and T1 isn't used.
 - **Counters** (in `Work`, `src/zp.6502`): `fields` (vertical syncs),
   `frames` (flips) and `frames_drawn` (`frame_end`s), 16 bits each, for
   measuring. Read them between frames.
 - **The keys** (`src/input.6502`): the interrupt reads Driller's keys
   from the System VIA into `keys` (held) and `keys_made` (gone down since
   `key_take`), a bit each: `K_FORWARD` and the rest.
-- **Zero page**: `frame_ready` and `draw_buffer` are fixed below
-  `ZP_FIXED`; baron's pool is the rest up to `&FB`.
+- **Zero page**: `frame_ready`, `draw_buffer` and `view_shown` are
+  fixed below `ZP_FIXED`; baron's pool is the rest up to `&FB`.
 - **The test scene** (`src/main.6502`, until the renderer replaces it):
   bars of the eight colours moving a pixel a frame in the view, inside a
   white border, and the screen's edge in cyan.
 - **Checked** by `make frames` (`tools/frames.mjs`, on jsbeeb's full
-  video). It checks the registers and the picture against the MOS's own
-  MODE 2. Every flip must land in the vertical blank and show the one
-  frame handed over, byte for byte. Every screen write must be inside a
-  frame and to the buffer not shown. Every sync and flip must be
-  counted, and every key must set its bit. It reports the pace.
+  video, for both builds). It checks the registers and the picture
+  against the MOS's own MODE 2. Each flip must:
+  - land while the CRTC isn't fetching the view (the VSync build: in the
+    vertical blank);
+  - show the one frame handed over, byte for byte, after the frame it
+    replaces was shown whole;
+  - find both buffers the same outside the view.
+
+  Every write to the view must be inside a frame and to the buffer not
+  shown. Every sync and flip must be counted, and every key must set its
+  bit. It reports the pace both ways.
 
 ## 2. Colour
 
@@ -178,7 +208,9 @@ In order. Formats are the model's; the 6502 matches them exactly.
       back buffer still has the frame from two frames ago, and its span
       lists can be kept (at `&3000-&3FFF`, which is per buffer by the X
       bit) to compare against. Sky and ground mostly survive a step.
-11. **Flip** at VSync: the IRQ sets ACCCON D to the buffer just drawn.
+11. **Flip** as soon as the CRTC isn't fetching the view: ACCCON D set to
+    the buffer just drawn, at once by `frame_end` or by T1's interrupt
+    as the view's last line goes (section 1, as built).
 
 Then the panel and the logic, which are later layers.
 

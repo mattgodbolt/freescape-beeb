@@ -94,10 +94,15 @@ includes.)
   swallows the rest of it.
 - Run to a label after boot, never a fixed wait.
 - `.DELETE_ON_ERROR` stays in the Makefile.
-- The screen is written only between `frame_begin` and `frame_end`, to
-  the buffer not shown. `make frames` fails any other write. Run it after
-  touching the interrupt, the screen, or anything that holds interrupts
-  off: a long `SEI` moves the flip into the picture.
+- The view is written only between `frame_begin` and `frame_end`, to
+  the buffer not shown. Outside the view, both buffers must hold the
+  same at every flip, because the flip comes mid-field: write a change
+  there into both. `make frames` fails either. Run it after touching the
+  interrupt, the screen, or anything that holds interrupts off, and keep
+  `SEI` shorter than a field.
+- User VIA T1 is the frame loop's: free-running, timing the view's end
+  (`src/irq.6502`). Read its high byte (`&FE65`) for the beam's place,
+  never its low byte, which acknowledges the interrupt.
 - MOS 3.20's MODE 2 has its vertical sync a row later than OS 1.20's
   table: it adds the `*TV` setting plus one. The disc's screen sits
   where MOS 3.20 puts it at `*TV 0,1` (`MODE2_R7`).
