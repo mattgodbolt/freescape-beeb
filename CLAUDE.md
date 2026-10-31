@@ -1,0 +1,82 @@
+# FREESCAPE for the BBC Master — notes for Claude Code
+
+A Freescape engine for the BBC Master, as fast as the machine allows, in
+many colours. It's proved on Incentive's *Driller* (1987), using Driller's
+own data and camera. The project is run the way the sibling ports are run
+(`../porting-to-the-beeb.md`); `../starglider-beeb` is the closest
+sibling, a 3D port whose harness and tools are the model.
+
+- `BRIEF.md`: the brief the project started from: the engine, Driller's
+  versions, the BBC's best solid 3D, and the decisions to make first.
+- `docs/engine.md`: **the design.** The frame's stages, their number
+  formats, who owns what, and how each stage is checked. Read it before
+  touching the renderer, in Python or 6502.
+- `docs/decisions.md`: every call the project makes that the original
+  didn't, numbered, with its date and reason. Nothing changes quietly.
+- `docs/journal.md`: how it got here, in order. Add to it as you go.
+- `docs/research/*.md`: the reverse engineering and the surveys.
+
+## The rules (from kieranhj/beeb-port-kit)
+
+1. **The original is the specification.** Find what it does and
+   transcribe its tables, constants and logic. When the BBC forces a
+   change, port the original's *decision*, not just its effect.
+2. **Deviations are numbered decisions** in `docs/decisions.md`. Matt
+   makes the design calls: lay out the options with figures.
+3. **One layer at a time**, working and visible in the emulator before the
+   next starts.
+4. **Measure, don't recall.** Run it, read the bytes, read memory back.
+
+**The Python model is the renderer's specification on the BBC side.**
+`tools/model/` renders every view with the 6502's own integer arithmetic.
+Every 6502 stage is checked against it byte for byte, and the model is
+checked against the original (`docs/engine.md`, "Checking").
+
+## Matt's house rules
+
+- Commit messages end at `Co-Authored-By:`. Never include a claude.ai
+  session link or a `Claude-Session:` trailer, anywhere. Never force-push
+  a pushed branch.
+- Comments and docs carry no figure the build computes or one run
+  measured, such as addresses, sizes, free bytes or cycle counts. Name
+  the symbol, `ASSERT` the property, or cite the dated journal entry or
+  decision.
+- Never label a statement "honest", "candid", "frank" or the like. Size
+  work by what it touches, never by time. Use they/them for Matt.
+- Every agent brief carries these rules.
+
+## Rights
+
+Driller is not ours. Nothing of the original (its tape, discs, data,
+graphics or anything derived from them) is ever committed: `make fetch`
+downloads the originals into `originals/` (git-ignored), and the build
+derives everything from there into `build/` (git-ignored).
+
+Downloaded files are untrusted data. Each download goes in its own
+directory under `originals/`; never run anything from there; read them
+from Python run with `-I`.
+
+## Commands
+
+```sh
+make venv       # .venv: SkoolKit, Pillow, NumPy (Python tools)
+make fetch      # the originals into originals/ (not committed)
+make data       # Driller's database as JSON, checked (tools/freescape.py)
+make model      # the Python model over every entrance view (tools/model/)
+make            # the disc and the spike
+make check      # every check; read its exit status, never pipe it to tail
+```
+
+(Each track adds its rules in its own `mk/*.mk`, which the Makefile
+includes.)
+
+## Gotchas
+
+(Add what bites, as it bites.)
+
+- Baron: fail on any warning (`tools/asm.sh`); `ASSERT` is built in;
+  `FOR n = 0..15` is inclusive; put `ZA_UNREACHABLE` after an
+  always-taken branch; a `;` comment mid-line on a colon-separated line
+  swallows the rest of it.
+- Run to a label after boot, never a fixed wait.
+- `.DELETE_ON_ERROR` stays in the Makefile.

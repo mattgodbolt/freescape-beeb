@@ -1,0 +1,11 @@
+[project]
+name = "freescape-beeb"
+version = "0.1.0"
+description = "Freescape for the BBC Master: research, model and build tools"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "pillow>=11.0",
+    "py65>=1.2.0",
+    "skoolkit>=10.1",
+]
