@@ -1,0 +1,109 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the area records (docs/research/objects.md)
+\
+\ tools/mkareas.py packs each area's objects into sideways RAM
+\ (build/gen/areas.6502, sections AreaBank*) and defines the working copy
+\ the object pipeline reads (section ObjArea): structure of arrays, a slot
+\ an object, the globals in the first G_OBJ slots and the area's after
+\ them. Entering an area copies its record into the working copy, so every
+\ array has one address whatever the area, and the stages index them with
+\ abs,X.
+\
+\ Entry points:
+\   area_init    once: the globals copied in, shown as the data has them
+\   area_enter   A = the area's index (0 .. AR_COUNT - 1, the directory's
+\                order): its record copied in, its objects shown as the
+\                data has them, the transform's cache emptied. The bank
+\                paged at &8000 (romsel, and its copy at ROMSEL_COPY) is
+\                put back after. Not while the object pipeline is running.
+\
+\ The working copy is never in sideways RAM (the build that places it
+\ ASSERTs so), since the copy pages the record's bank in at &8000.
+\
+\ The runtime state beside the copy: ob_state's bit 7 hides an object
+\ (the logic sets and clears it by slot; ob_id gives each slot's Driller
+\ id), and ob_n is the slots in use.
+\ ***************************************************************************
+
+ROMSEL_COPY = &F4                   ; the OS's copy of romsel, kept as the OS keeps it
+NSPACES     = 5                     ; a record's counts: objects, faces, planes, vertices, sensors
+
+SECTION ObjWork
+.ob_n       SKIP 1                  ; slots in use: G_OBJ + the area's objects
+.ob_state   SKIP N_OBJ              ; bit 7: hidden
+ENDSECTION
+
+\ AREA_COPY counts, dest_lo, dest_hi: each array of the record at src (its
+\ counts at counts) to its destination in the tables given; src is left
+\ past the record.
+MACRO AREA_COPY counts, dest_lo, dest_hi
+    LDX #0
+.array
+    STX i
+    LDA dest_lo,X : STA dst
+    LDA dest_hi,X : STA dst+1
+    LDY ad_space,X
+    LDA counts,Y : BEQ next
+    TAX
+    LDY #0
+.byte
+    LDA (src),Y : STA (dst),Y
+    INY : DEX : BNE byte
+    TYA : CLC : ADC src : STA src
+    BCC next
+    INC src+1
+.next
+    LDX i : INX : CPX #AD_COUNT : BNE array
+ENDMACRO
+
+SECTION ObjCode
+
+\ area_init: the globals' record into the working copy's first slots.
+.area_init
+{
+    ZA_ENTRY
+    ZA_AUTO2 src, dst
+    ZA_AUTO1 i
+    LDA #LO(globals_record + NSPACES) : STA src
+    LDA #HI(globals_record + NSPACES) : STA src+1
+    AREA_COPY globals_record, ad_gdest_lo, ad_gdest_hi
+    LDX #G_OBJ - 1
+.state
+    LDA ob_flags,X : AND #F_HIDDEN : STA ob_state,X
+    DEX : BPL state
+    LDA #G_OBJ : STA ob_n
+    JMP cache_reset
+}
+
+\ area_enter: area A's record into the working copy after the globals.
+.area_enter
+{
+    ZA_ENTRY
+    ZA_AUTO2 src, dst
+    ZA_AUTO1 i
+    TAX
+    LDA ROMSEL_COPY : PHA
+    LDA ar_bank,X : STA ROMSEL_COPY : STA romsel
+    LDA ar_lo,X : STA src
+    LDA ar_hi,X : STA src+1
+    LDY #NSPACES - 1
+.counts
+    LDA (src),Y : STA ar_counts,Y
+    DEY : BPL counts
+    LDA src : CLC : ADC #NSPACES : STA src
+    BCC copy
+    INC src+1
+.copy
+    AREA_COPY ar_counts, ad_dest_lo, ad_dest_hi
+    PLA : STA ROMSEL_COPY : STA romsel
+    LDA ar_counts : CLC : ADC #G_OBJ : STA ob_n
+    TAX
+    BRA state_next
+.state
+    LDA ob_flags,X : AND #F_HIDDEN : STA ob_state,X
+.state_next
+    DEX : CPX #G_OBJ : BCS state
+    JMP cache_reset
+}
+
+ENDSECTION

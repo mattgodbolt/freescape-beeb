@@ -1,0 +1,342 @@
+#!/usr/bin/env node
+// The object pipeline's check: the 6502 (src/area.6502, matrix, objects,
+// transform, clip, order) headless on every case of tools/objectcases.py,
+// each stage's output against the model's exactly.
+//
+//   node tools/objectcheck.mjs BUILD [--view TEXT] [--verbose] [--json OUT]
+//
+// BUILD holds the check build (OCODE, OCONST, OTMP, AREAS*, symbols.json) and
+// cases.json (mk/objects.mk). It checks:
+//   - stage 1: every matrix of cases.json's (matrix_build);
+//   - for each view, through objects_frame:
+//     - stage 2: the candidates, their seen faces and the vertices those use;
+//     - stage 3: each candidate's camera-space vertices, read as
+//       transform_object returns;
+//     - stages 4-6: each candidate's drawn faces, colour and polygon;
+//     - stage 7: the drawn objects' order;
+//     - the output, the faces nearest first, as the rasteriser reads them;
+//   - that nothing outside the pipeline's own memory was written.
+// It reports each stage's cycles, median and maximum over the entrance
+// views and over all the views: an instruction-level count, each
+// instruction's cycles going to the innermost stage routine on the stack
+// (STAGES below). With --json it writes each view's.
+//
+// Exits non-zero when anything disagrees.
+import fs from "node:fs";
+import { headless } from "./run6502.mjs";
+
+const args = process.argv.slice(2);
+const dir = args[0];
+if (!dir) {
+    console.error("usage: objectcheck.mjs BUILD [--view TEXT] [--verbose] [--json OUT]");
+    process.exit(2);
+}
+const opt = (name) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : undefined;
+};
+const only = opt("--view");
+const jsonOut = opt("--json");
+const verbose = args.includes("--verbose");
+
+const symFile = `${dir}/symbols.json`;
+const sections = {};
+for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
+    for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
+const cases = JSON.parse(fs.readFileSync(`${dir}/cases.json`, "utf8"));
+const views = cases.views.filter((v) => !only || v.name.includes(only));
+
+const m = await headless({ symbols: symFile });
+const S = (name) => m.sym(name);
+const has = (name) => name in m.syms;
+m.load(`${dir}/OCODE`, sections.ObjCode.org);
+m.load(`${dir}/OCONST`, sections.ObjConst.org);
+const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
+m.load(`${dir}/OMATHS`, sections.ObjMaths.org, space(sections.ObjMaths.org));
+for (const name of Object.keys(sections)) {
+    const b = /^AreaBank(\d+)$/.exec(name);
+    if (b) m.load(`${dir}/AREAS${b[1]}`, 0x8000, Number(b[1]));
+}
+
+const s8 = (v) => (v & 0x80 ? v - 256 : v);
+const s16 = (lo, hi) => {
+    const v = lo | (hi << 8);
+    return v & 0x8000 ? v - 0x10000 : v;
+};
+const s24 = (b0, b1, b2) => {
+    const v = b0 | (b1 << 8) | (b2 << 16);
+    return v & 0x800000 ? v - 0x1000000 : v;
+};
+const arr = (name, i) => m.peek(S(name) + i, space(S(name)));
+
+let failures = 0;
+const fail = (what) => {
+    failures++;
+    if (failures <= 40) console.log(`FAIL ${what}`);
+};
+
+// --- Where the pipeline may write: its zero page, the stack, its own
+// sections, romsel and its copy.
+const allowed = [
+    [0x10, 0x90],
+    [0x100, 0x200],
+    [0xf4, 0xf5],
+    [0xfe30, 0xfe31],
+];
+allowed.push([S("acccon"), S("acccon") + 1]);
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjCode"]) {
+    const a = sections[name];
+    allowed.push([a.org, a.guard]);
+}
+const badWrites = [];
+m.tm.processor.debugWrite.add((addr) => {
+    if (!allowed.some(([lo, hi]) => addr >= lo && addr < hi)) {
+        if (badWrites.length < 10) badWrites.push(addr);
+    }
+});
+
+// --- The stages, for the cycle count: each instruction's cycles go to the
+// innermost of these routines being run (entered and not yet returned
+// from), or to "frame" outside them all.
+const STAGES = [
+    ["matrix_update", "matrix"],
+    ["camera_setup", "pass"],
+    ["object_pass", "pass"],
+    ["transform_setup", "transform"],
+    ["transform_object", "transform"],
+    ["near_clip", "near"],
+    ["project", "project"],
+    ["outcode", "outcode"],
+    ["clip2d", "clip2d"],
+    ["draw_object", "faces"],
+    ["sort_objects", "sort"],
+    ["emit_faces", "emit"],
+];
+const entries = new Map();
+for (const [label, stage] of STAGES) if (has(label)) entries.set(S(label), stage);
+const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
+
+// --profile: every instruction's cycles to the routine it's in (the last
+// label at or below it that isn't inside a scope), over all the views.
+const profile = args.includes("--profile") ? new Map() : null;
+const routines = [];
+if (profile) {
+    const all = JSON.parse(fs.readFileSync(symFile, "utf8"));
+    for (const a of all.assemblies)
+        for (const s of a.sections)
+            if (s.name === "ObjCode" && s.labels)
+                for (const [k, v] of Object.entries(s.labels))
+                    if (!k.includes(".") && !k.includes("@")) routines.push([v.value, k]);
+    routines.sort((a, b) => a[0] - b[0]);
+}
+const routineOf = (pc) => {
+    let lo = 0;
+    let hi = routines.length - 1;
+    if (hi < 0 || pc < routines[0][0]) return "?";
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (routines[mid][0] <= pc) lo = mid;
+        else hi = mid - 1;
+    }
+    return routines[lo][1];
+};
+
+let tally = null; // stage -> cycles, while counting
+const stack = [];
+let lastPc = -1;
+let lastCycles = 0;
+let current = "frame";
+const watches = new Map(); // address -> callback, run as the instruction is reached
+m.tm.processor.debugInstruction.add((pc) => {
+    if (!tally) return false;
+    const cpu = m.tm.processor;
+    const now = m.tm.elapsedCycles;
+    if (lastPc >= 0) {
+        tally[current] = (tally[current] || 0) + (now - lastCycles);
+        if (profile) {
+            const r = routineOf(lastPc);
+            profile.set(r, (profile.get(r) || 0) + (now - lastCycles));
+        }
+    }
+    lastPc = pc;
+    lastCycles = now;
+    while (stack.length && cpu.s > stack[stack.length - 1].sp) stack.pop();
+    const stage = entries.get(pc);
+    if (stage) stack.push({ stage, sp: cpu.s });
+    current = stack.length ? stack[stack.length - 1].stage : "frame";
+    const w = watches.get(pc);
+    if (w) w();
+    return false;
+});
+
+async function counted(entry) {
+    tally = {};
+    stack.length = 0;
+    lastPc = -1;
+    const r = await m.call(entry, { secs: 30 });
+    if (lastPc >= 0) tally[current] = (tally[current] || 0) + (m.tm.elapsedCycles - lastCycles);
+    const t = tally;
+    tally = null;
+    return { total: r.total, stages: t };
+}
+
+// --- Stage 1: the matrices.
+await m.call(S("check_init"));
+let matrixBad = 0;
+for (const [yaw, pitch, roll, want] of cases.matrices) {
+    m.poke(S("mat_angles"), yaw);
+    m.poke(S("mat_angles") + 1, pitch);
+    m.poke(S("mat_angles") + 2, roll);
+    await m.call(S("check_matrix"));
+    const got = m.read(S("mat"), 9).map(s8);
+    if (got.join() !== want.join()) {
+        matrixBad++;
+        fail(`matrix ${yaw},${pitch},${roll}: ${got} want ${want}`);
+    }
+}
+console.log(`stage 1: ${cases.matrices.length} matrices, ${matrixBad} wrong`);
+
+// --- The views.
+const full = has("of_transformed");
+const results = [];
+let area = -1;
+const counts = { views: 0, cands: 0, verts: 0, faces: 0, out: 0 };
+for (const view of views) {
+    if (view.area !== area) {
+        m.poke(S("check_area"), view.area);
+        await m.call(S("check_enter"));
+        area = view.area;
+    }
+    const [x, y, z, yaw, pitch, roll] = view.camera;
+    m.pokew(S("cam_x"), x);
+    m.pokew(S("cam_y"), y);
+    m.pokew(S("cam_z"), z);
+    m.poke(S("cam_yaw"), yaw);
+    m.poke(S("cam_pitch"), pitch);
+    m.poke(S("cam_roll"), roll);
+    const seen = [];
+    if (full) {
+        watches.set(S("of_transformed"), () => {
+            const c = m.peek(S("of_cand"));
+            const slot = arr("cd_obj", c);
+            const vmask = arr("cd_vmask", c);
+            const verts = {};
+            for (let j = 0; j < 8; j++) {
+                if (!(vmask & (1 << j))) continue;
+                const g = (p) => [0, 1, 2].map((b) => arr(`${p}${b}`, j));
+                verts[j] = [s24(...g("vx")), s24(...g("vy")), s24(...g("vz"))];
+            }
+            seen.push({ slot, verts });
+        });
+    }
+    badWrites.length = 0;
+    const { total, stages } = await counted(S(full ? "check_frame" : "check_pass"));
+    const name = view.name;
+    if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
+
+    // stage 1 again, as the frame built it
+    const mat = m.read(S("mat"), 9).map(s8);
+    if (mat.join() !== view.matrix.join()) fail(`${name}: matrix ${mat} want ${view.matrix}`);
+
+    // stage 2: the candidates
+    const n = m.peek(S("cd_n"));
+    const cands = [];
+    for (let i = 0; i < n; i++) cands.push([arr("cd_obj", i), arr("cd_mask", i), arr("cd_vmask", i)]);
+    const want = view.cands.map((c) => [c.slot, c.mask, c.vmask]);
+    if (JSON.stringify(cands) !== JSON.stringify(want)) {
+        fail(`${name}: candidates ${JSON.stringify(cands)} want ${JSON.stringify(want)}`);
+        results.push({ name, total, stages });
+        continue;
+    }
+    counts.views++;
+    counts.cands += n;
+    if (full) {
+        // stage 3: camera-space vertices
+        for (let i = 0; i < view.cands.length; i++) {
+            const w = view.cands[i];
+            const g = seen[i];
+            if (!g || g.slot !== w.slot) {
+                fail(`${name}: candidate ${i} not transformed`);
+                continue;
+            }
+            for (const [j, v] of Object.entries(w.verts)) {
+                counts.verts++;
+                if (!g.verts[j] || g.verts[j].join() !== v.join())
+                    fail(`${name}: slot ${w.slot} vertex ${j} ${g.verts[j]} want ${v}`);
+            }
+        }
+        // stages 4-6: each candidate's drawn faces, then 7 and the output
+        const faceAt = (f, base) => {
+            const nv = arr(`${base}_fn`, f);
+            const v0 = arr(`${base}_fv`, f);
+            const poly = [];
+            for (let k = 0; k < nv; k++) {
+                const v = v0 + k;
+                poly.push([s16(arr("out_vxl", v), arr("out_vxh", v)), s16(arr("out_vyl", v), arr("out_vyh", v))]);
+            }
+            return [arr(`${base}_fc`, f), poly];
+        };
+        const dn = m.peek(S("dl_n"));
+        const drawn = new Map();
+        for (let d = 0; d < dn; d++) {
+            const f0 = arr("dl_f0", d);
+            const nf = arr("dl_nf", d);
+            const faces = [];
+            for (let k = 0; k < nf; k++) faces.push(faceAt(f0 + k, "tf"));
+            drawn.set(arr("dl_obj", d), faces);
+        }
+        for (const w of view.cands) {
+            const got = drawn.get(w.slot) || [];
+            counts.faces += w.faces.length;
+            if (JSON.stringify(got) !== JSON.stringify(w.faces))
+                fail(`${name}: slot ${w.slot} faces ${JSON.stringify(got)} want ${JSON.stringify(w.faces)}`);
+        }
+        const order = [];
+        for (let d = 0; d < dn; d++) order.push(arr("dl_obj", arr("dl_ord", d)));
+        if (order.join() !== view.order.join()) fail(`${name}: order ${order} want ${view.order}`);
+        const on = arr("out_nf", 0);
+        const out = [];
+        for (let f = 0; f < on; f++) out.push(faceAt(f, "out"));
+        counts.out += on;
+        if (JSON.stringify(out) !== JSON.stringify(view.out))
+            fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
+    }
+    if (verbose) console.log(name, total, JSON.stringify(stages));
+    results.push({ name, total, stages, entrance: /^a\d+-e\d+$/.test(name) });
+}
+
+// --- The cycles.
+const median = (v) => {
+    const s = [...v].sort((a, b) => a - b);
+    const n = s.length;
+    return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0;
+};
+const report = (label, rows) => {
+    if (!rows.length) return;
+    console.log(`${label}: ${rows.length} views, cycles median / max`);
+    const line = (name, vals) => {
+        const top = Math.max(...vals);
+        const who = rows[vals.indexOf(top)].name;
+        console.log(`  ${name.padEnd(10)} ${String(median(vals)).padStart(8)} ${String(top).padStart(8)}  ${who}`);
+    };
+    for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0));
+    line("total", rows.map((r) => r.total));
+};
+report("entrance views", results.filter((r) => r.entrance));
+report("all views", results);
+console.log(
+    `checked ${counts.views} views: ${counts.cands} candidates, ${counts.verts} vertices, ` +
+        `${counts.faces} faces, ${counts.out} output faces`,
+);
+if (profile) {
+    const total = [...profile.values()].reduce((a, b) => a + b, 0);
+    console.log(`profile: cycles by routine over ${results.length} views`);
+    for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40))
+        console.log(`  ${r.padEnd(20)} ${String(Math.round(c / results.length)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);
+}
+if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify(results, null, 1) + "\n");
+if (failures) {
+    console.log(`${failures} failures`);
+    process.exit(1);
+}
+console.log("objects: ok");

@@ -1,0 +1,172 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the draw order (docs/engine.md, stage 7;
+\ decision 3; tools/model/order.py)
+\
+\ The original's sort: up to n - 1 bubble passes over the draw list in the
+\ object pass's order, stopping after a pass with no swap; a pair keeps its
+\ order only when the second is nearer on some axis and the first on none.
+\ On one axis (the model's compare_axis), with the header boxes relative to
+\ the camera:
+\
+\ - overlapping boxes (each's min below the other's max): no verdict;
+\ - a box across the camera's coordinate is the nearer, the first first;
+\ - boxes on opposite sides: no verdict;
+\ - else, of two below the camera, the one whose (min, max) is the greater
+\   is nearer, and of two above it the one whose (min, max) is the less, a
+\   tie going to the second below and the first above (the model's sign
+\   test on min_b - min_a, or max_b - max_a when the mins are equal).
+\
+\ Every quantity is 64 cells - c, so each compare is of cells: min_a <
+\ max_b is L_a < H_b, and below the camera (min < 0) is L < e, e the
+\ camera's ceiling cell (src/objects.6502). So each entry gets its cells
+\ and its side of the camera on each axis once, and a compare is byte
+\ compares.
+\
+\ Entry points:
+\   sort_objects  dl_ord = the draw list's entries farthest first
+\   emit_faces    the drawn faces nearest first (dl_ord backwards, each
+\                 object's in its face order) into out_fn, out_fv, out_fc,
+\                 and their count in out_nf
+\ ***************************************************************************
+
+SK_ACROSS = 0 : SK_BELOW = 1 : SK_ABOVE = 2     ; an entry's side of the camera
+
+SECTION ObjWork
+.sk_lx      SKIP N_OBJ              ; each entry's header box, cells
+.sk_ly      SKIP N_OBJ
+.sk_lz      SKIP N_OBJ
+.sk_hx      SKIP N_OBJ
+.sk_hy      SKIP N_OBJ
+.sk_hz      SKIP N_OBJ
+.sk_sx      SKIP N_OBJ              ; its side of the camera on each axis (SK_*)
+.sk_sy      SKIP N_OBJ
+.sk_sz      SKIP N_OBJ
+ENDSECTION
+
+SECTION ObjCode
+
+\ SK_AXIS k, lo, hi, side, olo, ohi: entry X's keys on axis k, from slot Y's
+\ header box (olo, ohi)
+MACRO SK_AXIS k, lo, hi, side, olo, ohi
+    LDA olo,Y : STA lo,X
+    CMP cell_e + k : BCS above      ; L >= e: wholly above
+    LDA ohi,Y : STA hi,X
+    CMP cell_e + k : BCC below      ; H < e: wholly below
+    LDA #SK_ACROSS : BRA set
+.above
+    LDA ohi,Y : STA hi,X
+    LDA #SK_ABOVE : BRA set
+.below
+    LDA #SK_BELOW
+.set
+    STA side,X
+ENDMACRO
+
+\ SK_COMPARE lo, hi, side: one axis of a pair's compare (X = a, Y = b): on
+\ to sort_objects.first if a is the nearer, set second if b is, and on if
+\ neither
+MACRO SK_COMPARE lo, hi, side
+    LDA lo,X : CMP hi,Y : BCS apart     ; L_a >= H_b
+    LDA lo,Y : CMP hi,X : BCC done      ; L_b < H_a: they overlap
+.apart
+    LDA side,X : BEQ first_x            ; a across the camera
+    LDA side,Y : BEQ second_x           ; b across
+    CMP side,X : BNE done               ; opposite sides
+    CMP #SK_ABOVE : BEQ above
+    \ both below: a is nearer if (L_b, H_b) < (L_a, H_a)
+    LDA lo,Y : CMP lo,X : BNE below_decided
+    LDA hi,Y : CMP hi,X
+.below_decided
+    BCC first_x
+    BRA second_x
+.above
+    \ both above: a is nearer unless (L_b, H_b) < (L_a, H_a)
+    LDA lo,Y : CMP lo,X : BNE above_decided
+    LDA hi,Y : CMP hi,X
+.above_decided
+    BCC second_x
+.first_x
+    JMP sort_objects.first
+.second_x
+    LDA #1 : STA sort_objects.second
+.done
+ENDMACRO
+
+\ sort_objects: the original's sort of the draw list into dl_ord.
+.sort_objects
+{
+    ZA_ENTRY
+    ZA_AUTO1 last, passes, changed, j, b, second
+    \ each entry's keys, and dl_ord the list's own order
+    LDX #0
+    CPX dl_n : BNE keys
+    RTS
+.keys
+    TXA : STA dl_ord,X
+    LDY dl_obj,X
+    SK_AXIS 0, sk_lx, sk_hx, sk_sx, ob_lx, ob_hx
+    SK_AXIS 1, sk_ly, sk_hy, sk_sy, ob_ly, ob_hy
+    SK_AXIS 2, sk_lz, sk_hz, sk_sz, ob_lz, ob_hz
+    INX : CPX dl_n : BEQ keyed
+    JMP keys
+.keyed
+    DEX : BNE pairs
+    RTS                                 ; (one entry)
+.pairs
+    STX last                            ; the pairs: 0 .. last - 1
+    STX passes                          ; at most this many passes
+.pass
+    STZ changed
+    STZ j
+.pair
+    LDY j
+    LDX dl_ord,Y                        ; a
+    LDA dl_ord+1,Y : STA b : TAY        ; b
+    STZ second
+    SK_COMPARE sk_lx, sk_hx, sk_sx
+    SK_COMPARE sk_ly, sk_hy, sk_sy
+    SK_COMPARE sk_lz, sk_hz, sk_sz
+    LDA second : BNE kept
+.first
+    \ swapped: b, then a (in X)
+    LDY j
+    LDA b : STA dl_ord,Y
+    TXA : STA dl_ord+1,Y
+    LDA #1 : STA changed
+.kept
+    INC j : LDA j : CMP last : BCS pass_done
+    JMP pair
+.pass_done
+    LDA changed : BEQ sorted
+    DEC passes : BEQ sorted
+    JMP pass
+.sorted
+    RTS
+}
+
+\ emit_faces: the faces nearest first, from the sorted draw list.
+.emit_faces
+{
+    ZA_ENTRY
+    ZA_AUTO1 p, f, end
+    STZ out_nf
+    LDX dl_n : BEQ done
+.object
+    DEX : STX p
+    LDY dl_ord,X
+    LDA dl_f0,Y : STA f
+    CLC : ADC dl_nf,Y : STA end
+.face
+    LDY f
+    LDX out_nf
+    LDA tf_fn,Y : STA out_fn,X
+    LDA tf_fv,Y : STA out_fv,X
+    LDA tf_fc,Y : STA out_fc,X
+    INC out_nf
+    INC f : LDA f : CMP end : BNE face
+    LDX p : BNE object
+.done
+    RTS
+}
+
+ENDSECTION

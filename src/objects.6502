@@ -1,0 +1,301 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the object pass (docs/engine.md, stage 2;
+\ tools/model/objects.py's object_pass) and the frame's object pipeline
+\
+\ For each slot, the area's then the globals' (the model's order, less what
+\ can't be drawn): skip it if it's hidden; skip it if the coarse cull puts
+\ it wholly behind the camera; then each face's test, and the object is a
+\ candidate if the camera sees a face. A sensor is a candidate when it's
+\ watching (the model's sensor_watching).
+\
+\ Everything's a byte compare against the camera's cell on each axis
+\ (camera_setup), but a slanted plane's test (plane_test):
+\
+\ - the camera's floor cell f = c DIV 64 and ceiling cell e = -(-c DIV 64),
+\   each clamped to a byte (the records' cells are below 255);
+\ - a corner 64 L is above the camera (L - c > 0) when f < L, and below it
+\   when L < e; so a face in the plane 64 P is seen from below (the model's
+\   c < 64 P) when f < P and from above when P < e, which the records hold
+\   as 255 - e < 255 - P so that both are thr < tval;
+\ - the coarse cull's "the box no higher than the camera" (hi <= c) is
+\   H <= f, and "no lower" (lo >= c) is L >= e.
+\
+\ Entry points:
+\   camera_setup  the frame's cells and thresholds, from cam_* and mat
+\                 (after matrix_update)
+\   object_pass   the candidates into cd_n, cd_obj (their slots, in order),
+\                 cd_mask (bit j: face ob_f0 + j is seen) and cd_vmask (the
+\                 vertices those faces use)
+\   objects_frame the whole pipeline, stages 1 to 7: the camera's view of
+\                 the area into out_* (src/clip.6502), nearest face first
+\ ***************************************************************************
+
+SECTION ObjWork
+.cell_f     SKIP 3                  ; the camera's floor cell on each axis, at most 254
+.cell_e     SKIP 3                  ; its ceiling cell, at most 255
+.thr        SKIP 8                  ; a face is seen if thr[fa_test] < fa_tval
+.cull_hi    SKIP 3                  ; the coarse cull: a box goes if its H < cull_hi ...
+.cull_lo    SKIP 3                  ; ... or its L >= cull_lo, on some axis
+.cd_n       SKIP 1                  ; the candidates
+.cd_obj     SKIP N_OBJ
+.cd_mask    SKIP N_OBJ
+.cd_vmask   SKIP N_OBJ
+ENDSECTION
+
+ASSERT T_AXLO = 0 AND T_AXHI = 1 AND T_PLANE = 6 AND T_ALWAYS = 7
+ASSERT ob_bly = ob_blx + N_OBJ AND ob_blz = ob_bly + N_OBJ
+
+SECTION ObjCode
+
+\ camera_setup: the cells, the faces' thresholds and the cull's.
+.camera_setup
+{
+    ZA_ENTRY
+    ZA_AUTO1 q, rest
+    FOR k = 0..2
+        \ q = c DIV 64, and rest non-zero if c isn't a multiple of 64
+        LDA cam_x + 2 * k + 1 : CMP #64 : BCC near
+        LDA #255 : STA q : STA rest : BRA got
+    .near
+        STA q
+        LDA cam_x + 2 * k
+        ASL A : ROL q
+        ASL A : ROL q
+        STA rest
+    .got
+        LDA q : CMP #255 : BCC f_ok
+        LDA #254
+    .f_ok
+        STA cell_f + k
+        STA thr + 2 * k             ; T_AXLO + 2 k: seen if f < P
+        LDA rest : CMP #1           ; C set if c isn't a multiple of 64
+        LDA q : ADC #0 : BCC e_ok
+        LDA #255
+    .e_ok
+        STA cell_e + k
+        EOR #&FF : STA thr + 2 * k + 1   ; T_AXHI + 2 k: seen if 255 - e < 255 - P
+        \ the cull, on the matrix's ahead row
+        STZ cull_hi + k
+        LDA #255 : STA cull_lo + k
+        LDA mat + 6 + k : BMI behind
+        CMP #CULL_K : BCC done
+        LDA cell_f + k : INC A : STA cull_hi + k
+        BRA done
+    .behind
+        CMP #(256 - CULL_K) AND &FF : BEQ minus
+        BCS done
+    .minus
+        LDA cell_e + k : STA cull_lo + k
+    .done
+    NEXT
+    LDA #255 : STA thr + T_PLANE    ; never by compare: plane_test decides
+    STZ thr + T_ALWAYS              ; (tval 255)
+    RTS
+}
+ASSERT CULL_K > 0 AND CULL_K < 128
+
+\ object_pass: the candidates, from the area's slots and then the globals'.
+.object_pass
+{
+    ZA_ENTRY
+    ZA_AUTO1 obj, n, bit, mask, vmask, last, globals
+    STZ cd_n
+    STZ globals
+    LDA ob_n : STA last
+    LDX #G_OBJ
+    CPX last : BNE object
+    \ (no area objects: straight to the globals)
+.wrap
+    LDA globals : BNE finished
+    INC globals
+    LDA #G_OBJ : STA last
+    LDX #0
+.object
+    LDA ob_state,X : BMI next
+    LDA ob_bhx,X : CMP cull_hi+0 : BCC next
+    LDA ob_bhy,X : CMP cull_hi+1 : BCC next
+    LDA ob_bhz,X : CMP cull_hi+2 : BCC next
+    LDA ob_blx,X : CMP cull_lo+0 : BCS next
+    LDA ob_bly,X : CMP cull_lo+1 : BCS next
+    LDA ob_blz,X : CMP cull_lo+2 : BCC faces
+.next
+    INX
+    CPX last : BNE object
+    BRA wrap
+.finished
+    RTS
+.faces
+    STX obj
+    LDA ob_flags,X : AND #K_MASK : CMP #K_SENSOR : BEQ sensor
+    LDA ob_nf,X : STA n
+    LDA ob_f0,X : TAX
+    STZ mask : STZ vmask
+    LDA #1 : STA bit
+.face
+    LDY fa_test,X : LDA thr,Y : CMP fa_tval,X : BCC seen
+    CPY #T_PLANE : BNE unseen
+    JSR plane_test
+    BCC unseen
+.seen
+    LDA bit : TSB mask
+    LDA fa_vmask,X : TSB vmask
+.unseen
+    ASL bit
+    INX
+    DEC n : BNE face
+    LDA mask : BEQ restore
+.candidate
+    LDY cd_n
+    LDA obj : STA cd_obj,Y
+    LDA mask : STA cd_mask,Y
+    LDA vmask : STA cd_vmask,Y
+    INC cd_n
+.restore
+    LDX obj
+    JMP next
+.sensor
+    JSR sensor_watching
+    BCC restore
+    LDA #1 : STA mask : STA vmask
+    BRA candidate
+}
+
+\ sensor_watching: C set if sensor slot X is watching the camera: it's on a
+\ side the sensor's axes watch (bits as the model's sides(): 2k below the
+\ corner on axis k, 2k + 1 above it), and the Manhattan distance from the
+\ corner (64 L) to the camera is under its range. X is kept.
+.sensor_watching
+{
+    ZA_AUTO1 sides
+    ZA_AUTO 3, sum
+    ZA_AUTO2 d
+    STZ sides
+    STZ sum : STZ sum+1 : STZ sum+2
+    FOR k = 0..2
+        LDA cell_f + k : CMP ob_lx + k * N_OBJ,X : BCS not_below
+        LDA #1 << (2 * k) : TSB sides
+    .not_below
+        LDA ob_lx + k * N_OBJ,X : CMP cell_e + k : BCS not_above
+        LDA #2 << (2 * k) : TSB sides
+    .not_above
+        \ d = 64 L - c, and its size added to sum
+        LDA ob_lx + k * N_OBJ,X : LSR A : LSR A : STA d+1
+        LDA ob_lx + k * N_OBJ,X : LSR A : ROR A : ROR A : AND #&C0
+        SEC : SBC cam_x + 2 * k : STA d
+        LDA d+1 : SBC cam_x + 2 * k + 1 : BPL positive
+        STA d+1
+        LDA #0 : SEC : SBC d : STA d
+        LDA #0 : SBC d+1
+    .positive
+        STA d+1
+        LDA sum : CLC : ADC d : STA sum
+        LDA sum+1 : ADC d+1 : STA sum+1
+        BCC no_carry
+        INC sum+2
+    .no_carry
+    NEXT
+    LDY ob_aux,X
+    LDA sides : AND sn_axes,Y : BEQ no
+    LDA sum+2 : BNE no
+    LDA sum : CMP sn_rl,Y
+    LDA sum+1 : SBC sn_rh,Y
+    BCS no                          ; (the distance is at least the range)
+    SEC
+    RTS
+.no
+    CLC
+    RTS
+}
+
+\ plane_test: C set if the camera sees face X, a slanted plane: the reduced
+\ normal n's two components on axes a and b, and the plane's point 64 v on
+\ them (pl_*), seen when n_a (c_a - 64 v_a) + n_b (c_b - 64 v_b) > 0. The
+\ terms' signs settle most without a product. X is kept.
+.plane_test
+{
+    ZA_AUTO2 ra, rb
+    ZA_AUTO1 face, sa, sb
+    ZA_AUTO 3, ta
+    STX face
+    LDY fa_tval,X
+    LDA pl_a,Y : ASL A : TAX
+    LDA cam_x,X : SEC : SBC pl_ral,Y : STA ra
+    LDA cam_x+1,X : SBC pl_rah,Y : STA ra+1
+    LDA pl_b,Y : ASL A : TAX
+    LDA cam_x,X : SEC : SBC pl_rbl,Y : STA rb
+    LDA cam_x+1,X : SBC pl_rbh,Y : STA rb+1
+    \ each term's sign in bit 7, or the term zero
+    LDA rb : ORA rb+1 : BEQ b_zero
+    LDA rb+1 : EOR pl_nb,Y : STA sb
+    LDA ra : ORA ra+1 : BEQ sign_b      ; a's term zero: b's sign decides
+    LDA ra+1 : EOR pl_na,Y : STA sa
+    EOR sb : BMI products               ; opposite signs: the products decide
+    LDA sa                              ; the same: either's sign decides
+    BRA decide
+.b_zero
+    LDA ra : ORA ra+1 : BEQ unseen      ; both zero: on the plane
+    LDA ra+1 : EOR pl_na,Y
+    BRA decide
+.sign_b
+    LDA sb
+.decide
+    \ seen if the sign (bit 7) is positive
+    LDX face
+    ASL A : BCS unseen_x
+    SEC
+    RTS
+.unseen
+    LDX face
+.unseen_x
+    CLC
+    RTS
+.products
+    \ (the maths' mul: src/maths.6502)
+    LDA pl_na,Y : JSR mul_set
+    LDA ra : STA mv0
+    LDA ra+1 : STA mv0+1
+    JSR mul
+    LDA macc : STA ta
+    LDA macc+1 : STA ta+1
+    LDA macc+2 : STA ta+2
+    LDX face : LDY fa_tval,X
+    LDA pl_nb,Y : JSR mul_set
+    LDA rb : STA mv0
+    LDA rb+1 : STA mv0+1
+    JSR mul
+    LDA ta : CLC : ADC macc : STA ta
+    LDA ta+1 : ADC macc+1 : STA ta+1
+    LDA ta+2 : ADC macc+2
+    BMI unseen
+    ORA ta : ORA ta+1 : BEQ unseen
+    LDX face
+    SEC
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ objects_frame: stages 1 to 7, the camera (cam_*) to the faces nearest
+\ first in out_* (src/clip.6502). Needs the maths' tables readable.
+.objects_frame
+    ZA_ENTRY
+    JSR matrix_update
+    JSR transform_setup
+    JSR camera_setup
+    JSR object_pass
+    STZ tf_n : STZ out_vn : STZ dl_n : STZ out_over
+    LDX #0
+    CPX cd_n : BEQ of_sort
+.of_candidate
+    STX of_cand
+    LDA cd_obj,X : STA of_slot
+    LDA cd_vmask,X
+    LDX of_slot
+    JSR transform_object
+.of_transformed                     ; (tools/objectcheck.mjs reads the vertices here)
+    JSR draw_object
+    LDX of_cand : INX : CPX cd_n : BNE of_candidate
+.of_sort
+    JSR sort_objects
+    JMP emit_faces
+
+ENDSECTION
