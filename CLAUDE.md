@@ -62,7 +62,8 @@ from Python run with `-I`.
 Matt follows the work through `README.md` and `freescape.ssd`, which the
 README's jsbeeb link boots (`github:mattgodbolt/freescape-beeb/freescape.ssd`).
 Keep the README's "Where it's up to" true, and commit and push a new disc
-whenever something visible lands. The disc is a tech demo: it may show
+whenever something visible lands, with fresh screenshots in
+`docs/images/` for the README (from `make run`'s, cropped). The disc is a tech demo: it may show
 Driller's scenes, attributed to Incentive on the disc itself (decision 6),
 but it isn't a release of the game, and nothing else of Driller's is
 committed.

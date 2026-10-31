@@ -20,6 +20,8 @@ engine has its reference. The Python model of the renderer, the maths,
 the span buffer and row writer, and the colours are being built in
 parallel. `docs/journal.md` has the story as it goes.
 
+![The disc today: MODE 2's eight colours in the view's place, double-buffered](docs/images/disc_testcard.png)
+
 ## How it works
 
 The design is in [`docs/engine.md`](docs/engine.md). In short:
