@@ -97,7 +97,7 @@ B $88D9,2,2
 @ $88DB label=BufferRows
 g $88DB The buffer's rows and bytes a row
 W $88DB,4,2
-@ $88E5 label=CullBox
+@ $88E5 label=CullBounds
 g $88E5 The coarse cull's box, in cells: x max, x min, y max, y min, z max, z min
 B $88E5,6,2
 @ $8920 label=GameFlags
