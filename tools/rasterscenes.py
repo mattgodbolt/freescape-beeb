@@ -374,8 +374,8 @@ def edge_scenes():
 def build(s):
     """The model's image of a scene. Its span buffer, with the fill rule's
     exact edges, must give the brute force's image; and the DDA's edges
-    (decision 21), which the image is made with, must be within a pixel of
-    the exact ones on every line."""
+    (docs/research/raster.md), which the image is made with, must be within
+    a pixel of the exact ones on every line."""
     bg = Background(tuple(s["sky"]), tuple(s["ground"]),
                     None if s["horizon"] is None else Horizon(*s["horizon"]))
     faces = [(tuple(p), [tuple(v) for v in vs]) for p, vs in s["faces"]]

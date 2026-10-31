@@ -644,13 +644,14 @@ ASSERT sbg_3 - (sb3 + 2) = STEP_G AND sb_end3 - (sb3 + 2) = STEP_NONE
 \ r_y on; otherwise C = 1, with the chain's x on line r_y, the line it ends
 \ before and its gradient set, and the loop patched to step it. Keeps X.
 \
-\ tools/model/raster.py's edge_crossings is the rule (decision 21): a
-\ vertical edge's boundary is (x + 7) >> 4; another's x is a DDA in 8.8,
-\ X = 16 (x0 - 8) + 255 plus or minus g t0 >> 4 on the first line, and
-\ g = |dx| r >> (8 + s) a line after (with dx's sign), where dy is n 2^s
-\ (n in [128, 255], rounded up) and r = 256 + f(n) its reciprocal, from
-\ recipf. The products by r are quarter squares, by the maths' tables with
-\ f patched in (mulf).
+\ tools/model/raster.py's edge_crossings is the rule (docs/research/
+\ raster.md): a vertical edge's boundary is (x + 7) >> 4; another's x is a
+\ DDA in 8.8, X = 16 (x0 - 8) + 255 plus or minus g t0 >> 4 on the first
+\ line, and g = |dx| r >> (8 + s) a line after (with dx's sign), where dy
+\ is n 2^s (n in [128, 255], rounded up) and r = 256 + f(n) its
+\ reciprocal, from recipf. The products by r are quarter squares (mulf).
+\ An edge no taller than a line has no gradient: its offset is
+\ |dx| t0 r >> (12 + s).
 
 ZA_AUTO1 e_c, e_u, e_w, e_k1, e_t0, e_neg, e_sh
 ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g

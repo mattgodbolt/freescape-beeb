@@ -121,7 +121,8 @@ def edge_crossings(x0, y0, x1, y1):
     A horizontal edge crosses none.
 
     The boundary is the exact one, (x + 7) >> 4, for a vertical edge, and
-    otherwise a DDA in 8.8 fixed point (decision 21), as the 6502 steps it.
+    otherwise a DDA in 8.8 fixed point (docs/research/raster.md), as the
+    6502 steps it.
     With dy normalised to n at 2^s (normalise) and r = 256 + f(n), its
     reciprocal, the gradient is g = |dx| r >> (8 + s) pixels a line, and
     the first line's offset from the top vertex g t0 >> 4, t0 the line's
