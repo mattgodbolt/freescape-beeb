@@ -1,8 +1,12 @@
-# Fetched originals and anything derived from them: never checked in (BRIEF.md D6)
-/originals/
-/build/
-/.venv/
+# Fetched originals and anything derived from them: never checked in
+# (decision 6). No trailing slashes, so a worktree's symlinks to them are
+# ignored too.
+/originals
+/build
+/.venv
+/node_modules
+/shots
+/local.mk
 __pycache__/
 *.pyc
-node_modules/
 /.claude/scheduled_tasks.lock
