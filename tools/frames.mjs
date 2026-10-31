@@ -18,21 +18,26 @@
 // - the view's border is where src/defs.6502 puts it, on the picture and
 //   in both buffers;
 // - both buffers hold the same at main_loop: 0 but the test scene's edge;
-// - every write to the screen comes between frame_begin and frame_end, to
+// - every write to the view comes between frame_begin and frame_end, to
 //   the buffer not shown;
-// - every flip comes while the CRTC is past its last row shown, and shows
-//   the buffer of the one frame handed over since the last flip, whose
-//   view holds the test scene's frame for that frame byte for byte, and
-//   whose bytes outside the view are as they were at main_loop;
+// - every flip comes while the CRTC isn't fetching the view's lines (with
+//   FLIP_AT_VSYNC, in the vertical blank), and shows the buffer of the one
+//   frame handed over since the last flip, whose view holds the test
+//   scene's frame for that frame byte for byte, and whose bytes outside
+//   the view are as they were at main_loop; and, flipping as the beam
+//   leaves the view, both buffers hold the same outside the view;
+// - every frame is shown whole, its view's lines all fetched from its
+//   buffer, at least once before the next flip;
 // - every vertical sync is counted (fields) and every flip (frames);
 // - each of Driller's keys (src/input.6502) sets its bit and no other,
 //   alone and with another held.
 //
 // It reports the test scene's pace as it is (its whole view a frame):
-// frames a second and fields a frame from the counters, and the cycles a
-// frame spends drawing and waiting. Then it runs the scene with its cost
-// varied at random each frame (scene_rows, scene_delay), so frames end all
-// over the field, and reports the fields a frame there too.
+// frames a second and fields a frame from the counters, the fields each
+// frame was shown for, and the cycles a frame spends drawing and waiting.
+// Then it runs the scene with its cost varied at random each frame
+// (scene_rows, scene_delay), so frames end all over the field, and
+// reports the same there.
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -274,15 +279,30 @@ for (const buffer of [0, 1]) {
 }
 if (cpu.acccon & 7) fail(`ACCCON ${hex(cpu.acccon)} at main_loop: D, E or X set`);
 
+// The flip, as built: as the beam leaves the view (the default), or at the
+// vertical sync (FLIP_AT_VSYNC). Lines count from the field's first shown.
+const VSYNC = Boolean(sym("FLIP_AT_VSYNC"));
+const LINE_CYCLES = sym("LINE_CYCLES");
+const FIELD_LINES = sym("FIELD_LINES");
+const VIEW_TOP = sym("VIEW_TOP_LINE");
+const VIEW_END = sym("VIEW_END_LINE");
+console.log(`frames: ${disc}: the flip ${VSYNC ? "at the vertical sync" : "as the beam leaves the view"}`);
+// The view's bytes, by offset from SCREEN.
+const viewMask = new Uint8Array(SCREEN_BYTES);
+for (let y = 0; y < VIEW_H; y++) for (let c = 0; c < VIEW_BYTES; c++) viewMask[viewAt(y, c) - SCREEN] = 1;
+
 // The hooks. Frames handed over and not yet shown, and the state between
 // frame_begin and frame_end.
 const pending = [];
 let checking = true;
 let inFrame = false;
-let flips = 0, writes = 0, syncs = 0;
-let lastFlipField = null;
-const fieldsShown = new Map(); // fields a frame was shown for -> how many frames
-let minMargin = Infinity; // the fewest lines between a flip and the next line shown
+let flips = 0, viewWrites = 0, otherWrites = 0, syncs = 0;
+// The beam's line by the clock, from where the CRTC had it at the first
+// flip: a line is LINE_CYCLES, and every field FIELD_LINES.
+let lineAt = null;
+let lastFlip = null; // the last flip's line, so counted
+let shownFor = []; // the fields each frame was shown for
+let flipLines = { now: [], later: [] }; // where flips came: at once in frame_end, or by an interrupt
 let tBegin = 0, tShown = 0, drawCycles = 0, waitCycles = 0, drawn = 0;
 let vary = false;
 const rand = () => {
@@ -336,25 +356,44 @@ cpu.sysvia.setVBlankInt = function (level) {
 
 function flipped(to) {
     flips++;
-    const rows = r[4] + 1;
-    if (video.vertCounter < r[6]) fail(`flip ${flips} at character row ${video.vertCounter}, which is shown`);
-    const margin = (rows - video.vertCounter) * (r[9] + 1) - video.scanlineCounter + r[5];
-    minMargin = Math.min(minMargin, margin);
-    const field = word(sym("fields"));
-    if (lastFlipField !== null) {
-        const k = (field - lastFlipField) & 0xffff;
-        fieldsShown.set(k, (fieldsShown.get(k) ?? 0) + 1);
+    // where the beam is: the CRTC's line, and the clock's count of lines
+    const line = video.vertCounter * (r[9] + 1) + video.scanlineCounter + video.vertAdjustCounter;
+    if (!lineAt) lineAt = { t: now(), line };
+    const abs = lineAt.line + Math.floor((now() - lineAt.t) / LINE_CYCLES);
+    const off = (((abs - line) % FIELD_LINES) + FIELD_LINES) % FIELD_LINES;
+    if (off > 1 && off < FIELD_LINES - 1) fail(`flip ${flips}: the CRTC on line ${line}, but the clock says ${abs % FIELD_LINES}`);
+    // (frame_end's own flips leave frame_ready 0; an interrupt's find it set)
+    (ram[sym("frame_ready")] ? flipLines.later : flipLines.now).push(line);
+    if (line >= VIEW_TOP && line < VIEW_END) fail(`flip ${flips} on line ${line}, while the CRTC fetches the view's`);
+    if (VSYNC && video.vertCounter < r[6]) fail(`flip ${flips} on line ${line}, which is shown, not in the vertical blank`);
+    // the frame it replaces: shown whole, the lines of a view after its
+    // flip all before this one
+    if (lastFlip !== null) {
+        const top = (Math.floor((lastFlip - VIEW_TOP) / FIELD_LINES) + 1) * FIELD_LINES + VIEW_TOP;
+        if (top - VIEW_TOP + VIEW_END > abs)
+            fail(`flip ${flips} on line ${line}: the frame it replaces, shown from ${abs - lastFlip} lines before, ` +
+                `never had its view shown whole`);
+        shownFor.push((abs - lastFlip) / FIELD_LINES);
     }
-    lastFlipField = field;
+    lastFlip = abs;
+    // flipping mid-field shows the lines outside the view from both
+    // buffers, so they must be the same
+    if (!VSYNC) {
+        let bad = 0;
+        for (let i = 0; i < SCREEN_BYTES; i++)
+            if (!viewMask[i] && ram[SCREEN + i] !== ram[SCREEN + i + 0x8000] && bad++ < 3)
+                fail(`flip ${flips}: ${hex(SCREEN + i, 4)}, outside the view, differs between the buffers ` +
+                    `(${hex(ram[SCREEN + i])} in main RAM's, ${hex(ram[SCREEN + i + 0x8000])} in shadow's)`);
+    }
     const frame = pending.shift();
     if (!frame) return fail(`flip ${flips} with no frame handed over`);
     if (frame.buffer !== to) return fail(`flip ${flips} to buffer ${to}, but frame ${frame.n} was drawn in ${frame.buffer}`);
     // the view, as the frame drew it
-    const line = sceneLine(frame.phase);
+    const scene = sceneLine(frame.phase);
     let bad = 0;
     for (let y = 0; y < VIEW_H; y++)
         for (let c = 0; c < VIEW_BYTES; c++) {
-            const want = sceneByte(line, frame.rows, y, c);
+            const want = sceneByte(scene, frame.rows, y, c);
             const got = bufferByte(to, viewAt(y, c));
             if (want !== null && got !== want && bad++ < 3)
                 fail(`frame ${frame.n} (phase ${frame.phase}) shown with view line ${y}, column ${c} ` +
@@ -376,10 +415,14 @@ cpu.debugWrite.add((addr, value) => {
         const was = cpu.acccon;
         if ((value ^ was) & 1) flipped(value & 1);
     } else if (addr >= SCREEN && addr < 0x8000) {
-        writes++;
+        if (!viewMask[addr - SCREEN]) {
+            otherWrites++; // (checked at each flip, both buffers alike)
+            return false;
+        }
+        viewWrites++;
         const x = (cpu.acccon >> 2) & 1, d = cpu.acccon & 1;
-        if (!inFrame) fail(`a screen write (${hex(addr, 4)}) outside frame_begin..frame_end`);
-        if (x === d) fail(`a screen write (${hex(addr, 4)}) to the buffer shown (${d ? "shadow" : "main"} RAM's)`);
+        if (!inFrame) fail(`a write to the view (${hex(addr, 4)}) outside frame_begin..frame_end`);
+        if (x === d) fail(`a write to the view (${hex(addr, 4)}) of the buffer shown (${d ? "shadow" : "main"} RAM's)`);
     }
     return false;
 });
@@ -396,23 +439,37 @@ function verifyCounts(a, b, what) {
     if (delta(a, b, "frames") !== b.flips - a.flips)
         fail(`${what}: ${b.flips - a.flips} flips, but frames counted ${delta(a, b, "frames")}`);
 }
-const histogram = () =>
-    [...fieldsShown.entries()].sort((p, q) => p[0] - q[0]).map(([k, n]) => `${k}: ${n}`).join(", ");
+// A phase's run: its counters, and what the hooks saw.
+async function phase(what) {
+    const a = await counters();
+    drawCycles = waitCycles = drawn = 0;
+    shownFor = [];
+    flipLines = { now: [], later: [] };
+    lastFlip = null;
+    await session.runFor(secs * 2e6);
+    const b = await counters();
+    verifyCounts(a, b, what);
+    const seconds = (b.t - a.t) / 2e6;
+    const frames = delta(a, b, "frames"), fields = delta(a, b, "fields");
+    const mean = (xs) => xs.reduce((p, q) => p + q, 0) / xs.length;
+    const spread = (xs, f) => (xs.length ? `${f(Math.min(...xs))}-${f(Math.max(...xs))}` : "none");
+    const two = (v) => v.toFixed(2);
+    const lines = (xs) => `${xs.length}${xs.length ? ` on lines ${spread(xs, String)}` : ""}`;
+    console.log(
+        `frames: ${what}: ${frames} frames shown in ${fields} fields over ${two(seconds)}s: ` +
+            `${two(frames / seconds)} frames a second, ${two(fields / frames)} fields a frame; each shown for ` +
+            `${spread(shownFor, two)} fields; a frame ${Math.round(drawCycles / drawn)} cycles drawing, ` +
+            `${Math.round(waitCycles / drawn)} waiting in frame_begin`,
+    );
+    console.log(
+        `frames: ${what}: flips at once in frame_end ${lines(flipLines.now)}; by the interrupt ` +
+            `${lines(flipLines.later)} (the view's lines ${VIEW_TOP}-${VIEW_END - 1} of ${FIELD_LINES}); ` +
+            `${two(mean(shownFor))} fields a frame shown on average`,
+    );
+}
 
 // The scene as it is.
-const a = await counters();
-drawCycles = waitCycles = drawn = 0;
-await session.runFor(secs * 2e6);
-const b = await counters();
-verifyCounts(a, b, "steady");
-const seconds = (b.t - a.t) / 2e6;
-const frames = delta(a, b, "frames"), fields = delta(a, b, "fields");
-console.log(
-    `frames: the test scene: ${frames} frames shown in ${fields} fields over ${seconds.toFixed(2)}s: ` +
-        `${(frames / seconds).toFixed(2)} frames a second, ${(fields / frames).toFixed(2)} fields a frame; ` +
-        `a frame ${Math.round(drawCycles / drawn)} cycles drawing, ${Math.round(waitCycles / drawn)} waiting in frame_begin`,
-);
-console.log(`frames: fields each frame was shown for: ${histogram()}`);
+await phase("the test scene");
 
 // The picture: where the screen and the view are, and their colours.
 await session.runFrames(2);
@@ -441,19 +498,10 @@ else {
 }
 
 // The scene with its cost varied at random.
-fieldsShown.clear();
-lastFlipField = null;
 vary = true;
-const c = await counters();
-await session.runFor(secs * 2e6);
-const d = await counters();
+await phase(`the scene varied (1-${VIEW_ROWS} rows, 0-39 delays)`);
 vary = false;
-verifyCounts(c, d, "varied");
-console.log(
-    `frames: the scene varied (1-${VIEW_ROWS} rows, 0-39 delays): ${delta(c, d, "frames")} frames in ` +
-        `${delta(c, d, "fields")} fields; fields each frame was shown for: ${histogram()}`,
-);
-console.log(`frames: ${flips} flips, ${writes} screen writes checked; the latest flip ${minMargin} lines before the next line shown`);
+console.log(`frames: ${flips} flips checked; ${viewWrites} writes to the view, ${otherWrites} outside it`);
 checking = false;
 
 // The keys: each alone, then with O held.

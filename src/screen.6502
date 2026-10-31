@@ -5,19 +5,35 @@
 \ Two buffers at SCREEN, one in main RAM and one in shadow RAM, laid out
 \ alike: ACCCON's X picks the one the CPU's &3000-&7FFF reaches, its D the
 \ one the CRTC shows. The main loop draws into the one not shown and hands
-\ it over; the next vertical sync's interrupt shows it (src/irq.6502).
+\ it over, and it's shown (the flip) once the CRTC isn't fetching the
+\ view's lines: at once, or when the view's last line has gone (User VIA
+\ T1's interrupt, src/irq.6502). A frame is shown whole at least once
+\ before the next replaces it. With -D VSYNC_FLIP=TRUE the flip is at the
+\ vertical sync instead (FLIP_AT_VSYNC, src/defs.6502).
 \
 \ The protocol, for the renderer:
 \
 \   JSR frame_begin   waits until the frame last handed over is shown,
 \                     then selects the other buffer, the one not shown,
 \                     for the CPU (X); draw_buffer names it
-\   ... the frame's bytes written: all of them, since the buffer holds
+\   ... the view's bytes written: all of them, since the buffer holds
 \       the frame before last ...
-\   JSR frame_end     hands it over: the next vertical sync shows it
+\   JSR frame_end     hands it over: shown at once if the beam is outside
+\                     the view, or else as it leaves it
 \
-\ - Write the screen only between frame_begin and frame_end
-\   (tools/frames.mjs fails a write to the buffer shown).
+\ - Write the view only between frame_begin and frame_end (tools/frames.mjs
+\   fails a write to the shown buffer's view).
+\ - Outside the view, both buffers must hold the same at every flip, as a
+\   field can show those lines from either buffer: above the flip's line
+\   from one, below it from the other (tools/frames.mjs checks it). So a
+\   change there (the panel, text) is written into both buffers, X
+\   selecting each in turn, before the frame that goes with it is handed
+\   over. The shown buffer's change shows at once, and for one field may
+\   show half made if the beam passes it meanwhile; to avoid that, write
+\   it while T1's high byte is at most HI(SAFE_T1) (the beam in the view's
+\   lines, or just short of them), and finish before the beam reaches it.
+\   Or keep such a part in one buffer and show it from there by D, set at
+\   the view's end and set back before its top: an interrupt more a field.
 \ - Call frame_begin as late as possible. What a frame computes before its
 \   first screen write (the camera, the transforms, the spans) can go
 \   before it, and so overlaps the wait for the last frame's flip.
@@ -42,12 +58,49 @@
     RTS
 }
 
-\ frame_end: the frame drawn into draw_buffer handed to the interrupt, to
-\ show from the next vertical sync.
+\ frame_end: the frame drawn into draw_buffer handed over. It's shown at
+\ once if the frame shown now has had its view shown whole and the beam is
+\ outside the view, by FLIP_LEAD lines short of its top; otherwise
+\ frame_ready asks T1's interrupt to show it as the view's last line goes.
+\ With FLIP_AT_VSYNC, the vertical sync's interrupt shows it. A and X
+\ aren't kept.
 .frame_end
+{
     INCW frames_drawn
+IF FLIP_AT_VSYNC
     LDA #1 : STA frame_ready
+ELSE
+    PHP : SEI
+    LDA view_shown : BEQ later
+    LDA usrvia_t1ch : CMP #HI(SAFE_T1) + 1 : BCC later
+    JSR flip
+    PLP
     RTS
+.later
+    LDA #1 : STA frame_ready
+    PLP
+ENDIF
+    RTS
+}
+
+\ flip: the frame in draw_buffer shown (ACCCON's D, by TSB or TRB, which
+\ the main loop's X changes can't split), with interrupts off and the beam
+\ outside the view. Its view isn't shown whole yet.
+.flip
+{
+    LDA #ACCCON_D
+    LDX draw_buffer : BEQ main
+    TSB acccon
+    BRA shown
+.main
+    TRB acccon
+.shown
+    STZ frame_ready
+    STZ view_shown
+    INCW frames
+    RTS
+}
+ASSERT P% <= &3000                              ; (the interrupt runs it)
 
 \ screen_init: both buffers cleared, main RAM's shown, then MODE 2 in the
 \ hardware (src/defs.6502): the palette with logical colour n physical
@@ -94,9 +147,11 @@ CRTC_BYTES = P% - crtc_bytes
 }
 
 \ frame_init: main RAM's buffer shown and none handed over, so the first
-\ frame_begin selects shadow RAM's. Before the interrupt is on.
+\ frame_begin selects shadow RAM's; and the first frame may replace main
+\ RAM's at once. Before the interrupt is on.
 .frame_init
     STZ draw_buffer : STZ frame_ready
+    LDA #1 : STA view_shown
     STZ fields : STZ fields+1
     STZ frames : STZ frames+1
     STZ frames_drawn : STZ frames_drawn+1

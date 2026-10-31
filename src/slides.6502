@@ -1,0 +1,498 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the slideshow: Driller's views, drawn on
+\ the BBC
+\
+\ Every entrance view of Incentive's Driller (decision 6: a tech demo,
+\ attributed on the screen), drawn by the engine's rasteriser and writer
+\ (src/raster.6502, src/writer.6502) from the inputs the model computes
+\ for it (tools/mkslides.py): the faces nearest first, in view coordinates,
+\ with their patterns. The stages before the rasteriser aren't in 6502 yet,
+\ so their output comes off the disc.
+\
+\ !BOOT loads the rasteriser into sideways RAM bank BANK_RASTER and the
+\ views into the banks after it (*SRLOAD), then runs SLIDES, which reads
+\ the MOS's font, owns the machine from then on as FS does (src/main.6502),
+\ and draws a view every frame: the view's inputs copied into RasterIn when
+\ it comes up (slide_load), then frame_begin, raster_frame, frame_end, for
+\ as long as it's held, so the frames a second shown are the rasteriser's
+\ own. A view is held for slide_hold fields; SPACE, cursor right or cursor
+\ down step to the next, cursor left or up to the one before.
+\
+\ Below the view, in text it draws itself (src/text.6502): the area's
+\ name, the entrance, the view's number, the frames a second and fields a
+\ frame since the view came up, and the credit. The flip comes as the beam
+\ leaves the view (decision 21), so the text goes into both buffers as the
+\ beam allows; a view's own lines are drawn before its first frame is
+\ handed over, and the figures when there's time.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+INCLUDE "zp.6502"
+INCLUDE "macros.6502"
+
+\ The views' records and where they are (tools/mkslides.py, from Driller's
+\ data: built, never committed), with their banks' sections.
+INCLUDE "../build/slides/slides.6502"
+
+IF DEFINED(BUILD)
+    build_stamp = BUILD
+ELSE
+    build_stamp = "DEV"
+ENDIF
+
+BANK_RASTER = 4             ; the rasteriser's code, row runs and work (decision 20)
+SLIDE_HOLD  = 100           ; fields a view is held for, to begin with
+\ The field's rate, a hundred times: frames a second from fields a frame.
+FIELDS_100S = 200000000 DIV FIELD_CYCLES
+
+ASSERT SLIDES >= 1 AND SLIDES <= 255
+ASSERT SLIDE_MAX_FACES <= RS_FACES AND SLIDE_MAX_VERTICES <= RS_VERTICES
+ASSERT SLIDE_MAX_PATTERNS <= RS_PATTERNS
+FOR i = 0..<LEN(SLIDE_BANKS)
+    ASSERT SLIDE_BANKS[i] <> BANK_RASTER
+NEXT
+
+\ (*SRLOAD's Q loads through user memory, a whole file at once, which is
+\ free until SLIDES loads; without it a bank takes many seconds.)
+SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
+    EQUS "*| FREESCAPE for the BBC Master: Driller's views ", build_stamp, 13
+    EQUS "*SRLOAD RRUNS ", ~raster_runs_org, " ", AS_STRING(BANK_RASTER), " Q", 13
+    EQUS "*SRLOAD RCODE ", ~raster_code_org, " ", AS_STRING(BANK_RASTER), " Q", 13
+    FOR i = 0..<LEN(SLIDE_BANKS)
+        EQUS "*SRLOAD S", AS_STRING(SLIDE_BANKS[i]), " ", ~SLIDE_BANK_ORG, " ", AS_STRING(SLIDE_BANKS[i]), " Q", 13
+    NEXT
+    EQUS "*RUN SLIDES", 13
+ENDSECTION
+
+\ The rasteriser's sections, one after another in bank BANK_RASTER; its
+\ inputs (RasterIn) in main RAM, after SLIDES.
+raster_runs_org = &8000
+SECTION RasterRuns, org = raster_runs_org, guard = &C000, filename = "RRUNS", cmos = TRUE
+ENDSECTION
+raster_code_org = raster_runs_end
+SECTION RasterCode, org = raster_code_org, guard = &C000, filename = "RCODE", cmos = TRUE
+ENDSECTION
+SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
+ENDSECTION
+SECTION RasterState, org = raster_work_end, guard = &C000, virtual = TRUE
+ENDSECTION
+SECTION TextRAM, org = slides_end, guard = &3000, virtual = TRUE
+ENDSECTION
+SECTION RasterIn, org = text_ram_end, guard = &3000, virtual = TRUE
+ENDSECTION
+
+\ SLIDES: the slideshow, all below &3000, which ACCCON's X moves to shadow
+\ RAM.
+SECTION Slides, org = &0E00, load = &FFFF0E00, exec = &FFFF0000 OR start, filename = "SLIDES", guard = &3000, cmos = TRUE
+
+\ The text's lines: {character row, logical colour}, below the view.
+TL_NAME     = 0             ; the record's lines (SLIDE_TEXT_LINES): the name, ...
+TL_FPS      = 3             ; the frames a second, from fixed_text on
+TL_FPF      = 4             ; the fields a frame
+TEXT_LAYOUT = {{15, 3}, {16, 7}, {17, 6}, {19, 2}, {20, 2}, {22, 5}, {25, 7}, {26, 7}, {27, 7}, {28, 7}}
+ASSERT TL_FPS = TL_NAME + SLIDE_TEXT_LINES AND SLIDE_TEXT_COLS = TEXT_COLS
+NUMBER_COL  = 12            ; the figures' four characters on their lines
+FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(REPEATED(TEXT_COLS - LEN(s) - (TEXT_COLS - LEN(s)) DIV 2, ' '))
+FUNCTION label(s) = s + CHR(REPEATED(TEXT_COLS - LEN(s), ' '))
+FPS_LABEL   = "frames/sec"
+FPF_LABEL   = "fields/frm"
+ASSERT LEN(FPS_LABEL) < NUMBER_COL AND LEN(FPF_LABEL) < NUMBER_COL  ; (a space before the figure)
+FIXED_TEXT = {
+    label(FPS_LABEL),
+    label(FPF_LABEL),
+    centred("SPACE / cursors"),
+    centred("Driller (c)"),
+    centred("Incentive"),
+    centred("Software 1987,"),
+    centred("a tech demo")
+}
+ASSERT LEN(FIXED_TEXT) = TEXT_LINES - TL_FPS
+FOR i = 0..<LEN(FIXED_TEXT)
+    ASSERT LEN(FIXED_TEXT[i]) = TEXT_COLS
+NEXT
+
+\ start: the font read while the OS is there, the machine taken, then the
+\ views, for ever.
+.start
+    ZA_ENTRY
+    JSR text_init
+    SEI
+    LDX #&FF : TXS                              ; (nothing returns to the OS)
+    \ (romsel's copy at &F4 is left: nothing of the OS runs from here on,
+    \ and &F4 is baron's zero page)
+    LDA #BANK_RASTER : STA romsel
+    JSR screen_init
+    JSR raster_init
+    JSR slides_init
+    JSR text_flush                              ; (both buffers, before anything is shown)
+    JSR frame_init
+    JSR input_init
+    JSR irq_install
+    \ (on into slides_loop)
+
+\ slides_loop: a frame at a time. A new view's inputs are copied, and the
+\ text drawn, before frame_begin, overlapping the wait for the last
+\ frame's flip.
+.slides_loop
+    JSR slide_keys
+    LDA slide_want : CMP slide_now : BEQ same
+    STA slide_now
+    JSR slide_load
+.same
+    \ the text as the beam allows, while the last frame waits for its flip
+.flip_wait
+    JSR text_sync
+    LDA frame_ready : BNE flip_wait
+    JSR frame_begin
+    JSR slide_stats
+    JSR text_sync
+    JSR raster_frame
+.slide_drawn                                    ; (tools/slidecheck.mjs times raster_frame to here)
+    LDA slide_named : BNE named
+    LDA #TL_NAME * TEXT_COLS + RECORD_TEXT : JSR text_wait  ; a view's own lines with its first frame
+    INC slide_named
+.named
+    JSR text_catch_up
+    JSR frame_end
+    BRA slides_loop
+
+INCLUDE "screen.6502"
+INCLUDE "irq.6502"
+INCLUDE "input.6502"
+INCLUDE "text.6502"
+
+SECTION Work
+.slide_now      SKIP 1      ; the view whose inputs are in RasterIn
+.slide_want     SKIP 1      ; the view to show next
+.slide_hold     SKIP 1      ; fields a view is held for (0: for ever)
+.slide_fresh    SKIP 1      ; non-zero: the view has had no frame_begin yet
+.slide_named    SKIP 1      ; non-zero: the view's own text lines are drawn
+.slide_f0       SKIP 2      ; fields and frames at the view's first frame_begin
+.slide_n0       SKIP 2
+.slide_df       SKIP 2      ; fields and frames since
+.slide_dn       SKIP 2
+.slide_figs     SKIP 2      ; slide_df when the figures are next due
+.slide_count    SKIP 3      ; slide_load's: faces, vertices, pattern bytes
+ENDSECTION
+
+\ slides_init: the fixed lines, and view 0's inputs.
+.slides_init
+{
+    LDX #TL_FPS * TEXT_COLS
+    LDY #0
+.fixed
+    LDA fixed_text,Y : JSR text_set
+    INX : INY : CPY #FIXED_BYTES : BNE fixed
+    LDA #SLIDE_HOLD : STA slide_hold
+    STZ slide_now : STZ slide_want
+    JMP slide_load
+.fixed_text
+    EQUS SUM(FIXED_TEXT)
+FIXED_BYTES = P% - fixed_text
+}
+
+\ ---------------------------------------------------------------------------
+\ slide_keys: the view to show next, slide_want: the next one or the one
+\ before for a key, or the next once this one has been held slide_hold
+\ fields. SPACE, cursor right and cursor down step on, cursor left and up
+\ back.
+ASSERT K_CUR_UP DIV 8 = K_CUR_LEFT DIV 8 AND K_CUR_DOWN DIV 8 = K_CUR_UP DIV 8 AND K_CUR_RIGHT DIV 8 = K_CUR_UP DIV 8
+ASSERT K_MODE DIV 8 <> K_CUR_UP DIV 8
+.slide_keys
+{
+    ZA_AUTO1 space, cursor
+    LDX #K_MODE DIV 8 : JSR key_take : STA space
+    LDX #K_CUR_UP DIV 8 : JSR key_take : STA cursor
+    LDA space : AND #1 << (K_MODE AND 7) : BNE next
+    LDA cursor : AND #(1 << (K_CUR_RIGHT AND 7)) OR (1 << (K_CUR_DOWN AND 7)) : BNE next
+    LDA cursor : AND #(1 << (K_CUR_LEFT AND 7)) OR (1 << (K_CUR_UP AND 7)) : BNE back
+    \ held long enough?
+    LDA slide_fresh : BNE stay
+    LDA slide_hold : BEQ stay
+    JSR read_counters
+    LDA count_fields : SEC : SBC slide_f0 : TAX
+    LDA count_fields+1 : SBC slide_f0+1 : BNE next
+    CPX slide_hold : BCS next
+.stay
+    RTS
+.next
+    LDA slide_now : INC A
+    CMP #SLIDES : BNE want
+    LDA #0
+    BRA want
+.back
+    LDA slide_now : BNE before
+    LDA #SLIDES
+.before
+    DEC A
+.want
+    STA slide_want
+    RTS
+}
+
+\ read_counters: fields and frames (src/zp.6502), which the interrupt
+\ changes, read whole.
+SECTION Work
+.count_fields   SKIP 2
+.count_frames   SKIP 2
+ENDSECTION
+.read_counters
+    PHP : SEI
+    LDA fields : STA count_fields : LDA fields+1 : STA count_fields+1
+    LDA frames : STA count_frames : LDA frames+1 : STA count_frames+1
+    PLP
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ slide_load: view slide_now's record (tools/mkslides.py) into RasterIn and
+\ its text lines. Between them, mkslides.py's record and this routine are
+\ all that know the rasteriser's input layout:
+\
+\   SLIDE_TEXT_LINES lines of SLIDE_TEXT_COLS characters
+\   faces, vertices, patterns, sky, ground, horizon, hx (2), hy (2), hdx, hdy
+\   fn[faces], fv[faces], fc[faces]
+\   vxl[vertices], vxh[vertices], vyl[vertices], vyh[vertices]
+\   pat[4 patterns]
+\
+\ With the view's bank paged while it reads, and BANK_RASTER's after.
+RECORD_TEXT = SLIDE_TEXT_LINES * SLIDE_TEXT_COLS
+ASSERT RECORD_TEXT < 256
+.slide_load
+{
+    ZA_AUTO2 src, dst
+    ZA_AUTO1 n
+    LDX slide_now
+    LDA slide_bank,X : STA romsel
+    LDA slide_lo,X : STA src : LDA slide_hi,X : STA src+1
+    \ the text, and the figures blank until the view's first frame
+    LDY #0
+    LDX #TL_NAME * TEXT_COLS
+.text
+    LDA (src),Y : JSR text_set
+    INX : INY : CPY #RECORD_TEXT : BNE text
+    LDY #3
+.blank
+    TYA : CLC : ADC #TL_FPS * TEXT_COLS + NUMBER_COL : TAX
+    LDA #' ' : JSR text_set
+    TXA : CLC : ADC #(TL_FPF - TL_FPS) * TEXT_COLS : TAX
+    LDA #' ' : JSR text_set
+    DEY : BPL blank
+    \ the counts and the background
+    LDY #RECORD_TEXT
+    LDA (src),Y : STA rs_nfaces : STA slide_count : INY
+    LDA (src),Y : STA slide_count + 1 : INY
+    LDA (src),Y : ASL A : ASL A : STA slide_count + 2 : INY
+    LDA (src),Y : STA rs_sky : INY
+    LDA (src),Y : STA rs_ground : INY
+    LDA (src),Y : STA rs_horizon : INY
+    LDA (src),Y : STA rs_hx : INY
+    LDA (src),Y : STA rs_hx + 1 : INY
+    LDA (src),Y : STA rs_hy : INY
+    LDA (src),Y : STA rs_hy + 1 : INY
+    LDA (src),Y : STA rs_hdx : INY
+    LDA (src),Y : STA rs_hdy : INY
+    TYA : CLC : ADC src : STA src
+    BCC arrays
+    INC src+1
+    \ the arrays, each the length of its count
+.arrays
+    LDX #0
+.array
+    LDA array_lo,X : STA dst : LDA array_hi,X : STA dst+1
+    LDY array_count,X : LDA slide_count,Y : STA n
+    LDY #0
+    BRA test
+.copy
+    LDA (src),Y : STA (dst),Y
+    INY
+.test
+    CPY n : BNE copy
+    TYA : CLC : ADC src : STA src
+    BCC same
+    INC src+1
+.same
+    INX : CPX #ARRAYS : BNE array
+    LDA #BANK_RASTER : STA romsel
+    LDA #1 : STA slide_fresh
+    STZ slide_named
+    RTS
+\ Each array: where it goes, and which of slide_count is its length.
+.array_lo
+    EQUB LO(rs_fn), LO(rs_fv), LO(rs_fc), LO(rs_vxl), LO(rs_vxh), LO(rs_vyl), LO(rs_vyh), LO(rs_pat)
+.array_hi
+    EQUB HI(rs_fn), HI(rs_fv), HI(rs_fc), HI(rs_vxl), HI(rs_vxh), HI(rs_vyl), HI(rs_vyh), HI(rs_pat)
+.array_count
+    EQUB 0, 0, 0, 1, 1, 1, 1, 2
+ARRAYS = P% - array_count
+}
+\ (the counts fit a byte each: mkslides.py checks)
+ASSERT SLIDE_MAX_PATTERNS * 4 < 256 AND SLIDE_MAX_VERTICES < 256
+
+\ Each view's bank and its record's address there.
+.slide_bank
+    EQUB SLIDE_BANK
+.slide_lo
+    EQUB LO(SLIDE_ADDR)
+.slide_hi
+    EQUB HI(SLIDE_ADDR)
+
+\ ---------------------------------------------------------------------------
+\ slide_stats (after frame_begin, so every frame handed over is shown): at
+\ a view's first frame_begin, the fields and frames to count from; after,
+\ the frames a second and the fields a frame since, to a tenth, into their
+\ lines: at the view's first frame shown, then every FIGURE_FIELDS fields,
+\ since drawing them takes time from the frames they measure. The count
+\ starts again after DF_MAX fields, so a view held for ever keeps its
+\ figures in range.
+FIGURE_FIELDS = 25
+DF_MAX = 2048
+ASSERT DF_MAX * 10 < 65536                      ; (fields a frame: 10 df / dn)
+ASSERT DF_MAX * FIELDS_100S < &1000000          ; (frames a second: 100 rate dn / 10 df, dn <= df)
+.slide_stats
+{
+    JSR read_counters
+    LDA slide_fresh : BEQ running
+.restart
+    STZ slide_fresh
+    LDA count_fields : STA slide_f0 : LDA count_fields+1 : STA slide_f0+1
+    LDA count_frames : STA slide_n0 : LDA count_frames+1 : STA slide_n0+1
+    STZ slide_figs : STZ slide_figs+1
+    RTS
+.running
+    LDA count_fields : SEC : SBC slide_f0 : STA slide_df
+    LDA count_fields+1 : SBC slide_f0+1 : STA slide_df+1
+    LDA count_frames : SEC : SBC slide_n0 : STA slide_dn
+    LDA count_frames+1 : SBC slide_n0+1 : STA slide_dn+1
+    LDA slide_dn : ORA slide_dn+1 : BNE some
+    RTS
+.some
+    LDA slide_df+1 : CMP #HI(DF_MAX) : BCS restart
+    ASSERT LO(DF_MAX) = 0
+    \ time for the figures?
+    LDA slide_df : CMP slide_figs : LDA slide_df+1 : SBC slide_figs+1 : BCS figures
+    RTS
+.figures
+    LDA slide_df : CLC : ADC #FIGURE_FIELDS : STA slide_figs
+    LDA slide_df+1 : ADC #0 : STA slide_figs+1
+    \ fields a frame, tenths: (10 df + dn / 2) / dn
+    LDA slide_df : STA mul_a : LDA slide_df+1 : STA mul_a+1
+    LDA #10 : STA mul_b : STZ mul_b+1
+    LDA slide_dn : STA div_d : LDA slide_dn+1 : STA div_d+1
+    JSR ratio
+    LDX #TL_FPF * TEXT_COLS + NUMBER_COL
+    JSR figure
+    \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
+    LDA slide_dn : STA mul_a : LDA slide_dn+1 : STA mul_a+1
+    LDA #LO(FIELDS_100S) : STA mul_b : LDA #HI(FIELDS_100S) : STA mul_b+1
+    LDA slide_df : STA div_d : LDA slide_df+1 : STA div_d+1
+    ASL div_d : ROL div_d+1 : ASL div_d : ROL div_d+1       ; 10 df: (4 df + df) 2
+    LDA div_d : CLC : ADC slide_df : STA div_d
+    LDA div_d+1 : ADC slide_df+1 : STA div_d+1
+    ASL div_d : ROL div_d+1
+    JSR ratio
+    LDX #TL_FPS * TEXT_COLS + NUMBER_COL
+    JMP figure
+}
+
+SECTION Work
+.mul_a          SKIP 2      ; ratio's: the product's factors ...
+.mul_b          SKIP 2
+.div_d          SKIP 2      ; ... the divisor ...
+.quot           SKIP 4      ; ... the product, then the quotient
+.rem            SKIP 2
+ENDSECTION
+
+\ ratio: quot = (mul_a mul_b + div_d DIV 2) DIV div_d, rounded to nearest,
+\ where that sum fits 24 bits and div_d isn't 0. mul_b is lost.
+.ratio
+{
+    \ the product: shift and add, into quot's four bytes
+    STZ quot+2 : STZ quot+3
+    LDX #16
+.mbit
+    LSR mul_b+1 : ROR mul_b : BCC mskip
+    LDA quot+2 : CLC : ADC mul_a : STA quot+2
+    LDA quot+3 : ADC mul_a+1 : STA quot+3
+.mskip
+    ROR quot+3 : ROR quot+2 : ROR quot+1 : ROR quot
+    DEX : BNE mbit
+    \ and half the divisor, to round
+    LDA div_d+1 : LSR A : TAY : LDA div_d : ROR A
+    CLC : ADC quot : STA quot
+    TYA : ADC quot+1 : STA quot+1
+    LDA quot+2 : ADC #0 : STA quot+2
+    \ the quotient: shift and subtract, 24 bits
+    STZ rem : STZ rem+1
+    LDX #24
+.dbit
+    ASL quot : ROL quot+1 : ROL quot+2 : ROL rem : ROL rem+1
+    BCS dsub                                    ; (17 bits: more than the divisor)
+    LDA rem : CMP div_d : LDA rem+1 : SBC div_d+1 : BCC dnext
+.dsub
+    LDA rem : SBC div_d : STA rem               ; (C is set either way)
+    LDA rem+1 : SBC div_d+1 : STA rem+1
+    INC quot
+.dnext
+    DEX : BNE dbit
+    RTS
+}
+
+\ figure: quot, in tenths (at most 99.9), as four characters from cell X:
+\ "dd.d", the first blank if it's 0.
+.figure
+{
+    ZA_AUTO1 lo, hi
+    LDA quot : STA lo : LDA quot+1 : STA hi
+    LDA quot+2 : BNE most
+    LDA lo : CMP #LO(1000) : LDA hi : SBC #HI(1000) : BCC fits
+.most
+    LDA #LO(999) : STA lo : LDA #HI(999) : STA hi
+.fits
+    LDY #0
+.hundreds
+    LDA lo : CMP #100 : LDA hi : SBC #0 : BCC tens
+    LDA lo : SEC : SBC #100 : STA lo
+    LDA hi : SBC #0 : STA hi
+    INY : BRA hundreds
+.tens
+    LDA #' '
+    CPY #0 : BEQ first
+    TYA : ORA #'0'
+.first
+    JSR text_set : INX
+    LDY #0
+    LDA lo
+.ten
+    CMP #10 : BCC units
+    SBC #10 : INY
+    BRA ten
+.units
+    STA lo
+    TYA : ORA #'0' : JSR text_set : INX
+    LDA #'.' : JSR text_set : INX
+    LDA lo : ORA #'0' : JMP text_set
+}
+
+.slides_end
+ENDSECTION
+
+INCLUDE "raster.6502"
+INCLUDE "writer.6502"
+
+\ Where each section ends, for the next's org.
+SECTION RasterRuns
+.raster_runs_end
+ENDSECTION
+SECTION RasterCode
+.raster_code_end
+ENDSECTION
+SECTION RasterWork
+.raster_work_end
+ENDSECTION
+SECTION RasterState
+.raster_state_end
+ENDSECTION
+ASSERT raster_state_end <= &C000
+SECTION TextRAM
+.text_ram_end
+ENDSECTION

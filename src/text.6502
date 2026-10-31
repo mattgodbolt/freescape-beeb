@@ -1,0 +1,259 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - text in MODE 2, drawn by the engine
+\
+\ Lines of TEXT_COLS characters, each on one character row of the screen
+\ below the view and in one colour (TEXT_LAYOUT, which the includer
+\ defines: {row, logical colour} a line), in the MOS's own font: text_init
+\ reads it through OSWORD 10 while the OS is still there, and widens each
+\ glyph to MODE 2's bytes, white, so drawing one is 32 bytes ANDed with the
+\ ink.
+\
+\ The flip comes mid-field (decision 21), so what's outside the view must
+\ be the same in both buffers at every flip, and a change to the buffer
+\ shown shows at once (docs/engine.md, section 1). So each character goes
+\ into both buffers, and is begun only while the beam is in the view's
+\ lines or just above them (User VIA T1's high byte from TEXT_T1_MIN to
+\ HI(SAFE_T1)) with time to finish before FLIP_LINE: before a flip that
+\ waits for T1 can come, and before the beam reaches the text below the
+\ view, so the shown buffer's copy is whole when the beam shows it.
+\ Characters whose time hasn't come wait for a later window.
+\
+\ The caller says what it wants shown with text_set, a character at a
+\ time. text_sync draws what it can, anywhere once the interrupt is on:
+\ inside a frame (no flip comes there), or while a frame waits for its
+\ flip, which T1 then brings at FLIP_LINE, in the beam's window, so that
+\ wait isn't wasted. The frame loop's own timing can keep missing the
+\ window, so text_catch_up waits for the beam once the text has been
+\ behind for TEXT_PATIENCE calls; text_wait waits until a range of cells
+\ is drawn; text_flush draws everything, beam or not, before the
+\ interrupt is on. text_gen moves on whenever anything wanted changes, so
+\ a call with nothing new costs a compare.
+\
+\ The includer declares the virtual section TextRAM (the font, below
+\ &3000 and outside the screen); the rest goes in Work.
+\ ***************************************************************************
+
+TEXT_COLS   = SCREEN_COLS DIV 4             ; a character is 8 pixels, four bytes
+TEXT_LINES  = LEN(TEXT_LAYOUT)
+TEXT_CELLS  = TEXT_LINES * TEXT_COLS
+TEXT_FIRST  = 32                            ; the glyphs kept: space ...
+TEXT_LAST   = 126                           ; ... to tilde
+GLYPH       = 32                            ; bytes a widened glyph: 4 columns of 8 lines
+ASSERT TEXT_COLS = 16                       ; (a cell's line and column are its index's nibbles)
+ASSERT TEXT_CELLS < 256
+ASSERT SCREEN_ROW MOD 256 = 0 AND LO(SCREEN) = 0
+ASSERT MAX(TEXT_LAYOUT[.., 0]) < SCREEN_ROWS
+
+\ The beam's window. A character into both buffers takes at most
+\ TEXT_CHAR_US (tools/slidecheck.mjs fails a write to the shown buffer
+\ made with the beam at or past its character row, and a flip with the
+\ buffers different outside the view), so one begun TEXT_T1_MIN pages of
+\ T1 before FLIP_LINE is done by then. No interrupt comes in the window:
+\ T1's is at its end, the vertical sync's far below.
+TEXT_TOP_LINE = MIN(TEXT_LAYOUT[.., 0]) * (CRTC_R9 + 1)
+TEXT_CHAR_US  = 1000
+TEXT_T1_MIN   = CEIL(TEXT_CHAR_US / 256)
+TEXT_PATIENCE = 4                           ; text_catch_up's calls behind before it waits
+ASSERT NOT(FLIP_AT_VSYNC)                   ; (T1 times the window)
+ASSERT TEXT_TOP_LINE >= FLIP_LINE           ; (the text is below the view)
+ASSERT TEXT_T1_MIN < HI(SAFE_T1) AND FLIP_LINE < FLAG_LINE
+
+osword      = &FFF1
+
+SECTION Work
+.text_want      SKIP TEXT_CELLS     ; what each cell should show
+.text_shown     SKIP TEXT_CELLS     ; what both buffers show
+.text_gen       SKIP 1              ; moves on when text_want changes
+.text_seen      SKIP 1              ; text_gen when everything was last drawn
+.text_left      SKIP 1              ; the first cell text_sync last left undrawn (TEXT_CELLS: none)
+.text_free      SKIP 1              ; non-zero: draw whatever the beam (text_flush)
+.text_behind    SKIP 1              ; text_catch_up's calls since the text was last all drawn
+.text_block     SKIP 9              ; OSWORD 10's: the character, then its eight lines
+ENDSECTION
+
+SECTION TextRAM
+.text_font      SKIP GLYPH * (TEXT_LAST + 1 - TEXT_FIRST)
+ENDSECTION
+
+\ text_init: the font read (with the OS still there: OSWORD 10) and
+\ widened, every cell wanted blank and shown blank in both buffers, which
+\ screen_init has cleared (a space's glyph is blank).
+.text_init
+{
+    ZA_AUTO2 f
+    ZA_AUTO1 g
+    LDA #TEXT_FIRST : STA text_block
+.char
+    \ (nothing in zero page is kept across the call, which may use it)
+    LDA #10 : LDX #LO(text_block) : LDY #HI(text_block)
+    JSR osword
+    LDA text_block
+    JSR text_glyph : STA f : STX f+1
+    \ Line l's byte, two bits a column from the left, into the glyph at
+    \ 8 * column + l, as the screen lays out four byte columns.
+    LDY #0
+.line
+    LDA text_block + 1,Y : STA g
+    FOR k = 0..3
+        LDA #0 : ASL g : ROL A : ASL g : ROL A : TAX
+        LDA pair,X : STA (f),Y
+        IF k < 3
+            TYA : CLC : ADC #8 : TAY
+        ENDIF
+    NEXT
+    TYA : SEC : SBC #3 * 8 - 1 : TAY
+    CPY #8 : BNE line
+    INC text_block
+    LDA text_block : CMP #TEXT_LAST + 1 : BNE char
+    \ nothing wanted, nothing shown
+    LDX #TEXT_CELLS - 1
+    LDA #' '
+.blank
+    STA text_want,X : STA text_shown,X
+    DEX : CPX #&FF : BNE blank
+    LDA #1 : STA text_gen
+    STZ text_seen : STZ text_left : STZ text_free : STZ text_behind
+    RTS
+\ A pair of pixels, the left one first, as a white MODE 2 byte.
+.pair
+    EQUB 0, PIX_RIGHT, PIX_LEFT, PIX_LEFT OR PIX_RIGHT
+}
+
+\ text_set: character A wanted in cell X (line X DIV TEXT_COLS, column
+\ X MOD TEXT_COLS). Keeps A, X and Y.
+.text_set
+{
+    CMP text_want,X : BEQ same
+    STA text_want,X
+    INC text_gen
+.same
+    RTS
+}
+
+\ text_sync: each cell not shown as wanted drawn into both buffers, from
+\ the first, while the beam leaves time; text_left says where it stopped.
+\ Keeps ACCCON's X.
+.text_sync
+{
+    LDA text_gen : CMP text_seen : BNE changed
+    RTS
+.changed
+    PHA
+    LDX #0
+.cell
+    LDA text_want,X : CMP text_shown,X : BEQ same
+    LDA text_free : BNE draw
+    LDA usrvia_t1ch                             ; (its high byte only: the low acknowledges)
+    CMP #TEXT_T1_MIN : BCC stop
+    CMP #HI(SAFE_T1) + 1 : BCS stop
+.draw
+    PHX
+    JSR text_draw
+    PLX
+    LDA text_want,X : STA text_shown,X
+.same
+    INX : CPX #TEXT_CELLS : BNE cell
+    PLA : STA text_seen
+    STX text_left
+    RTS
+.stop
+    PLA
+    STX text_left
+    RTS
+}
+
+\ text_wait: text_sync again and again, waiting for the beam, until every
+\ cell below A is drawn.
+.text_wait
+{
+    ZA_AUTO1 limit
+    STA limit
+.again
+    JSR text_sync
+    LDA text_left : CMP limit : BCC again
+    RTS
+}
+
+\ text_catch_up: text_sync, or text_wait for every cell once the text has
+\ been behind for TEXT_PATIENCE calls.
+.text_catch_up
+{
+    JSR text_sync
+    LDA text_left : CMP #TEXT_CELLS : BEQ caught
+    INC text_behind
+    LDA text_behind : CMP #TEXT_PATIENCE : BCC behind
+.waiting                                        ; (tools/slidecheck.mjs counts these)
+    LDA #TEXT_CELLS : JSR text_wait
+.caught
+    STZ text_behind
+.behind
+    RTS
+}
+
+\ text_flush: every cell drawn, whatever the beam: before the interrupt is
+\ on, when nothing is shown that matters.
+.text_flush
+    LDA #1 : STA text_free
+    JSR text_sync
+    STZ text_free
+    RTS
+
+\ text_draw: cell X's wanted character into both buffers, in its line's
+\ colour; ACCCON's X as it was. A character with no glyph shows as a space.
+.text_draw
+{
+    ZA_AUTO2 f, p
+    ZA_AUTO1 ink, was
+    TXA : LSR A : LSR A : LSR A : LSR A : TAY  ; the line
+    LDA text_ink,Y : STA ink
+    LDA text_row,Y : STA p+1
+    \ column c is 32 c bytes along the row, on its second page from 8 on
+    TXA : AND #TEXT_COLS - 1
+    ASL A : ASL A : ASL A : ASL A : ASL A : STA p
+    LDA p+1 : ADC #0 : STA p+1
+    LDA text_want,X
+    JSR text_glyph : STA f : STX f+1
+    LDA acccon : AND #ACCCON_X : STA was
+    LDA #ACCCON_X : TSB acccon
+    JSR glyph                                   ; shadow RAM's ...
+    LDA #ACCCON_X : TRB acccon
+    JSR glyph                                   ; ... and main RAM's
+    LDA was : BEQ done
+    TSB acccon
+.done
+    RTS
+.glyph
+    LDY #GLYPH - 1
+.byte
+    LDA (f),Y : AND ink : STA (p),Y
+    DEY : BPL byte
+    RTS
+}
+
+\ text_glyph: where character A's glyph is, in A (low) and X (high); a
+\ character with none has a space's.
+.text_glyph
+{
+    ZA_AUTO1 hi
+    CMP #TEXT_FIRST : BCC none
+    CMP #TEXT_LAST + 1 : BCC some
+.none
+    LDA #' '
+.some
+    SEC : SBC #TEXT_FIRST
+    STZ hi
+    ASL A : ROL hi : ASL A : ROL hi : ASL A : ROL hi : ASL A : ROL hi : ASL A : ROL hi
+    ASSERT GLYPH = 32
+    CLC : ADC #LO(text_font)
+    PHA
+    LDA hi : ADC #HI(text_font) : TAX
+    PLA
+    RTS
+}
+
+\ Each line's ink (its colour in both pixels of a byte) and its character
+\ row's high byte on the screen.
+.text_ink
+    EQUB mode2_byte(TEXT_LAYOUT[.., 1], TEXT_LAYOUT[.., 1])
+.text_row
+    EQUB HI(SCREEN + TEXT_LAYOUT[.., 0] * SCREEN_ROW)

@@ -1,0 +1,156 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the camera's matrix (docs/engine.md, stage
+\ 1; tools/model/matrix.py)
+\
+\ M = Rroll (Rpitch Ryaw), nine signed bytes, 1.0 = 64, row-major (camera
+\ x, y, z), from the original's sine table; each product's sums plus 32,
+\ shifted right six (rounding half up) to a byte, as the model and the
+\ original compose. Written out, with s and c the angles' sines and
+\ cosines and r() that rounding:
+\
+\   Rpitch Ryaw = [[cy, 0, -sy], [r(sp sy), cp, r(sp cy)], [r(cp sy), -sp, r(cp cy)]]
+\   M's row 0   = r(cr PY0 + sr PY1), row 1 = r(cr PY1 - sr PY0), row 2 = PY2
+\
+\ (a product with the 64 of an identity rotation rounds back to itself, so
+\ the first row and the last are exact). That's 14 products of bytes each
+\ within -64..64, by quarter squares: a b = f(|a + b|) - f(|a - b|), f(n) =
+\ n * n DIV 4.
+\
+\ Entry points:
+\   matrix_update   the matrix for cam_yaw, cam_pitch, cam_roll, built if
+\                   an angle changed since the last build (and the
+\                   transform's cache then emptied); C set if it was built
+\   matrix_build    the matrix built
+\ ***************************************************************************
+
+SECTION ObjWork
+.cam_x      SKIP 2                  ; the camera: the eye, in world units, 16-bit
+.cam_y      SKIP 2
+.cam_z      SKIP 2
+.cam_yaw    SKIP 1                  ; 0-71, 5 degrees a step
+.cam_pitch  SKIP 1
+.cam_roll   SKIP 1
+.mat        SKIP 9                  ; M, row-major, signed bytes
+.mat_angles SKIP 3                  ; the yaw, pitch and roll it was built for
+.mat_valid  SKIP 1                  ; non-zero once built
+.mat_big    SKIP 1                  ; non-zero if an entry is beyond -64..64
+ENDSECTION
+
+M00 = mat + 0 : M01 = mat + 1 : M02 = mat + 2
+M10 = mat + 3 : M11 = mat + 4 : M12 = mat + 5
+M20 = mat + 6 : M21 = mat + 7 : M22 = mat + 8
+
+SECTION ObjCode
+
+\ matrix_update: build the matrix if the angles aren't the last build's.
+.matrix_update
+{
+    ZA_ENTRY
+    LDA mat_valid : BEQ build
+    LDA cam_yaw : CMP mat_angles : BNE build
+    LDA cam_pitch : CMP mat_angles+1 : BNE build
+    LDA cam_roll : CMP mat_angles+2 : BNE build
+    CLC
+    RTS
+.build
+    LDA cam_yaw : STA mat_angles
+    LDA cam_pitch : STA mat_angles+1
+    LDA cam_roll : STA mat_angles+2
+    LDA #1 : STA mat_valid
+    JSR matrix_build
+    JSR cache_reset
+    SEC
+    RTS
+}
+
+\ mmul a, b: the product of two signed bytes in zero page (each within
+\ -64..64) into mp (16-bit signed).
+MACRO MMUL a, b
+    LDA a : CLC : ADC b
+    BPL sum_pos
+    EOR #&FF : INC A                ; |a + b| (128 stays 128)
+.sum_pos
+    TAX
+    LDA a : SEC : SBC b
+    BPL diff_pos
+    EOR #&FF : INC A
+.diff_pos
+    TAY
+    LDA msq_lo,X : SEC : SBC msq_lo,Y : STA mp
+    LDA msq_hi,X : SBC msq_hi,Y : STA mp+1
+ENDMACRO
+
+\ MROUND: mp's (v + 32) >> 6 in A, which must fit a signed byte.
+MACRO MROUND
+    LDA mp : CLC : ADC #32 : STA mp
+    LDA mp+1 : ADC #0 : STA mp+1
+    LDA mp
+    ASL A : ROL mp+1
+    ASL A : ROL mp+1
+    LDA mp+1
+ENDMACRO
+
+\ MADD acc: mp added to acc (16-bit).
+MACRO MADD acc
+    LDA acc : CLC : ADC mp : STA acc
+    LDA acc+1 : ADC mp+1 : STA acc+1
+ENDMACRO
+
+\ matrix_build: M from mat_angles.
+.matrix_build
+{
+    ZA_ENTRY
+    ZA_AUTO1 sy, cy, sp, cp, sr, cr, py10, py12, nsy
+    ZA_AUTO2 mp, acc
+    LDX mat_angles : LDA sin_table,X : STA sy : LDA cos_table,X : STA cy
+    LDX mat_angles+1 : LDA sin_table,X : STA sp : LDA cos_table,X : STA cp
+    LDX mat_angles+2 : LDA sin_table,X : STA sr : LDA cos_table,X : STA cr
+    LDA #0 : SEC : SBC sy : STA nsy
+    \ Rpitch Ryaw's middle row (its first is cy, 0, -sy) and its last,
+    \ which is M's
+    MMUL sp, sy : MROUND : STA py10
+    MMUL sp, cy : MROUND : STA py12
+    MMUL cp, sy : MROUND : STA M20
+    LDA #0 : SEC : SBC sp : STA M21
+    MMUL cp, cy : MROUND : STA M22
+    \ row 0: cr PY0 + sr PY1
+    MMUL cr, cy : LDA mp : STA acc : LDA mp+1 : STA acc+1
+    MMUL sr, py10 : MADD acc
+    LDA acc : STA mp : LDA acc+1 : STA mp+1 : MROUND : STA M00
+    MMUL sr, cp : MROUND : STA M01
+    MMUL cr, nsy : LDA mp : STA acc : LDA mp+1 : STA acc+1
+    MMUL sr, py12 : MADD acc
+    LDA acc : STA mp : LDA acc+1 : STA mp+1 : MROUND : STA M02
+    \ row 1: cr PY1 - sr PY0
+    MMUL cr, py10 : LDA mp : STA acc : LDA mp+1 : STA acc+1
+    MMUL sr, cy
+    LDA acc : SEC : SBC mp : STA mp : LDA acc+1 : SBC mp+1 : STA mp+1
+    MROUND : STA M10
+    MMUL cr, cp : MROUND : STA M11
+    MMUL cr, py12 : LDA mp : STA acc : LDA mp+1 : STA acc+1
+    MMUL sr, nsy
+    LDA acc : SEC : SBC mp : STA mp : LDA acc+1 : SBC mp+1 : STA mp+1
+    MROUND : STA M12
+    \ mat_big: an entry beyond 64 either way (src/transform.6502's fills)
+    STZ mat_big
+    LDX #8
+.big
+    LDA mat,X : BPL positive
+    EOR #&FF : INC A
+.positive
+    CMP #65 : BCC small
+    STA mat_big
+.small
+    DEX : BPL big
+    RTS
+}
+
+ENDSECTION
+
+SECTION ObjConst
+\ Quarter squares for MMUL: n * n DIV 4, n = 0..128.
+.msq_lo
+    EQUB LO((0..128) * (0..128) DIV 4)
+.msq_hi
+    EQUB HI((0..128) * (0..128) DIV 4)
+ENDSECTION

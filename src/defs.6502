@@ -26,9 +26,12 @@ sysvia_pcr  = &FE4C
 sysvia_ifr  = &FE4D         ; bit 1: the vertical sync (CA1) has come
 sysvia_ier  = &FE4E         ; write bit 7 clear to disable the bits set
 sysvia_ora_nh = &FE4F       ; port A without handshake: the keyboard
-usrvia_t1cl = &FE64
-usrvia_t1ch = &FE65
-usrvia_ifr  = &FE6D
+usrvia_t1cl = &FE64         ; T1's counter, low (reading it acknowledges T1); written, its latch
+usrvia_t1ch = &FE65         ; ... high (reading it doesn't; writing it starts the count)
+usrvia_t1ll = &FE66         ; T1's latch, which a free-running T1 reloads from ...
+usrvia_t1lh = &FE67         ; ... written without starting a count
+usrvia_acr  = &FE6B
+usrvia_ifr  = &FE6D         ; bit 6: T1
 usrvia_ier  = &FE6E
 irq1v       = &0204         ; the OS's IRQ vector, which the engine takes
 FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
@@ -103,12 +106,48 @@ ASSERT CRTC_R7 > CRTC_R6 AND CRTC_R7 <= CRTC_R4
 ASSERT SCREEN + CRTC_R6 * CRTC_R1 * (CRTC_R9 + 1) <= &8000
 
 \ The field the CRTC makes, in 2MHz cycles: a line is R0 + 1 characters of
-\ its 2MHz clock. The System VIA flags the vertical sync at the sync's end
-\ (CA1's falling edge, as the MOS sets the PCR), VSYNC_LINES after it
-\ begins, and the field's first line shown comes FLAG_TO_TOP lines later:
-\ a flip made in that window shows a whole frame (src/irq.6502).
+\ its 2MHz clock. Lines are counted from the field's first line shown. The
+\ System VIA flags the vertical sync at the sync's end (CA1's falling
+\ edge, as the MOS sets the PCR), VSYNC_LINES after it begins, on
+\ FLAG_LINE, and the next field's first line shown comes FLAG_TO_TOP lines
+\ later.
 LINE_CYCLES = CRTC_R0 + 1
+LINE_US     = LINE_CYCLES DIV 2         ; the VIAs count microseconds
 FIELD_LINES = (CRTC_R4 + 1) * (CRTC_R9 + 1) + CRTC_R5
 FIELD_CYCLES = FIELD_LINES * LINE_CYCLES
+FIELD_US    = FIELD_LINES * LINE_US
 VSYNC_LINES = CRTC_R3 >> 4
-FLAG_TO_TOP = (CRTC_R4 + 1 - CRTC_R7) * (CRTC_R9 + 1) + CRTC_R5 - VSYNC_LINES
+FLAG_LINE   = CRTC_R7 * (CRTC_R9 + 1) + VSYNC_LINES
+FLAG_TO_TOP = FIELD_LINES - FLAG_LINE
+ASSERT FLAG_TO_TOP = (CRTC_R4 + 1 - CRTC_R7) * (CRTC_R9 + 1) + CRTC_R5 - VSYNC_LINES
+ASSERT LINE_CYCLES MOD 2 = 0
+
+\ --- The flip (src/screen.6502, src/irq.6502) -----------------------------
+\ The view's lines: from VIEW_TOP_LINE up to VIEW_END_LINE. Everything
+\ else on the screen is the same in both buffers, so a finished frame is
+\ shown (ACCCON's D) whenever the CRTC isn't fetching the view: at once if
+\ the beam is outside it, or at FLIP_LINE, just past it, when User VIA T1
+\ times out. T1 runs free, a field a period, started in step with the
+\ vertical sync, so its count says where the beam is whatever any
+\ interrupt's latency: a count above SAFE_T1 is a beam at least FLIP_LEAD
+\ lines short of the view's top, or past FLIP_LINE.
+\
+\ -D VSYNC_FLIP=TRUE builds the flip at the vertical sync instead: the
+\ buffers swap in the vertical blank, and T1 isn't used.
+FLIP_AT_VSYNC = DEFINED(VSYNC_FLIP)
+VIEW_TOP_LINE = VIEW_ROW0 * 8
+VIEW_END_LINE = VIEW_TOP_LINE + VIEW_H
+FLIP_LINE   = VIEW_END_LINE + 1         ; a line's margin past the view
+FLIP_LEAD   = 2                         ; lines before the view's top a flip mustn't start in
+ASSERT FLIP_LINE < FLAG_LINE
+\ T1's first count, from the sync's flag (polled for: SYNC_LAG microseconds
+\ to the count's start) to its first time-out at FLIP_LINE; then its
+\ period, a field (a count of n times out every n + 2 microseconds).
+SYNC_LAG    = 5
+T1_SYNC     = (FIELD_LINES - FLAG_LINE + FLIP_LINE) * LINE_US - SYNC_LAG - 2
+T1_PERIOD   = FIELD_US - 2
+\ The count left at the beam's latest safe line before the view, to T1's
+\ next time-out at FLIP_LINE. frame_end reads T1's high byte alone, so a
+\ high byte above HI(SAFE_T1) is safe.
+SAFE_T1     = (FLIP_LINE - VIEW_TOP_LINE + FLIP_LEAD) * LINE_US
+ASSERT HI(SAFE_T1) < HI(T1_PERIOD) AND T1_SYNC < 65536
