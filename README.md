@@ -12,12 +12,13 @@ Master. The disc follows the work as it lands, so it's in progress.
 
 ## Where it's up to
 
-*2026-10-31.* The research and the design are done, and the engine is
-being built in parallel tracks: the screen and frame loop, the Python
-model of the renderer, the maths, the span buffer and row writer, the
-colours, and the original's own code run headless as the oracle. The
-disc is a placeholder page until the screen lands. `docs/journal.md` has
-the story as it goes.
+*2026-10-31.* The disc boots into MODE 2, double-buffered in main and
+shadow RAM with the flip at the vertical sync, and draws a moving test
+pattern where the 3D view will go, at 25 frames a second. Driller's own
+ZX code runs headless as the oracle and draws every entrance view, so the
+engine has its reference. The Python model of the renderer, the maths,
+the span buffer and row writer, and the colours are being built in
+parallel. `docs/journal.md` has the story as it goes.
 
 ## How it works
 

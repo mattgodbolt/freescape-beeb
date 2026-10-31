@@ -82,3 +82,46 @@ share its layout).
 ## 8. Where the colours come from
 
 Open: the colour study (`docs/research/colour.md`) proposes it.
+
+## 9. Where the screen sits (2026-10-31, autonomous)
+
+The screen sits where MOS 3.20 puts MODE 2 at `*TV 0,1`: the CRTC's
+vertical sync at the row MOS 3.20 computes (its table's row plus the
+`*TV` setting plus one), fixed in the build so the raster timing never
+moves. Following the machine's CMOS `*TV` setting at start-up is the
+alternative, if a real display wants it.
+
+## 10. The keys (2026-10-31, autonomous)
+
+Driller's own, from ScummVM's key map: O and K forward and back, Q and W
+turn, P and L look up and down, N and M roll, R and F rise and fall, U
+turns round, A and Z the angle, S and X the step; 0 or 5 fire, D drills,
+C collects, SPACE changes mode, I shows information, T the sound, ESCAPE
+for the ZX's 1. COPY fires too, and the cursor keys are read as the ZX's
+cursor joystick. Driller has no key to centre the view, so there isn't
+one. The keys are read once a field (`src/input.6502`).
+
+## 11. Rounding in the matrix and transform (2026-10-31, autonomous)
+
+The original builds `M = S · Rroll · Rpitch · Ryaw` in signed bytes, with
+the projection's scaling `S = diag(32, 64, 21)` folded into the matrix,
+and rounds every product of the transform
+(`docs/research/zx-driller.md`). The engine keeps the composition and its
+per-step rounding but leaves `S` out of the matrix (1.0 = 64 on every
+axis) and puts it in the projection's focal lengths, and its transform
+rounds nothing (`docs/engine.md`, stage 3).
+
+Why: the original's z row has 21 levels to a unit, and its rounded
+products can't be cached; exact products can, which is what makes a step
+cost no multiplies. The views agree with the original's to within the
+rounding, and the ZX oracle checks how far.
+
+## 12. The fill rule (2026-10-31, autonomous)
+
+The original walks each edge in whole-pixel steps; the engine covers a
+pixel when its centre is inside the polygon (`docs/engine.md`, section 9),
+with vertices in sixteenths of a pixel.
+
+Why: sub-pixel vertices keep edges steady as the camera moves a frame at a
+time (decision 4), which whole-pixel vertices don't. Compared with the ZX's
+images, edges may differ by a pixel.
