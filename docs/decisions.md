@@ -125,3 +125,9 @@ with vertices in sixteenths of a pixel.
 Why: sub-pixel vertices keep edges steady as the camera moves a frame at a
 time (decision 4), which whole-pixel vertices don't. Compared with the ZX's
 images, edges may differ by a pixel.
+
+Matt, on decisions 11 and 12 (2026-10-31): "I much rather we have a faster
+version than a pixel correct one." So the oracle checks the model's views
+against the original's within a tolerance at edges, and speed wins
+wherever exactness against the original would cost it. The 6502 still
+matches the model byte for byte.
