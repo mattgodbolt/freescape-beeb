@@ -51,6 +51,7 @@ VF_NEAR     = &80                   ; vflag: nearer than ZNEAR (transform_object
 VF_GTEST    = &40                   ; ... tested against the guard band ...
 VF_GOUT     = &20                   ; ... and outside it
 VF_PROJ     = &10                   ; ... projected: vsx, vsy and voc hold it
+VF_Z16      = &08                   ; ... g16_* hold its z << 4
 CLIP_W      = SUB * VIEW_W          ; the view's rectangle, in view coordinates
 CLIP_H      = SUB * VIEW_H
 HALF        = SUB DIV 2
@@ -67,6 +68,10 @@ ASSERT PROJ_YC + (VIEW_FY << GUARD_YS) + CLIP_H < &8000
 SECTION ObjWork
 .voc        SKIP VALL               ; a vertex's outcode against the view's rectangle
 .vbc        SKIP VALL               ; ... and the planes beyond its sides (vertex_guard)
+.g16_0      SKIP VALL               ; its z << 4 (vertex_z16)
+.g16_1      SKIP VALL
+.g16_2      SKIP VALL
+.g16_3      SKIP VALL
 .vsxl       SKIP VALL               ; its projection
 .vsxh       SKIP VALL
 .vsyl       SKIP VALL
@@ -457,47 +462,46 @@ SECTION ObjCode
 \ ===========================================================================
 \ Crossings (the model's crossing_t and lerp).
 
-\ frac16: ft = floor(2^16 fp / fd), fp (4 bytes, at least 0) below fd (4
-\ bytes): sixteen steps of a long division, the remainder in fp. Two bytes
-\ of remainder when fd is below 2^16, else four.
+\ frac16: ft = the model's crossing_t, from fp (4 bytes, at least 0) and fd
+\ (4 bytes, fp less): fp and fd shifted right together until fd fits 16
+\ bits (whole bytes while it's past 24), then floor(2^16 fp / fd) by
+\ sixteen steps of a long division, unrolled, the remainder's high byte in
+\ A. (When the shifts leave fp = fd, every step takes and ft is &FFFF, the
+\ model's clamp.)
 .frac16
 {
     ZA_AUTO 4, fp
     ZA_AUTO 4, fd
     ZA_AUTO2 ft
-    LDX #16
-    LDA fd+3 : ORA fd+2 : BNE wide
-.narrow
-    ASL fp : ROL fp+1
-    BCS narrow_take                 ; (past 16 bits: at least fd)
-    LDA fp : CMP fd
-    LDA fp+1 : SBC fd+1
-    BCC narrow_bit
-.narrow_take
-    LDA fp : SBC fd : STA fp        ; (C set either way)
-    LDA fp+1 : SBC fd+1 : STA fp+1
-    SEC
-.narrow_bit
-    ROL ft : ROL ft+1
-    DEX : BNE narrow
-    RTS
-.wide
-    ASL fp : ROL fp+1 : ROL fp+2 : ROL fp+3
-    BCS wide_take
-    LDA fp : CMP fd
-    LDA fp+1 : SBC fd+1
-    LDA fp+2 : SBC fd+2
-    LDA fp+3 : SBC fd+3
-    BCC wide_bit
-.wide_take
-    LDA fp : SBC fd : STA fp
-    LDA fp+1 : SBC fd+1 : STA fp+1
-    LDA fp+2 : SBC fd+2 : STA fp+2
-    LDA fp+3 : SBC fd+3 : STA fp+3
-    SEC
-.wide_bit
-    ROL ft : ROL ft+1
-    DEX : BNE wide
+    LDA fd+3 : BEQ under24
+    LDA fd+1 : STA fd
+    LDA fd+2 : STA fd+1
+    LDA fd+3 : STA fd+2
+    LDA fp+1 : STA fp
+    LDA fp+2 : STA fp+1
+    LDA fp+3 : STA fp+2
+.under24
+    LDA fd+2 : BEQ divide
+.normalise
+    LSR fd+2 : ROR fd+1 : ROR fd
+    LSR fp+2 : ROR fp+1 : ROR fp
+    LDA fd+2 : BNE normalise
+.divide
+    LDA fp+1
+    FOR k = 1..16
+        ASL fp : ROL A
+        BCS take                    ; (past 16 bits: at least fd)
+        CMP fd+1 : BCC bit
+        BNE take
+        LDY fp : CPY fd : BCC bit
+    .take
+        TAY                         ; (C is set on every way here)
+        LDA fp : SBC fd : STA fp
+        TYA : SBC fd+1
+        SEC
+    .bit
+        ROL ft : ROL ft+1
+    NEXT
     RTS
 }
 
@@ -540,16 +544,41 @@ SECTION ObjCode
 \ ===========================================================================
 \ The guard band (decision 17; the model's outside_guard and guard_clip).
 
+\ vertex_z16: vertex Y's z << 4 in g16_*, once (vflag's VF_Z16): the guard
+\ band's slope for x, and twice its slope for y, so both its tests and its
+\ planes' distances take it (GUARD_XS = 4, GUARD_YS = 3, ASSERTed). By
+\ nibbles: each byte's low four bits up and high four down (lo4, hi4). X
+\ and Y are kept.
+.vertex_z16
+{
+    ZA_AUTO1 t
+    LDA vflag,Y : AND #VF_Z16 : BNE done
+    PHX
+    LDX vz0,Y
+    LDA lo4,X : STA g16_0,Y
+    LDA hi4,X : STA t
+    LDX vz1,Y
+    LDA lo4,X : ORA t : STA g16_1,Y
+    LDA hi4,X : STA t
+    LDX vz2,Y
+    LDA lo4,X : ORA t : STA g16_2,Y
+    LDA hi4,X : STA g16_3,Y
+    LDA vflag,Y : ORA #VF_Z16 : STA vflag,Y
+    PLX
+.done
+    RTS
+}
+ASSERT GUARD_XS = 4 AND GUARD_YS = 3
+
 \ vertex_guard: vertex Y against the planes beyond the view's sides and
 \ the guard band, once a vertex (vflag, vbc): A = which of x = -z, x = z,
 \ 2y = z, 2y = -z it's beyond (the model's beyond: OC_LEFT, OC_RIGHT,
 \ OC_TOP, OC_BOTTOM), and C set if it's outside the guard band (the
-\ model's outside_guard: |x| > z << GUARD_XS or |y| > z << GUARD_YS). Only
-\ a vertex beyond one of the planes can be outside the band. Y is kept.
+\ model's outside_guard: |x| > 16 z or |y| > 8 z, so 2 |y| > 16 z). Only a
+\ vertex beyond one of the planes can be outside the band. Y is kept.
 .vertex_guard
 {
     ZA_AUTO 4, ga
-    ZA_AUTO 4, g
     ZA_AUTO1 code
     LDA vflag,Y : BIT #VF_GTEST : BEQ test
     AND #VF_GOUT : CMP #1
@@ -572,8 +601,8 @@ SECTION ObjCode
     LDA vx0,Y : STA ga
     LDA #OC_RIGHT
 .x_got
-    LDX #GUARD_XS : JSR beyond
-    \ 2 |y| against z, and against z << (GUARD_YS + 1) for the band
+    JSR beyond
+    \ 2 |y| against z
     LDA vy2,Y : BPL y_pos
     LDA #0 : SEC : SBC vy0,Y : STA ga
     LDA #0 : SBC vy1,Y : STA ga+1
@@ -588,12 +617,12 @@ SECTION ObjCode
 .y_got
     STZ ga+3
     ASL ga : ROL ga+1 : ROL ga+2 : ROL ga+3
-    LDX #GUARD_YS + 1 : JSR beyond
+    JSR beyond
     LDA code : STA vbc,Y
     LDA vflag,Y : AND #VF_GOUT : CMP #1
     LDA code
     RTS
-\ beyond: if ga > (vertex Y's z), code gets A, and if ga > z << X too,
+\ beyond: if ga > (vertex Y's) z, code gets A, and if ga > z << 4 too,
 \ vflag's VF_GOUT is set
 .beyond
     PHA
@@ -604,68 +633,53 @@ SECTION ObjCode
     PLA
     BCS done                        ; (ga <= z)
     TSB code
-    LDA vz0,Y : STA g
-    LDA vz1,Y : STA g+1
-    LDA vz2,Y : STA g+2
-    STZ g+3
-.shift
-    ASL g : ROL g+1 : ROL g+2 : ROL g+3
-    DEX : BNE shift
-    \ g - ga borrows if ga > g
-    LDA g : CMP ga
-    LDA g+1 : SBC ga+1
-    LDA g+2 : SBC ga+2
-    LDA g+3 : SBC ga+3
+    JSR vertex_z16
+    \ z << 4 - ga borrows if ga > z << 4
+    LDA g16_0,Y : CMP ga
+    LDA g16_1,Y : SBC ga+1
+    LDA g16_2,Y : SBC ga+2
+    LDA g16_3,Y : SBC ga+3
     BCS done
     LDA vflag,Y : ORA #VF_GOUT : STA vflag,Y
 .done
     RTS
 }
-ASSERT GUARD_XS > 0 AND GUARD_YS > 0
 
-\ guard_f: gf*,X = guard_clip.plane's f for vertex Y, g z - s v (the model's
-\ GUARD_PLANES: 0 x <= 16 z, 1 -x <= 16 z, 2 y <= 8 z, 3 -y <= 8 z), 32-bit.
-\ X and Y are kept.
+\ guard_f: gf*,X = guard_clip.plane's f for vertex Y, 32-bit: the model's
+\ GUARD_PLANES' 16 z - x and 16 z + x for planes 0 and 1, and twice its 8 z
+\ - y and 8 z + y for 2 and 3 (twice, the same crossings: a crossing's
+\ fraction is a ratio, and crossing_t's shifts keep it). X and Y are kept.
 .guard_f
 {
-    ZA_AUTO 4, f
     ZA_AUTO 4, v
-    PHX
-    LDA vz0,Y : STA f+0
-    LDA vz1,Y : STA f+1
-    LDA vz2,Y : STA f+2
-    STZ f+3
-    LDX #GUARD_XS
-    LDA guard_clip.plane : CMP #2 : BCC shift
-    LDX #GUARD_YS
-.shift
-    ASL f+0 : ROL f+1 : ROL f+2 : ROL f+3
-    DEX : BNE shift
+    JSR vertex_z16
     LDA guard_clip.plane : CMP #2 : BCS y_axis
     LDA vx0,Y : STA v+0
     LDA vx1,Y : STA v+1
     LDA vx2,Y : STA v+2
+    ASL A : SEXT : STA v+3
     BRA got
 .y_axis
-    LDA vy0,Y : STA v+0
-    LDA vy1,Y : STA v+1
-    LDA vy2,Y : STA v+2
+    \ 2 y
+    LDA vy0,Y : ASL A : STA v+0
+    LDA vy1,Y : ROL A : STA v+1
+    LDA vy2,Y : ROL A : STA v+2
+    LDA vy2,Y : ASL A : SEXT : STA v+3
 .got
-    ASL A : SEXT : STA v+3
-    PLX
-    LDA guard_clip.plane : LSR A : BCS add      ; odd planes: f = g z + v
-    LDA f+0 : SEC : SBC v+0 : STA gf0,X
-    LDA f+1 : SBC v+1 : STA gf1,X
-    LDA f+2 : SBC v+2 : STA gf2,X
-    LDA f+3 : SBC v+3 : STA gf3,X
+    LDA guard_clip.plane : LSR A : BCS add      ; odd planes: + v
+    LDA g16_0,Y : SEC : SBC v+0 : STA gf0,X
+    LDA g16_1,Y : SBC v+1 : STA gf1,X
+    LDA g16_2,Y : SBC v+2 : STA gf2,X
+    LDA g16_3,Y : SBC v+3 : STA gf3,X
     RTS
 .add
-    LDA f+0 : CLC : ADC v+0 : STA gf0,X
-    LDA f+1 : ADC v+1 : STA gf1,X
-    LDA f+2 : ADC v+2 : STA gf2,X
-    LDA f+3 : ADC v+3 : STA gf3,X
+    LDA g16_0,Y : CLC : ADC v+0 : STA gf0,X
+    LDA g16_1,Y : ADC v+1 : STA gf1,X
+    LDA g16_2,Y : ADC v+2 : STA gf2,X
+    LDA g16_3,Y : ADC v+3 : STA gf3,X
     RTS
 }
+
 
 \ GP_AXIS a0, a1, a2: guard_point's new vertex on one axis (its arrays):
 \ P + lerp(Q - P)
@@ -1040,24 +1054,58 @@ ENDMACRO
 ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 
 \ clip2d: the polygon clipped to the view's rectangle, [0, CLIP_W] x [0,
-\ CLIP_H] (the model's clip2d), then its repeats dropped.
+\ CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges a
+\ vertex is beyond (OC_*): the passes for the others are skipped, as they'd
+\ change nothing (a crossing lies between its edge's ends, so it isn't
+\ beyond an edge neither of them is). Each pass goes from pa to pb, and
+\ back.
 .clip2d
 {
-    ZA_AUTO1 m, i, ip, iq
+    ZA_AUTO1 m, i, ip, iq, edges
+    STA edges
+    LDA #OC_LEFT : BIT edges : BNE pass1
+    JMP pass2
+.pass1
     CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, 0, FALSE
-    LDA p_n : BNE pass2
+    JSR back
+    BNE pass2
     RTS
 .pass2
-    CLIP_PASS pb_xl, pb_xh, pb_yl, pb_yh, pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
-    LDA p_n : BNE pass3
+    LDA #OC_RIGHT : BIT edges : BNE pass2_do
+    JMP pass3
+.pass2_do
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, CLIP_W, TRUE
+    JSR back
+    BNE pass3
     RTS
 .pass3
+    LDA #OC_TOP : BIT edges : BNE pass3_do
+    JMP pass4
+.pass3_do
     CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, 0, FALSE
-    LDA p_n : BNE pass4
+    JSR back
+    BNE pass4
     RTS
 .pass4
-    CLIP_PASS pb_yl, pb_yh, pb_xl, pb_xh, pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
+    LDA #OC_BOTTOM : BIT edges : BNE pass4_do
     JMP dedupe
+.pass4_do
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, CLIP_H, TRUE
+    JSR back
+    JMP dedupe
+\ back: pb's polygon to pa; Z set if it's empty
+.back
+    LDX p_n : BEQ empty
+.copy
+    DEX
+    LDA pb_xl,X : STA pa_xl,X
+    LDA pb_xh,X : STA pa_xh,X
+    LDA pb_yl,X : STA pa_yl,X
+    LDA pb_yh,X : STA pa_yh,X
+    TXA : BNE copy
+    LDA p_n
+.empty
+    RTS
 }
 
 \ SAME2D: Z set if pa's vertices X and Y are the same point
@@ -1329,14 +1377,16 @@ ENDMACRO
     LDX of_slot
     LDA ob_flags,X : BIT #F_LINE : BNE line
     AND #K_MASK : CMP #K_SENSOR : BEQ point
-    LDA any : BNE clip
+    LDA any : BNE clip              ; (A: the edges to clip to)
     JSR dedupe
     BRA drawn
 .line
     JSR line_quad
-    BRA clip
+    BRA widened
 .point
     JSR point_square
+.widened
+    LDA #OC_LEFT OR OC_RIGHT OR OC_TOP OR OC_BOTTOM
 .clip
     JSR clip2d
 .drawn
@@ -1372,4 +1422,12 @@ ENDMACRO
     RTS
 }
 
+ENDSECTION
+
+SECTION ObjConst
+\ A byte's nibbles moved: lo4[n] = (n << 4) AND &FF, hi4[n] = n >> 4
+.lo4
+    EQUB ((0..255) << 4) AND &FF
+.hi4
+    EQUB (0..255) >> 4
 ENDSECTION

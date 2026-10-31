@@ -50,9 +50,14 @@ T_BITS = 16                 # a crossing's fraction
 
 def crossing_t(fp, fq):
     """A crossing's fraction from its inside end (fp >= 0) to its outside
-    end (fq < 0): floor(2^T_BITS fp / (fp - fq)), below 2^T_BITS."""
+    end (fq < 0): floor(2^T_BITS fp / (fp - fq)), with fp and fp - fq first
+    shifted right until fp - fq fits T_BITS bits (so the 6502 divides 16
+    bits by 16, and t keeps T_BITS - 1 bits at least), and below
+    2^T_BITS."""
     assert fp >= 0 > fq
-    return (fp << T_BITS) // (fp - fq)
+    d = fp - fq
+    s = max(0, d.bit_length() - T_BITS)
+    return min(((fp >> s) << T_BITS) // (d >> s), (1 << T_BITS) - 1)
 
 
 def lerp(p, q, t):

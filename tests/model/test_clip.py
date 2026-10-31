@@ -66,7 +66,9 @@ class Crossings(unittest.TestCase):
             fp, fq = rng.randint(0, 1 << 28), -rng.randint(1, 1 << 28)
             t = clip.crossing_t(fp, fq)
             self.assertTrue(0 <= t < 1 << clip.T_BITS)
-            self.assertLessEqual(t * (fp - fq), fp << clip.T_BITS)
+            # within a unit or two of the exact fraction (normalised to 16 bits)
+            exact = (fp << clip.T_BITS) // (fp - fq)
+            self.assertLessEqual(abs(t - exact), 2)
 
     def test_lerp_rounds_half_up(self):
         h = 1 << (clip.T_BITS - 1)
@@ -142,9 +144,9 @@ class Guard(unittest.TestCase):
             out = clip.guard_clip(poly)
             for x, y, z in out:
                 self.assertGreaterEqual(z, ZNEAR)
-                # within the band, give or take the rounding of a new vertex
-                self.assertLessEqual(abs(x), clip.GUARD_X * z + clip.GUARD_X)
-                self.assertLessEqual(abs(y), clip.GUARD_Y * z + clip.GUARD_Y)
+                # within the band, give or take a crossing's 2^-15 of an edge
+                self.assertLessEqual(abs(x), clip.GUARD_X * z + (2 << 20 >> 14) + clip.GUARD_X)
+                self.assertLessEqual(abs(y), clip.GUARD_Y * z + (2 << 20 >> 14) + clip.GUARD_Y)
                 sx, sy = parts.project(x, y, z)
                 self.assertLess(abs(sx), (1 << 15) - 1)
                 self.assertLess(abs(sy), (1 << 15) - 1)
