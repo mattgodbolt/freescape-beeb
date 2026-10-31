@@ -1,0 +1,176 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the player logic's workspace
+\ (docs/research/logic6502.md)
+\
+\ Driller's own variables, by the original's names (tools/logic/state.py),
+\ in main RAM where the frame can read them without paging: LogicWork, in
+\ the OS's pages &08-&0C, which the engine's machine leaves alone (its
+\ interrupt is the vertical sync's alone, so the OS's sound, buffers,
+\ soft keys and characters there go unused). The section is saved as a
+\ file holding each variable's first value, the original's in play at the
+\ start (area 1, entrance 19, on the probe): loading it starts a game.
+\
+\ The mirror: the original keeps most of these in one block with its
+\ tables among them, and the FCL reaches into it (variable n is
+\ ZX &887F + n - 1, for any n up to 256; an instruction's length is read at
+\ ZX &8939 + op), so the block is kept whole at the original's offsets, from
+\ ZXV_ORG to ZXV_END, and zx(a) is where the ZX's address a is in it. Its
+\ six words that point into the database point into the bank's copy
+\ (LOGIC_DB), moved by DB_MOVE.
+\
+\ Needs build/logic6502/data.6502 (tools/mklogicdata.py) first.
+\ ***************************************************************************
+
+LOGIC_WORK     = &0800      ; LogicWork: pages &08 ...
+LOGIC_WORK_END = &0D00      ; ... to &0C (&0D is the NMI's)
+LOGIC_BANK     = 4          ; the sideways RAM bank of the database (src/logic/bank.6502)
+LOGIC_CODE_BANK = 5         ; ... and of the rest of the logic's code
+LOGIC_DB       = &C000 - DB_LEN     ; the database, at the bank's top
+DB_MOVE        = LOGIC_DB - ZX_DB   ; what a database pointer moves by
+ZXV_LEN        = ZXV_END - ZXV_ORG
+ASSERT LEN(ZXV_INIT) = ZXV_LEN
+
+\ zx(a): where the original's variable at a is, in the mirror.
+FUNCTION zx(a) = zxv + a - ZXV_ORG
+
+\ The mirror's byte i as the 6502 starts: the original's, but for the
+\ database pointers' bytes, which are moved.
+FUNCTION zxv_first(i) = WHERE(FIND(ZXV_PTRS, i, -1) >= 0, LO(ZXV_INIT[i] + 256 * ZXV_INIT[i + 1] + DB_MOVE), WHERE(FIND(ZXV_PTRS, i - 1, -1) >= 0, HI(ZXV_INIT[i - 1] + 256 * ZXV_INIT[i] + DB_MOVE), ZXV_INIT[i]))
+
+SECTION LogicWork, org = LOGIC_WORK, guard = LOGIC_WORK_END, filename = "LOGICW"
+.zxv
+    FOR i = 0..ZXV_LEN - 1
+        EQUB zxv_first(i)
+    NEXT
+    \ The rest of the original's variables, in its order.
+.Blocked        EQUB ZXI_Blocked        ; the move was stopped
+.Sound          EQUB ZXI_Sound          ; a sound to play after the screen's copy
+.SensorList     EQUB ZXI_SensorList     ; the sensors the redraw found (the renderer's), and their flash counters
+.EventsDue      EQUB ZXI_EventsDue      ; non-zero: run the events this pass
+.PanelEnergy    EQUB ZXI_PanelEnergy    ; the energy the panel shows
+.PanelShield    EQUB ZXI_PanelShield    ; the shield the panel shows
+.Collided       EQUB ZXI_Collided       ; the id of the object the move hit
+.Wipe           EQUB ZXI_Wipe           ; non-zero: the screen's copy wipes
+.ShotFlag       EQUB ZXI_ShotFlag       ; non-zero: the events are a shot's
+.GameOver       EQUB ZXI_GameOver       ; why the game ended: 1 shield, 2 time, 3 energy, 4 a fall
+.KeyCount       EQUB ZXI_KeyCount       ; the keys read this pass, at most 5
+.Keys           EQUB ZXI_Keys           ; their codes, in the keyboard's order
+.Countdown      EQUB ZXI_Countdown      ; frames to wait
+.RepeatDelay    EQUB ZXI_RepeatDelay    ; frames before a held key repeats (0 in play)
+.RepeatRate     EQUB ZXI_RepeatRate     ; frames between repeats (0 in play)
+.Control        EQUB ZXI_Control        ; 2: the Kempston joystick too (0 here; not read)
+.KeyTable3      EQUB ZXI_KeyTable3      ; entries in the first key table
+.KeyTable2      EQUB ZXI_KeyTable2      ; entries in the second
+.KeyRows        EQUB ZXI_KeyRows        ; the half-rows as last read, less the keys taken
+.Repeating      EQUB ZXI_Repeating      ; the held keys have been seen before
+.LastKeyCount   EQUB ZXI_LastKeyCount   ; the keys last read
+.LastKeys       EQUB ZXI_LastKeys
+.RepeatCopy     EQUB ZXI_RepeatCopy     ; RepeatDelay, copied
+.Actions        EQUB ZXI_Actions        ; the keys' actions this pass
+.ActionIndex    EQUB ZXI_ActionIndex    ; the action being done
+.SavedCellY     EQUB ZXI_SavedCellY     ; the step-up's starting cell
+.MoveScratch    EQUB ZXI_MoveScratch    ; the move's target cells, crossing point and deltas
+.HitRemembered  EQUB ZXI_HitRemembered  ; touch's last solid hit
+.FclOp          EQUB ZXI_FclOp          ; the FCL instruction being run
+    \ The 6502's own.
+.logic_paged    EQUB 0                  ; the bank src/logic/call.6502 last paged in
+    \ The index of the area's objects and the globals, in the original's
+    \ order, which src/logic/touch.6502 and lookup scan (built from the
+    \ records by index_objects as an area loads, and by logic_go_init).
+    \ For object i: its first cell and its end (first plus size, AND 255)
+    \ on each axis, its id, its record's flags as logic_go_shown last copied
+    \ them, and its record's address.
+IX_MAX = 48
+.ix_n           SKIP 1                  ; the objects indexed
+.ix_dirty       EQUB 1                  ; non-zero: indexed afresh, and touch's lists by face are to build
+.ix_xo          SKIP IX_MAX
+.ix_xe          SKIP IX_MAX
+.ix_yo          SKIP IX_MAX
+.ix_ye          SKIP IX_MAX
+.ix_zo          SKIP IX_MAX
+.ix_ze          SKIP IX_MAX
+.ix_id          SKIP IX_MAX
+.ix_flags       SKIP IX_MAX             ; the records' flags as logic_go_shown last copied them, for the renderer
+.ix_pl          SKIP IX_MAX
+.ix_ph          SKIP IX_MAX
+ENDSECTION
+
+\ --- The mirror's variables, at the original's addresses ------------------
+
+    \ the camera and the probe
+PlayerX         = zx(&8762)     ; camera x, world units (64 to a cell)
+PlayerY         = zx(&8764)     ; camera y: the eye
+PlayerZ         = zx(&8766)     ; camera z
+StepUnits       = zx(&8768)     ; the step in world units: Step times AreaScale
+Step            = zx(&876A)     ; the step, from StepTable
+StepIndex       = zx(&876B)     ; its index in StepTable
+Pitch           = zx(&876C)     ; 5-degree units, 0-71; positive looks down
+Yaw             = zx(&876D)     ; 5-degree units, 0-71; 0 looks along +z
+Roll            = zx(&876E)     ; 5-degree units, 0-71
+Turn            = zx(&876F)     ; the turn, from TurnTable
+TurnIndex       = zx(&8770)     ; its index in TurnTable
+ExtMax          = zx(&8771)     ; the probe's highest extension level
+ExtLevel        = zx(&8772)     ; its extension level, 1 to ExtMax
+FallLimit       = zx(&8773)     ; the most cells the probe survives falling
+ClimbLimit      = zx(&8774)     ; the most cells it steps up
+ExtMaxScaled    = zx(&8775)     ; ExtMax times AreaScale
+BodyHeight      = zx(&8776)     ; ExtLevel times AreaScale: the probe's height in cells
+FallLimitScaled = zx(&8777)     ; FallLimit times AreaScale
+ClimbLimitScaled = zx(&8778)    ; ClimbLimit times AreaScale
+AreaScale       = zx(&8779)     ; the area's scale
+InJet           = zx(&877A)     ; non-zero in the jet
+RigPlaced       = zx(&877B)     ; a rig in each of areas 1-18 (0: none)
+RigState        = zx(&878D)     ; the rigs' second byte
+AreaGas         = zx(&87A0)     ; the area's header bytes 10-12
+Globals         = zx(&87A5)     ; the eight global objects' records
+RigPositions    = zx(&882C)     ; where each area's rig stands, 3 cells an area
+    \ the area
+AreaId          = zx(&8862)     ; the area's id
+AreaObjects     = zx(&8863)     ; its object count
+AreaObjPtr      = zx(&8864)     ; its first object's record (in the bank)
+AreaNamePtr     = zx(&8866)     ; its name (in the bank)
+AreaCondPtr     = zx(&8868)     ; its conditions (in the bank)
+ScreenColours   = zx(&886A)     ; the colours the screen shows
+AreaColours     = zx(&886E)     ; the area's colours
+Score           = zx(&8872)     ; 24 bits
+Energy          = zx(&8875)     ; the vehicle's
+JetEnergy       = zx(&8876)
+ProbeEnergy     = zx(&8877)
+Shield          = zx(&8878)     ; the vehicle's
+JetShield       = zx(&8879)
+ProbeShield     = zx(&887A)
+FclBits         = zx(&887B)     ; the FCL's 32 bits; bit 32 (FclBits+3 bit 7) is in the jet
+FclVars         = zx(&887F)     ; the FCL's variables 1-29
+FclVar30        = zx(&889C)     ; minutes, all told
+MinuteCount     = zx(&889D)     ; variable 31: minutes in this area
+FclVar32        = zx(&889E)
+AreaFlags       = zx(&889F)     ; the area's header byte 0
+CrossX          = zx(&88A0)     ; the crosshair, screen x
+CrossY          = zx(&88A1)     ; ... and y (up)
+CrossOn         = zx(&88A2)     ; non-zero: it's shown
+ShootMode       = zx(&88AC)     ; non-zero: the movement keys move the crosshair
+CrossWanted     = zx(&88AD)     ; the crosshair outside shooting mode (key B)
+MinuteSeen      = zx(&88AE)     ; MinuteCount as the input last saw it
+TargetX         = zx(&88AF)     ; where the move is going; then where it stopped
+TargetY         = zx(&88B1)
+TargetZ         = zx(&88B3)
+CellX           = zx(&88B5)     ; the move's current cell
+CellY           = zx(&88B6)
+CellZ           = zx(&88B7)
+StepTable       = zx(&88BE)     ; a count, then the steps
+TurnTable       = zx(&88C9)     ; a count, then the turns
+Margin          = zx(&88D0)     ; how near a face the camera may stand
+ViewCentre      = zx(&88D9)     ; the crosshair's centre; its limits are twice it
+AreaExtent      = zx(&88DF)     ; x max, x min, y max, y min, z max, z min, in cells
+NGlobals        = zx(&890F)     ; the global objects
+AreaChanged     = zx(&8910)     ; set by the area's load, cleared by the screen's colours
+EntranceId      = zx(&8911)     ; the entrance the area's load puts the camera at
+DbPtr           = zx(&8912)     ; the database (its first byte: the areas)
+AreaTablePtr    = zx(&8914)     ; the areas' offsets from it
+FoundId         = zx(&8916)     ; the id lookup finds
+NDrawn          = zx(&8918)     ; the objects in the renderer's last draw list
+GameFlags       = zx(&8920)     ; what changed: bit 2 re-project (moved or turned), and more
+GameFlags2      = zx(&8921)     ; what changed: bit 3 redraw from the list, and the panel's
+GlobalCondPtr   = zx(&8922)     ; the global conditions (in the bank)
+ObjectHeader    = zx(&8929)     ; a record's header length by type: its FCL starts there
+FclLengths      = zx(&8939)     ; each FCL instruction's length, by opcode

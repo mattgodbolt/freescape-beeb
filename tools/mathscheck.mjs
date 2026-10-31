@@ -1,7 +1,7 @@
 // The maths checked on the 65C12, headless (make maths): src/maths.6502's
-// mul and dot3 and src/project.6502's project, built by
-// tools/mathscheck.6502, against tools/model/maths.py exactly, with their
-// cycles.
+// mul and dot3 and src/project.6502's project, project_z and project_y,
+// built by tools/mathscheck.6502, against tools/model/maths.py exactly,
+// with their cycles.
 //
 //   node tools/mathscheck.mjs build/maths [--quick | --full]
 //
@@ -11,7 +11,11 @@
 //   that: tools/mkmaths.py checks it); --full takes all 2^24 pairs, which
 //   is too slow for make check;
 // - dot3 and project: tools/mkmaths.py's cases (cases.json), with the
-//   model's answers, edges and random;
+//   model's answers, edges and random; project_z and project_y each after
+//   a project, against the model's project of the same vertex;
+// - every entrance view's projected vertices (views.json, the model's
+//   own), each by project, then shared by project_y and project_z, timed
+//   call by call: a vertex's and a view's cycles;
 // - cycles: from the JSR to the return, over a spread of cases each,
 //   reported as minimum, mean and maximum.
 //
@@ -28,6 +32,8 @@ const m = await headless({ symbols: path.join(dir, "symbols.json") });
 m.load(path.join(dir, "CODE"), m.sym("chk_code"));
 m.load(path.join(dir, "HAZEL"), 0xc000, "hazel");
 const cases = JSON.parse(fs.readFileSync(path.join(dir, "cases.json"), "utf8"));
+// The entrance views' vertices (tools/mkmaths.py --views).
+const views = JSON.parse(fs.readFileSync(path.join(dir, "views.json"), "utf8"));
 
 const BUF = m.sym("CHK_BUF");
 const TOP = m.sym("CHK_TOP");
@@ -193,6 +199,100 @@ const PROJ = m.sym("CHK_PROJ");
     show("project", near);
     show("project*", all);
     console.log("  (project: |X| <= 4 Z, |Y| <= 2 Z, Z <= 742000; project*: every case)");
+}
+
+// --- project_z and project_y, after project ----------------------------------
+
+const SHARE = m.sym("CHK_SHARE"), SHARE_IN = m.sym("CHK_SHARE_IN");
+{
+    const sh = cases.share;
+    const input = (i) => sh[i].slice(0, 6).flatMap((v) => bytes(v, 3));
+    await batch("chk_share", SHARE, sh.length,
+        (i) => [...input(i), ...new Array(SHARE - SHARE_IN).fill(0)],
+        SHARE_IN,
+        (i, out) => {
+            const got = [0, 2, 4, 6, 8].map((k) => s16(out.slice(k, k + 2)));
+            const want = sh[i].slice(6);
+            if (got.some((v, k) => v !== want[k])) fail(`project, project_z, project_y ${sh[i].slice(0, 6)}: ${got}, want ${want}`);
+        });
+    console.log(`project_z, project_y: ${sh.length} cases, each after project`);
+    const z = stats(), y = stats();
+    const band = sh.filter(([x, , zz, x2, y2, y3]) => zz <= 742000 && Math.abs(x2) <= 4 * zz && Math.abs(y2) <= 2 * zz && Math.abs(y3) <= 2 * zz);
+    for (let i = 0; i < band.length; i += Math.ceil(band.length / 1500)) {
+        const [tz, , ty] = await timed("chk_share1", ["chk_share1_z", "chk_share1_zdone", "chk_share1_y", "chk_share1_ydone"],
+            band[i].slice(0, 6).flatMap((v) => bytes(v, 3)));
+        add(z, tz); add(y, ty);
+    }
+    show("project_z", z);
+    show("project_y", y);
+    console.log("  (|X| <= 4 Z, |Y| <= 2 Z, Z <= 742000)");
+}
+
+// --- every entrance view's vertices, unshared and shared ----------------------
+
+// A schedule: each of an object's vertices by project (op 0), or by
+// project_z (1) after a vertex at its Z, or project_y (2) after one at its
+// X and Z. "each": every vertex by project, in the model's order; "columns":
+// an object's vertices at one (X, Z) one after the other, as a level
+// camera's vertical edges are; "shared": and at one Z.
+const SCHED = m.sym("CHK_SCHED");
+{
+    function schedule(objects, how) {
+        const out = [];
+        for (const obj of objects) {
+            let vs = obj;
+            if (how !== "each") {
+                const key = how === "columns" ? (v) => [v[0], v[2]] : (v) => [v[2], v[0]];
+                vs = [...obj].sort((a, b) => key(a)[0] - key(b)[0] || key(a)[1] - key(b)[1]);
+            }
+            let last = null;
+            for (const v of vs) {
+                let op = 0;
+                if (how === "each") op = 0;
+                else if (last && v[2] === last[2] && v[0] === last[0]) op = 2;
+                else if (last && how === "shared" && v[2] === last[2]) op = 1;
+                out.push([op, ...v]);
+                last = v;
+            }
+        }
+        return out;
+    }
+    const sites = { 0: ["chk_sched_p", "chk_sched_pd"], 1: ["chk_sched_z", "chk_sched_zd"], 2: ["chk_sched_y", "chk_sched_yd"] };
+    const per = Math.floor((TOP - BUF) / SCHED);
+    const summary = {};
+    for (const how of ["each", "columns", "shared"]) {
+        const perVertex = [], perView = [], ops = [0, 0, 0], byOp = [[], [], []];
+        for (const view of views) {
+            const recs = schedule(view.objects, how);
+            let total = 0;
+            for (let first = 0; first < recs.length; first += per) {
+                const chunk = recs.slice(first, first + per);
+                const buf = new Uint8Array(chunk.length * SCHED);
+                chunk.forEach(([op, x, y, z], i) => buf.set([op, ...bytes(x, 3), ...bytes(y, 3), ...bytes(z, 3)], i * SCHED));
+                m.write(BUF, buf);
+                m.pokew(m.sym("chk_count"), chunk.length);
+                const marks = chunk.flatMap(([op]) => sites[op].map((s) => m.sym(s)));
+                const { marks: t } = await m.call(m.sym("chk_sched"), { marks, secs: 600 });
+                const out = m.read(BUF, chunk.length * SCHED);
+                chunk.forEach(([op, x, y, z, wx, wy], i) => {
+                    const c = t[2 * i + 1] - t[2 * i];
+                    perVertex.push(c); total += c; ops[op]++; byOp[op].push(c);
+                    const o = out.slice(i * SCHED + 10, i * SCHED + 14);
+                    const sx = s16(o.slice(0, 2)), sy = s16(o.slice(2, 4));
+                    if (sy !== wy || (op !== 2 && sx !== wx)) fail(`${view.view} ${how} op ${op} ${x} ${y} ${z}: (${sx}, ${sy}), want (${wx}, ${wy})`);
+                });
+            }
+            perView.push(total);
+        }
+        const med = (a) => { const s = [...a].sort((p, q) => p - q), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; };
+        summary[how] = { perVertex, perView, ops };
+        console.log(`  ${how.padEnd(8)} a vertex: median ${med(perVertex)}, mean ${(perVertex.reduce((p, q) => p + q, 0) / perVertex.length).toFixed(1)}, max ${Math.max(...perVertex)}; ` +
+            `a view: median ${med(perView)}, max ${Math.max(...perView)}`);
+        const names = ["project", "project_z", "project_y"];
+        console.log("           " + byOp.map((a, k) => a.length ? `${a.length} by ${names[k]} (median ${med(a)}, max ${Math.max(...a)})` : "")
+            .filter((s) => s).join(", "));
+    }
+    console.log(`  (the ${views.length} entrance views' ${summary.each.perVertex.length} projected vertices, cycles from each JSR to its return)`);
 }
 
 // --- the real divide, for comparison (docs/research/maths.md) ----------------

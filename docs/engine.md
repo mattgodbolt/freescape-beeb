@@ -170,11 +170,13 @@ In order. Formats are the model's; the 6502 matches them exactly.
 4. **Near clip.** A face with any vertex nearer than `ZNEAR` is clipped
    against that plane in 3D. There is no far plane.
 5. **Project.** `x = XC + FX · X / Z` and `y = YC − FY · Y / Z`, in
-   sixteenths of a pixel (section 9), by a normalised reciprocal of Z
-   times quarter-square products (`src/project.6502`,
-   `docs/research/maths.md`); `ZNEAR` and the focal lengths are
-   `tools/model/maths.py`'s. Each projected vertex is kept for the faces
-   that share it.
+   sixteenths of a pixel (section 9), by a 9-bit reciprocal of Z and two
+   byte products (`src/project.6502`, `docs/research/projection.md`,
+   decision 27): never stepping backwards as X or Z grows, within 4/16 of
+   a pixel. Vertices sharing Z, or X and Z, take the cheaper `project_z`
+   and `project_y`, with the same results. `ZNEAR` and the focal lengths
+   are `tools/model/maths.py`'s. Each projected vertex is kept for the
+   faces that share it.
 6. **2D clip** of each face against the view's rectangle, so every vertex
    the rasteriser sees is a byte inside the view.
 7. **Order.** The original's sort (ScummVM's `area.cpp` reproduces it) over
@@ -257,12 +259,17 @@ come with it, to see where the cycles go.
 
 - Zero page: baron's allocator (`ZA_AUTO`), with long-lived state in fixed
   locations.
+- `&0800-&0CFF`: the player logic's variables, `LogicWork`
+  (`docs/research/logic6502.md`).
 - `&0E00-&2FFF`: the engine's main code.
 - `&3000-&3FFF`: per-buffer data only (section 4, stage 10).
 - `&4000-&7FFF`: the screen, 16K in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
   table) and the row-run code.
-- Sideways RAM banks 4-7: the area records, more code.
+- Sideways RAM banks 4-7: the area records, more code. The player logic
+  has two: `LOGIC_BANK`, Driller's database in the original's layout and
+  the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
+  with room to share.
 
 The tracks size these as they go, and `make memory` reports what each
 region holds.

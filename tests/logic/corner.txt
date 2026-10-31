@@ -1,0 +1,21 @@
+# The corner bug (decision 18) without the hang: a step that ends exactly
+# on a cell's corner while moving down z. Here the probe, three levels up
+# in area 25, steps from (779, 450) toward (832, 256), which meets x's
+# boundary at x 832 with z exactly 256, the first unit of z's target cell:
+# the original crosses z with x there, past the target, and runs on down z
+# until an object stops it (Collided 4, at z 74). With the fix (make
+# logic6502) the step crosses x alone and stops on its target.
+# Found by tools/logic/check.py --fix-corner --fuzz 1000 --seed 100000
+# (seed 100191).
+goto 25 8
+poke 8772 03
+poke 8776 0C
+poke 8768 90 01 64 06
+at 779 800 450
+angles 58 33 70
+X O
+expect StepUnits 200
+expect PlayerZ 74
+expect Collided 4
+K
+O

@@ -17,7 +17,10 @@ otherwise.
   runs every scene and sequence through the 6502 and fails on any byte that
   differs. Once the whole-view model is in the tree (`tools/model/render.py`)
   it also checks every Driller entrance view (`rasterscenes.py --driller`,
-  into `build/raster/driller.json`, never committed).
+  into `build/raster/driller.json`, never committed). It checks both ways:
+  the engine's build in `build/raster` and the other (the painter's or the
+  span buffer's, below) in `build/raster-alt`, the same check build with
+  `RASTER_OTHER_WAY` defined.
 - `node tools/rastercheck.mjs build/raster --verbose` prints each scene's
   cycles by part; `--json FILE` writes them with the model's counts;
   `--scene TEXT` picks scenes; `--scenes FILE` another scene file.
@@ -233,6 +236,55 @@ on average over both kinds.
   cycles a face's piece against 16 more a row set-up for the extra patches,
   an estimated 600 cycles a view; not built.
 
+## The painter's way
+
+Built and measured 2026-10-31 (`RASTER_PAINTER`, the comparison build).
+The view is the same, since painting back to front is the original's own
+algorithm and the span buffer only reproduces it: `raster.painter` must
+give the span buffer's bytes on every scene, and the 6502 must match them
+byte for byte, with the model's count of writes.
+
+- The backmost face (the input's last) and the background go through the
+  span buffer as before, so every byte is written once; the pools need
+  only a quarter page a field for one face's gaps, which leaves the
+  painter build 3K smaller.
+- The other faces are painted back to front: the line loop's copies jump
+  (a `JMP` patched for the frame's two phases) to `PAINT`, which writes a
+  span's whole bytes through the row run and reads, merges and writes back
+  the byte at each odd end. A line a painted face spans is no longer
+  background alone, for the screen's records.
+
+Measured over Driller's 65 views, each drawn fresh (`tools/rastercheck.mjs`):
+
+| | median | p90 | max | bytes written (median) |
+|---|---:|---:|---:|---:|
+| Span buffer | 125,406 | 224,523 | 364,241 | 5,408 |
+| Painter's | 135,039 | 224,936 | 324,093 | 8,941 |
+
+and in the slideshow (`tools/slidecheck.mjs`, each view held, the median
+over views of each view's median frame): span buffer 124,983 / 225,102 /
+366,124, painter's 135,245 / 225,429 / 325,189. At the median the
+painter's writes 3,533 bytes more (every byte of a painted face is written
+over the floor or the sky first), 18,335 cycles more of row runs, and
+saves 13,200 in insertion; on the busiest views insertion is the larger.
+The painter's is faster on 30 of the 65 views. Painting a view's faces
+when they span more than 500 face-lines, and the span buffer otherwise,
+would give 125,406 / 221,477 / 324,093; the better of the two on each view,
+122,691 / 221,477 / 324,093.
+
+The span buffer stays the engine's way: it's the faster at the median and
+the same at p90. The painter's stays buildable and checked.
+
+- **The background's restore.** Faces touch every line of at least half
+  of Driller's views (and of the 90th percentile's), so the records' skip
+  seldom applies to them. Restoring the
+  background only over each line's hull (in whole bytes) of what the frame
+  two back drew, then painting every face, would write median 9,535 bytes
+  a held view, max 15,094, against 8,941 and 13,951 as built, because the
+  backmost face is then painted over the background rather than written
+  with it (`raster.painter`'s counts and a model of the hulls, 2026-10-31).
+  Not built.
+
 ## What's left
 
 - **The budget.** The median view is about 3.1 fields and the busiest 9.1,
@@ -251,6 +303,8 @@ on average over both kinds.
   - half the lines rasterised, each written twice: an estimated quarter
     off (what's per face-line and the background halve), with half the
     vertical resolution.
-- **More of what the screen holds.** Only whole background lines are skipped
-  now; the background runs before the first face and after the last, on lines
-  whose split didn't move, are the next step, and they need the same records.
+- **Both ways in one build**, chosen a frame by the faces' line ranges
+  (the figures above): about 40K off the busiest view; it needs the span
+  buffer's pools and the painter's code in the bank together.
+- **More of what the screen holds.** Only whole background lines are
+  skipped now, and Driller's views seldom have one (above).

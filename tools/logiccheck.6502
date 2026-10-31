@@ -1,0 +1,128 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the logic's check build (make logic6502;
+\ tools/logiccheck.mjs drives it)
+\
+\ The logic as the engine has it: its workspace in main RAM (LOGICW, the
+\ game's start), Driller's database and the code that reads it in
+\ LOGIC_BANK (LOGIC), the rest in LOGIC_CODE_BANK (LOGICC), and the
+\ keyboard's bitmap where src/zp.6502 puts it. Entries for the harness, in
+\ main RAM (CHECK), going in as the frame does: a pass, a minute, an FCL
+\ script from CHK_SCRIPT, and the arithmetic on records in CHK_BUF (free
+\ here: there's no screen).
+\ ***************************************************************************
+
+INCLUDE "../src/defs.6502"
+INCLUDE "../build/logic6502/data.6502"
+INCLUDE "../src/zp.6502"
+INCLUDE "../src/logic/vars.6502"
+INCLUDE "../src/logic/bank.6502"
+
+CHK_BUF = &3000                     ; the arithmetic's records, up to CHK_TOP
+CHK_TOP = &8000
+\ cross_coord records: ct, cd, cD, cs (2 each) in; cres (2) out
+CHK_CROSS = 10
+\ mul_a_hl records: A, mhl (2) in; m24 (3), then shift6's mhl (2) out
+CHK_MUL = 8
+
+SECTION Check, org = &1900, filename = "CHECK", guard = &3000, cmos = TRUE
+.chk_code
+INCLUDE "../src/input.6502"         ; (its keys' names; the check sets keys itself)
+INCLUDE "../src/logic/call.6502"
+INCLUDE "../src/logic/hooks.6502"
+
+.chk_result     SKIP 1              ; what the entry returned in A
+.chk_len        SKIP 1              ; the script's length
+.chk_count      SKIP 2              ; records, for the arithmetic
+.CHK_SCRIPT     SKIP 64             ; an FCL script, as the scenarios' fcl steps run them
+
+.chk_init
+    ZA_ENTRY
+    JSR logic_go_init
+    RTS
+
+.chk_pass
+    ZA_ENTRY
+    JSR logic_go_pass
+.chk_pass_done
+    STA chk_result
+    RTS
+
+.chk_minute
+    ZA_ENTRY
+    JSR logic_go_minute
+    RTS
+
+.chk_shown
+    ZA_ENTRY
+    JSR logic_go_shown
+    RTS
+
+.chk_fcl
+    ZA_ENTRY
+    LDA #LOGIC_BANK : STA romsel
+    LDA #LO(CHK_SCRIPT) : STA run.ip
+    LDA #HI(CHK_SCRIPT) : STA run.ip+1
+    LDA chk_len : STA run.n
+    JSR run
+    RTS
+
+ZA_AUTO2 chk_p, chk_left
+
+MACRO CHK_BEGIN
+    LDA #LOGIC_CODE_BANK : STA romsel           ; (the arithmetic's)
+    LDA #LO(CHK_BUF) : STA chk_p
+    LDA #HI(CHK_BUF) : STA chk_p+1
+    LDA chk_count : STA chk_left
+    LDA chk_count+1 : STA chk_left+1
+ENDMACRO
+
+\ CHK_NEXT n, loop: on to the next record of n bytes, and round again if
+\ there's one.
+MACRO CHK_NEXT n, loop
+    LDA chk_p : CLC : ADC #n : STA chk_p
+    BCC same
+    INC chk_p+1
+.same
+    LDA chk_left : BNE low
+    DEC chk_left+1
+.low
+    DEC chk_left
+    LDA chk_left : ORA chk_left+1
+    BNE loop
+ENDMACRO
+
+.chk_cross
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_cross_loop
+    LDY #0 : LDA (chk_p),Y : STA ct
+    INY : LDA (chk_p),Y : STA ct+1
+    INY : LDA (chk_p),Y : STA cd
+    INY : LDA (chk_p),Y : STA cd+1
+    INY : LDA (chk_p),Y : STA cD
+    INY : LDA (chk_p),Y : STA cD+1
+    INY : LDA (chk_p),Y : STA cs
+    INY : LDA (chk_p),Y : STA cs+1
+    JSR cross_coord
+    LDY #8 : LDA cres : STA (chk_p),Y
+    INY : LDA cres+1 : STA (chk_p),Y
+    CHK_NEXT CHK_CROSS, chk_cross_loop
+    RTS
+
+.chk_mul
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_mul_loop
+    LDY #1 : LDA (chk_p),Y : STA mhl
+    INY : LDA (chk_p),Y : STA mhl+1
+    LDA (chk_p)
+    JSR mul_a_hl
+    LDY #3 : LDA m24 : STA (chk_p),Y
+    INY : LDA m24+1 : STA (chk_p),Y
+    INY : LDA m24+2 : STA (chk_p),Y
+    JSR shift6
+    INY : LDA mhl : STA (chk_p),Y
+    INY : LDA mhl+1 : STA (chk_p),Y
+    CHK_NEXT CHK_MUL, chk_mul_loop
+    RTS
+ENDSECTION

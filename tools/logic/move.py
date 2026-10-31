@@ -19,6 +19,13 @@ STORE_CEILING = 0x9DCA   # the step-up's test above: a dummy
 STORE_MARGIN = 0xBCCA    # $BCCB's test once Collided is set: a dummy
 SCRATCH = 0x9F33         # $9F33-$9F41: the target cells, crossing, delta
 
+# Decision 18: the port fixes the original's corner bug, where the rule
+# that moves the axes across together moves an axis already at its target
+# cell (docs/research/zx-logic.md, "The original's bugs"). Off, this is
+# the original, which make logic checks; on, it's the port's logic, which
+# the 6502 is checked against (tools/logictrace.py).
+FIX_CORNER = False
+
 
 class Freeze(Exception):
     """The original's move never finishes: its walk has come to a crossing
@@ -396,6 +403,14 @@ def _at_extent(s, b):
     return False
 
 
+def _arrived(s, axis):
+    """With FIX_CORNER (decision 18): is this axis (0 x, 1 y, 2 z) already
+    in its target cell, so that it mustn't cross with another?"""
+    if not FIX_CORNER:
+        return False
+    return s.mem[SCRATCH + axis] == (s.CellX, s.CellY, s.CellZ)[axis]
+
+
 def _next_crossing(s, c, dx, dy, dz):
     """$9FCA-$A157: the next boundary the walk crosses, and the axes that
     cross there (b, as c's bits) and the point (bx, by, bz)."""
@@ -410,13 +425,13 @@ def _next_crossing(s, c, dx, dy, dz):
             w = _boundary_with(c, Z_MOVES, Z_UP, s.CellZ, bz)
             if w == 2:
                 first = False
-            elif w == 1:
+            elif w == 1 and not _arrived(s, 2):
                 b |= c & 0x30
         if first and c & Y_MOVES:
             w = _boundary_with(c, Y_MOVES, Y_UP, s.CellY, by)
             if w == 2:
                 first = False
-            elif w == 1:
+            elif w == 1 and not _arrived(s, 1):
                 b |= c & 0x0C
         if first:
             return b, bx, by, bz
@@ -429,7 +444,7 @@ def _next_crossing(s, c, dx, dy, dz):
             w = _boundary_with(c, Y_MOVES, Y_UP, s.CellY, by)
             if w == 2:
                 first = False
-            elif w == 1:
+            elif w == 1 and not _arrived(s, 1):
                 b |= c & 0x0C
         if first:
             return b, bx, by, bz

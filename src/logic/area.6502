@@ -1,0 +1,292 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - areas, entrances and objects by id
+\ (tools/logic/area.py: the original's $A8BA, $9D1C, $BE18 and $CD3B;
+\ docs/research/zx-logic.md, "Areas and entrances")
+\
+\ An object's record: +0 type (low nibble) and flags (bit 5 destroyed, bit
+\ 6 invisible), +1-3 its cell x, y, z, +4-6 its size in cells (an
+\ entrance's pitch, yaw and roll), +7 its id, +8 the record's length, then
+\ its colours and vertices, then its FCL from ObjectHeader by type on.
+\ ***************************************************************************
+
+\ mul8: A = A * mul8.k, the low byte of a product of bytes, signed or not:
+\ the original's $928C as the area's load keeps it. Clobbers X.
+.mul8
+{
+    ZA_AUTO1 k, f
+    STA f
+    LDA #0
+    LDX #8
+.bit
+    ASL A
+    ASL f : BCC next
+    CLC : ADC k
+.next
+    DEX : BNE bit
+    RTS
+}
+
+\ area_step_units: StepUnits = AreaScale * Step, the original's $910E of
+\ a signed byte by a byte, to 16 bits (as step_units, in LOGIC_CODE_BANK).
+.area_step_units
+{
+    ZA_AUTO1 m
+    LDA AreaScale : STA m
+    STZ StepUnits+1
+    LDA #0
+    LDX #8
+.bit
+    ASL A : ROL StepUnits+1
+    ASL m : BCC next
+    CLC : ADC Step
+    BCC next
+    INC StepUnits+1
+.next
+    DEX : BNE bit
+    STA StepUnits
+    LDA AreaScale : BPL done
+    LDA StepUnits+1 : SEC : SBC Step : STA StepUnits+1  ; a negative scale's 256 * Step
+.done
+    RTS
+}
+
+\ find_area ($BE3B, $A8E3): fa = the record of area A, from the area
+\ table; C set if there is one.
+ZA_AUTO2 fa
+.find_area
+{
+    ZA_AUTO1 want, n
+    ZA_AUTO2 tp
+    STA want
+    LDA AreaTablePtr : STA tp
+    LDA AreaTablePtr+1 : STA tp+1
+    LDA LOGIC_DB : STA n                        ; the areas (0 is 256)
+.area
+    LDA (tp) : CLC : ADC DbPtr : STA fa
+    LDY #1 : LDA (tp),Y : ADC DbPtr+1 : STA fa+1
+    INY : LDA (fa),Y : CMP want : BEQ found
+    LDA tp : CLC : ADC #2 : STA tp
+    BCC same
+    INC tp+1
+.same
+    DEC n : BNE area
+    CLC
+    RTS
+.found
+    SEC
+    RTS
+}
+
+\ lookup ($A8BA): lk = the object with id FoundId: for A = 0, among the
+\ globals, then the area's objects; else among area A's. C set if found.
+\ The globals and the area's are the index's (src/logic/index.6502), with
+\ their ids: the area's from 0, then the globals', and FoundId put after
+\ the last stops each scan.
+ZA_AUTO2 lk
+.lookup
+{
+    ZA_AUTO1 n
+    CMP #0 : BNE other
+    LDA FoundId
+    LDX ix_n : STA ix_id,X                      ; (the stop)
+    LDX AreaObjects
+.global
+    CMP ix_id,X : BEQ global_is
+    INX
+    CMP ix_id,X : BEQ global_is
+    INX
+    BRA global
+.global_is
+    CPX ix_n : BNE indexed
+    LDX #0                                      ; not a global: the area's
+.area
+    CMP ix_id,X : BEQ area_is
+    INX
+    CMP ix_id,X : BEQ area_is
+    INX
+    BRA area
+.area_is
+    CPX AreaObjects : BCS none
+.indexed
+    LDA ix_pl,X : STA lk
+    LDA ix_ph,X : STA lk+1
+    SEC
+    RTS
+.other
+    JSR find_area : BCC none
+    LDA fa : CLC : ADC #&19 : STA lk
+    LDA fa+1 : ADC #0 : STA lk+1
+    LDY #1 : LDA (fa),Y
+.count
+    BEQ none
+    STA n
+.object
+    JSR is_it : BEQ found
+    JSR next_lk
+    DEC n : BNE object
+.none
+    CLC
+    RTS
+.found
+    SEC
+    RTS
+.is_it
+    LDY #7 : LDA (lk),Y : CMP FoundId
+    RTS
+.next_lk
+    LDY #8 : LDA (lk),Y
+    CLC : ADC lk : STA lk
+    BCC same
+    INC lk+1
+.same
+    RTS
+}
+
+\ place_rigs ($CD3B): the rig's five global parts, shown at the area's rig
+\ if it has one (RigPlaced), else hidden. An area from &13 on has none.
+RIG_PARTS = {&87A5, &87C0, &87CE, &87DE, &87EE}
+.place_rigs
+{
+    ZA_AUTO1 rig, rx, ry, rz
+    LDA #&40 : TRB FclBits+3
+    STZ rig
+    LDA AreaId : CMP #&13 : BPL none
+    LDA #&40 : TSB FclBits+3
+    \ (the load found the area, and tools/mklogicdata.py checks every
+    \ area's id is 1 to &7F, so AreaId is 1 to &12 here)
+    LDX AreaId : LDA RigPlaced-1,X : STA rig
+.none
+    LDA rig : BNE placed
+    LDA #&40
+    FOR i = 0..4
+        TSB zx(RIG_PARTS[i])
+    NEXT
+    RTS
+.placed
+    LDA AreaId : DEC A : STA rx
+    ASL A : ADC rx : TAX                         ; 3 cells an area
+    LDA RigPositions,X : STA rx
+    LDA RigPositions+1,X : STA ry
+    LDA RigPositions+2,X : STA rz
+    LDX #0 : LDA #2 : JSR put                   ; the base, 2 cells in
+    LDA ry : CLC : ADC #&0A : STA ry
+    LDX #zx(&87C0) - Globals : LDA #0 : JSR put
+    INC ry
+    LDX #zx(&87CE) - Globals : LDA #3 : JSR put
+    LDA rig : CMP #1 : BNE tall
+    LDA #&40
+    TSB zx(&87DE) : TSB zx(&87EE)
+    RTS
+.tall
+    LDA ry : CLC : ADC #8 : STA ry
+    LDX #zx(&87DE) - Globals : LDA #5 : JSR put
+    INC ry
+    LDX #zx(&87EE) - Globals : LDA #5
+    \ put: the part at Globals + X shown, at (rx + A, ry, rz + A)
+.put
+{
+    ZA_AUTO1 d
+    STA d
+    LDA Globals,X : AND #&BF : STA Globals,X
+    LDA rx : CLC : ADC d : STA Globals+1,X
+    LDA ry : STA Globals+2,X
+    LDA rz : CLC : ADC d : STA Globals+3,X
+    RTS
+}
+}
+
+\ load_area ($BE18): enter area AreaId: its objects, conditions, scale and
+\ the values scaled by it. Nothing more happens if there's no such area.
+.load_area
+{
+    STZ MinuteSeen : STZ MinuteCount
+    LDA #&40
+    TSB zx(&87FE) : TSB zx(&880E) : TSB zx(&881E)    ; three globals hidden
+    LDA #1 : STA AreaChanged : STA Wipe
+    LDA AreaId : JSR find_area : BCS found
+    RTS
+.found
+    LDA (fa) : STA AreaFlags
+    LDY #1 : LDA (fa),Y : STA AreaObjects
+    LDY #3 : LDA (fa),Y : CLC : ADC fa : STA AreaCondPtr
+    INY : LDA (fa),Y : ADC fa+1 : STA AreaCondPtr+1
+    LDY #5 : LDA (fa),Y : STA AreaScale
+    JSR area_step_units
+    LDA AreaScale : STA mul8.k
+    LDA FallLimit : JSR mul8 : STA FallLimitScaled
+    LDA ClimbLimit : JSR mul8 : STA ClimbLimitScaled
+    LDA ExtLevel : JSR mul8 : STA BodyHeight
+    LDA ExtMax : JSR mul8 : STA ExtMaxScaled
+    LDY #10
+.gas
+    LDA (fa),Y : STA AreaGas - 10,Y
+    INY : CPY #13 : BNE gas
+    JSR place_rigs
+    LDY #6
+.colours
+    LDA (fa),Y : STA AreaColours - 6,Y
+    INY : CPY #10 : BNE colours
+    LDA fa : CLC : ADC #13 : STA AreaNamePtr
+    LDA fa+1 : ADC #0 : STA AreaNamePtr+1
+    LDA fa : CLC : ADC #25 : STA AreaObjPtr
+    LDA fa+1 : ADC #0 : STA AreaObjPtr+1
+    JMP index_objects                           ; (the rig's parts placed too)
+}
+
+\ go_to_entrance ($9D1C): load area AreaId, then put the camera at entrance
+\ EntranceId: the cell's centre in x and z, the eye BodyHeight - 1 cells
+\ above the entrance's cell on the probe, the entrance's angles. With no
+\ object of that id (entrance 0 is one), the camera has crossed the area's
+\ edge: x cell 126 becomes 1 and 0 becomes 125, or else z likewise, and
+\ nothing else changes.
+.go_to_entrance
+{
+    JSR load_area
+    LDA EntranceId : STA FoundId
+    LDA #0 : JSR lookup : BCC wrapped
+    LDY #1 : LDA (lk),Y : JSR at_x
+    LDY #3 : LDA (lk),Y : JSR at_z
+    LDY #2 : LDA (lk),Y : STA CellY
+    LDX InJet : BNE eye
+    CLC : ADC BodyHeight : DEC A
+.eye
+    JSR centre : STA PlayerY : STX PlayerY+1
+    LDY #4 : LDA (lk),Y : STA Pitch
+    INY : LDA (lk),Y : STA Yaw
+    INY : LDA (lk),Y : STA Roll
+    RTS
+.wrapped
+    LDA CellX
+    CMP #&7E : BEQ x_first
+    CMP #0 : BEQ x_last
+    LDA CellZ
+    CMP #&7E : BEQ z_first
+    CMP #0 : BNE done
+    LDA #&7D : BRA at_z
+.z_first
+    LDA #1 : BRA at_z
+.x_first
+    LDA #1 : BRA at_x
+.x_last
+    LDA #&7D
+.at_x
+    STA CellX
+    JSR centre : STA PlayerX : STX PlayerX+1
+.done
+    RTS
+.at_z
+    STA CellZ
+    JSR centre : STA PlayerZ : STX PlayerZ+1
+    RTS
+    \ centre: A (low), X (high) = cell A's centre, (A << 6) + 32
+.centre
+{
+    ZA_AUTO1 hi
+    STZ hi
+    LSR A : ROR hi
+    LSR A : ROR hi
+    TAX
+    LDA hi : ORA #&20
+    RTS
+}
+}
