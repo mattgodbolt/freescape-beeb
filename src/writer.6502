@@ -105,20 +105,23 @@ NEXT
 }
 
 \ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
-\ pattern byte A. Keeps X.
+\ pattern byte A. Keeps X. It jumps into the row's run, whose planted RTS
+\ returns to put_run's caller. (A piece has whole bytes unless its first
+\ whole byte's slot is its plant's: (lo + 1) DIV 2 <= hi DIV 2 for lo < hi.)
 .put_run
 {
     STA r_v
     LDY r_hi : LDA rr_pl,Y
-    LDY r_lo : CMP rr_en,Y : BEQ none : BCC none
+    LDY r_lo : CMP rr_en,Y : BEQ none
     CMP r_pcur : BNE replant
 .go
     LDA rr_en,Y : STA jsr+1
     LDA r_y : AND #7 : TAY
     LDA r_v
 .jsr
-    JSR rr_rows                         ; patched: the piece's row and entry
-    ZA_CANCALL rr_rows
+    JMP rr_rows                         ; patched: the piece's row and entry
+    ZA_CANJUMP rr_rows
+    ZA_RETURN
 .none
     RTS
 .replant

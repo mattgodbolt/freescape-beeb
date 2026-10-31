@@ -232,6 +232,14 @@ def edge_scenes():
     out.append(scene("whole-view-twice", [(pattern(rng), jumble(rng, whole)), (pattern(rng), whole)], level, rng))
     out.append(scene("whole-behind-small", [(pattern(rng), [(400, 400), (900, 420), (600, 1000)]),
                                             (pattern(rng), whole)], level, rng))
+    # Gaps on the top line, then a face over them all from the first: its span
+    # fills the line's first gap and goes on through the rest (and the same
+    # on other lines, and with the first gap not at the left).
+    for name, y0 in (("top-line", 0), ("second-line", 16), ("last-line", YMAX - 40)):
+        faces = [(pattern(rng), [(80 * i + 100, y0), (80 * i + 140, y0), (80 * i + 120, y0 + 30)]) for i in range(8)]
+        faces.append((pattern(rng), [(60, y0), (1500, y0), (1500, min(YMAX, y0 + 400)), (60, min(YMAX, y0 + 400))]))
+        faces.append((pattern(rng), [(0, y0), (XMAX, y0), (XMAX, min(YMAX, y0 + 40)), (0, min(YMAX, y0 + 40))]))
+        out.append(scene(name, faces, level, rng))
     # Every line but the last full after the first face: the faces must go
     # on until the last is, and stop after.
     last = SUB * (VIEW_H - 1) + HALF

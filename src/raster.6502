@@ -372,13 +372,13 @@ MACRO INSERT k, next
     LDY GE,X : JSR put_bnd
 .right_even
     LDA r_pv + k : JSR put_run
-    LDA GN,X
     LDY r_prev : BNE unlink_mid
-    LDY r_y : STA head,Y : BNE unlinked
+    LDY r_y
+    LDA GN,X : STA head,Y : BNE unlinked     ; (Z from the LDA)
     DEC nopen                           ; the line's last gap: it's full
     JMP next
 .unlink_mid
-    STA GN,Y
+    LDA GN,X : STA GN,Y
 .unlinked
     \ On to the next gap if the span goes past this one.
     LDA r_hi : CMP r_b : BCS out2
