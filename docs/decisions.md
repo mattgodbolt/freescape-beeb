@@ -102,6 +102,18 @@ television blurs a dither as a real one does, and the patterns were chosen
 through a port of its shader (`tools/pal.py`), checked against the shader
 itself.
 
+## 8b. Patterns for each display (2026-10-31, Matt)
+
+Matt asked for PAL against RGB to be "something controllable outside":
+it is a different table of patterns, nothing else. The engine carries a
+table chosen for an RGB monitor, one for a PAL television and one for
+both (`make colours`; `tools/model/colours.py`'s `display`), copies the
+chosen display's patterns for the area into the row writer's live table
+on entering an area, and a key switches display and redraws. **The
+disc's default is PAL**: Matt's preference, the README's jsbeeb link,
+and a BBC on a television. The model's default is PAL too
+(`FREESCAPE_DISPLAY`).
+
 ## 8a. The background (2026-10-31, autonomous)
 
 The view is cleared to the sky, which is black in every area of the ST's
