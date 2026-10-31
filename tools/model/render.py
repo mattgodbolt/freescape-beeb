@@ -94,6 +94,13 @@ def draw_faces(cand, m, c, tally, check=False):
         if every_code:
             tally["faces_rejected"] += 1
             continue
+        if any(clip.outside_guard(v) for v in poly):
+            # (decision 17: so that no vertex projects past 16 bits)
+            poly = clip.guard_clip(poly)
+            tally["faces_guard_clipped"] += 1
+            if not poly:
+                tally["faces_rejected"] += 1
+                continue
         flat = [project(v) for v in poly]
         if s.line:
             # Widened, a line can reach past the view even when its ends don't.

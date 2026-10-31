@@ -33,10 +33,14 @@ def _agree():
     """The projection's constants are view.py's: a maths module that defines
     its own must define the same."""
     from tools.model import view
-    for name in ("FX", "FY", "XC", "YC", "ZNEAR"):
+    for name in ("FX", "FY", "XC", "YC"):
         if hasattr(maths, name) and getattr(maths, name) != getattr(view, name):
             raise ImportError("maths.%s is %r, view.%s %r" % (name, getattr(maths, name),
                                                               name, getattr(view, name)))
+    # The near clip may cut further out than the nearest Z the projection
+    # takes, not nearer.
+    if hasattr(maths, "ZNEAR") and view.ZNEAR < maths.ZNEAR:
+        raise ImportError("view.ZNEAR %r is nearer than maths.ZNEAR %r" % (view.ZNEAR, maths.ZNEAR))
 
 
 _agree()

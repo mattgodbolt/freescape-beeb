@@ -9,10 +9,20 @@ the results are integers like their inputs. There is no far plane.
 The frustum's side planes are tested exactly, before projection, only to
 throw away faces wholly outside one of them: a face so rejected would have
 clipped to nothing.
+
+A guard band keeps the projection in range. A vertex far to the side of
+a near one (|X| beyond about 25 Z) projects past what 16 bits hold, and a
+saturated vertex would bend the 2D clip's edges. So a face with a vertex
+outside |X| <= GUARD_X Z or |Y| <= GUARD_Y Z is first clipped against
+those planes in 3D, like the near plane. They lie well outside the view,
+so this is rare, and as powers of two they're shifts on the 6502.
 """
 from tools.model.view import FX, FY, SUB, VIEW_H, VIEW_W, XC, YC, ZNEAR
 
 NEAR, LEFT, RIGHT, TOP, BOTTOM = 1, 2, 4, 8, 16
+GUARD_X = 16                # |X| <= 16 Z: sx inside XC +- 16 FX
+GUARD_Y = 8                 # |Y| <= 8 Z: sy inside YC +- 8 FY
+assert XC + GUARD_X * FX < 1 << 15 and YC + GUARD_Y * FY < 1 << 15
 WIDTH = SUB * VIEW_W
 HEIGHT = SUB * VIEW_H
 
@@ -72,6 +82,51 @@ def _near_point(a, b, znear):
     return (a[0] + round_div((b[0] - a[0]) * t, dz),
             a[1] + round_div((b[1] - a[1]) * t, dz),
             znear)
+
+
+def outside_guard(v):
+    """Whether a camera-space vertex (in front of the near plane) is outside
+    the guard band."""
+    x, y, z = v
+    return abs(x) > GUARD_X * z or abs(y) > GUARD_Y * z
+
+
+def guard_clip(poly):
+    """A camera-space polygon (z >= ZNEAR throughout) clipped to the guard
+    band's four planes in 3D. A two-vertex polygon is a line, clipped as a
+    segment. New vertices are rounded to the nearest integer, half up."""
+    for axis, g in ((0, GUARD_X), (1, GUARD_Y)):
+        for sign in (1, -1):
+            if not poly:
+                return []
+            # inside: sign * v[axis] <= g * z; f(v) = g z - sign v[axis] >= 0
+            f = [g * v[2] - sign * v[axis] for v in poly]
+            if len(poly) == 2:
+                (a, b), (fa, fb) = poly, f
+                if fa < 0 and fb < 0:
+                    return []
+                if fa < 0 or fb < 0:
+                    cut = _plane_point(a, b, fa, fb)
+                    poly = [cut, b] if fa < 0 else [a, cut]
+                continue
+            out = []
+            n = len(poly)
+            for i in range(n):
+                a, b = poly[i], poly[(i + 1) % n]
+                fa, fb = f[i], f[(i + 1) % n]
+                if fa >= 0:
+                    out.append(a)
+                if (fa >= 0) != (fb >= 0):
+                    out.append(_plane_point(a, b, fa, fb))
+            poly = out
+    return poly
+
+
+def _plane_point(a, b, fa, fb):
+    """Where segment a-b crosses the plane on which f is zero (f(a) = fa,
+    f(b) = fb, of opposite signs)."""
+    d = fa - fb
+    return tuple(a[k] + round_div((b[k] - a[k]) * fa, d) for k in range(3))
 
 
 def _clip_edge(poly, axis, bound, keep_below):

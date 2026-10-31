@@ -119,3 +119,19 @@ colours, and `make colours` designs the BBC's patterns
 - `tools/pal.py`, the NumPy port of jsbeeb's PAL shader, differs from the
   shader itself (run in headless Chrome) by at most 1/255, in under 1% of
   bytes.
+
+## 2026-10-31: the maths (track F), and the guard band
+
+`src/maths.6502` and `src/project.6502` match `tools/model/maths.py` bit for
+bit (`make maths`; all 2^24 products checked once with `--full`). Measured
+that day (cycles with the JSR and RTS): a 16 × 8 product 80-123 (mean
+98) after `mul_set`'s 68; a three-term dot product 303-358 (mean 329) after
+`dot_set`; a projected vertex 441-598 (mean 508). Tables 3,328 bytes in
+HAZEL. `docs/research/maths.md` has the variants and their figures.
+
+Merging it showed the model's conservative-cull test failing. With the
+real projection, a vertex far to the side of a near one saturates its 16
+bits, and the 2D clip then cuts a wrong edge: culled objects hid it, and
+drawing without the cull showed it. Faces are now clipped in 3D to a
+guard band first (decision 17), and the test passes. The focal lengths are
+one rounded integer everywhere.

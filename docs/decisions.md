@@ -196,3 +196,23 @@ engine clips at `ZNEAR`, a few world units in front of it
 The engine's coarse cull is a test against the view's cone, not the
 original's box round the view's octant. It never removes an object that
 draws: checked over 10,920 camera orientations (journal, 2026-10-31).
+
+## 17. The projection, and a guard band (2026-10-31, autonomous)
+
+**The projection is a normalised reciprocal times quarter squares**, to
+sixteenths of a pixel (`docs/research/maths.md`): the case comes from Z's
+bit length, a 10-bit index looks up a 16-bit reciprocal, which is patched
+into the code once a vertex, then three byte products. It's within about
+2/16 of a pixel on the view, never goes backwards as X grows, and can step
+back a sixteenth as Z crosses a power of two. Against it: log and
+antilog tables (less precise for more table), and a real divide (slower).
+The original's focal length is rounded to whole sixteenths (`FX` = 1268,
+`FY` = 2 `FX`), so the clip and the projection share it; the projection
+takes any Z from one world unit, and the near clip cuts at four
+(decision 15). The tables go in HAZEL.
+
+**Faces are clipped in 3D to a guard band**, `|X| <= 16 Z` and
+`|Y| <= 8 Z`, when a vertex lies outside it (`tools/model/clip.py`). A
+vertex far to the side of a near one projects past 16 bits, and a
+saturated vertex bends the 2D clip's edges; the band is wide enough that
+few faces need it, and its planes are shifts on the 6502.

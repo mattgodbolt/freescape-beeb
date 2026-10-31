@@ -22,8 +22,10 @@ VIEW_W = VIEW_H = 104       # src/defs.6502
 # The original's focal length: 104 * 32 / 21 ZX pixels on both axes. Our
 # pixels are two ZX pixels wide and one high (decision 2).
 FOCAL_ZX = Fraction(104 * 32, 21)
-FX = FOCAL_ZX * SUB / 2     # about 1268 sixteenths
-FY = FOCAL_ZX * SUB         # about 2536
+# Rounded to whole sixteenths, so the clip's integer outcodes (clip.py)
+# and the projection share one focal length.
+FX = round(FOCAL_ZX * SUB / 2)      # 1268 sixteenths
+FY = 2 * FX
 XC = SUB * VIEW_W // 2      # the view's centre, in sixteenths
 YC = SUB * VIEW_H // 2
 

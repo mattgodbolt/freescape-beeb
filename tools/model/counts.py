@@ -43,7 +43,8 @@ KEYS = [
     "records", "not_drawn", "hidden", "culled_coarse", "no_faces", "considered",
     "culled_frustum", "drawn", "sort_comparisons",
     "vertices_transformed", "vertices_projected",
-    "faces_seen", "faces_rejected", "faces_near_clipped", "faces_clipped_2d", "faces_drawn",
+    "faces_seen", "faces_rejected", "faces_near_clipped", "faces_guard_clipped", "faces_clipped_2d",
+    "faces_drawn",
     "face_lines", "face_lines_open", "face_runs", "lines_full",
     "runs", "joins", "bytes",
 ]

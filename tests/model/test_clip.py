@@ -83,3 +83,29 @@ class Rect(unittest.TestCase):
     def test_widened(self):
         self.assertEqual(clip.line_quad((0, 8), (64, 8)), [(0, 0), (64, 0), (64, 16), (0, 16)])
         self.assertEqual(clip.point_square((24, 40)), [(16, 32), (32, 32), (32, 48), (16, 48)])
+
+
+class Guard(unittest.TestCase):
+    """The guard band (decision 17): what's clipped to it projects inside
+    16 bits, and what's inside it is untouched."""
+
+    def test_inside_untouched(self):
+        poly = [(100, 50, 1000), (-200, 30, 2000), (0, -400, 900)]
+        self.assertFalse(any(clip.outside_guard(v) for v in poly))
+        self.assertEqual(clip.guard_clip(poly), poly)
+
+    def test_far_side_vertex_clipped_into_range(self):
+        from tools.model import parts
+        rng = random.Random(17)
+        for _ in range(2000):
+            poly = [(rng.randint(-1 << 20, 1 << 20), rng.randint(-1 << 19, 1 << 19),
+                     rng.randint(ZNEAR, 1 << 16)) for _ in range(rng.randint(2, 5))]
+            out = clip.guard_clip(poly)
+            for x, y, z in out:
+                self.assertGreaterEqual(z, ZNEAR)
+                # within the band, give or take the rounding of a new vertex
+                self.assertLessEqual(abs(x), clip.GUARD_X * z + clip.GUARD_X)
+                self.assertLessEqual(abs(y), clip.GUARD_Y * z + clip.GUARD_Y)
+                sx, sy = parts.project(x, y, z)
+                self.assertLess(abs(sx), (1 << 15) - 1)
+                self.assertLess(abs(sy), (1 << 15) - 1)
