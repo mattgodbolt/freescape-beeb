@@ -261,7 +261,7 @@ const SCHED = m.sym("CHK_SCHED");
     const per = Math.floor((TOP - BUF) / SCHED);
     const summary = {};
     for (const how of ["each", "columns", "shared"]) {
-        const perVertex = [], perView = [], ops = [0, 0, 0];
+        const perVertex = [], perView = [], ops = [0, 0, 0], byOp = [[], [], []];
         for (const view of views) {
             const recs = schedule(view.objects, how);
             let total = 0;
@@ -276,7 +276,7 @@ const SCHED = m.sym("CHK_SCHED");
                 const out = m.read(BUF, chunk.length * SCHED);
                 chunk.forEach(([op, x, y, z, wx, wy], i) => {
                     const c = t[2 * i + 1] - t[2 * i];
-                    perVertex.push(c); total += c; ops[op]++;
+                    perVertex.push(c); total += c; ops[op]++; byOp[op].push(c);
                     const o = out.slice(i * SCHED + 10, i * SCHED + 14);
                     const sx = s16(o.slice(0, 2)), sy = s16(o.slice(2, 4));
                     if (sy !== wy || (op !== 2 && sx !== wx)) fail(`${view.view} ${how} op ${op} ${x} ${y} ${z}: (${sx}, ${sy}), want (${wx}, ${wy})`);
@@ -287,8 +287,10 @@ const SCHED = m.sym("CHK_SCHED");
         const med = (a) => { const s = [...a].sort((p, q) => p - q), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2; };
         summary[how] = { perVertex, perView, ops };
         console.log(`  ${how.padEnd(8)} a vertex: median ${med(perVertex)}, mean ${(perVertex.reduce((p, q) => p + q, 0) / perVertex.length).toFixed(1)}, max ${Math.max(...perVertex)}; ` +
-            `a view: median ${med(perView)}, max ${Math.max(...perView)}; ` +
-            `${ops[0]} by project, ${ops[1]} by project_z, ${ops[2]} by project_y`);
+            `a view: median ${med(perView)}, max ${Math.max(...perView)}`);
+        const names = ["project", "project_z", "project_y"];
+        console.log("           " + byOp.map((a, k) => a.length ? `${a.length} by ${names[k]} (median ${med(a)}, max ${Math.max(...a)})` : "")
+            .filter((s) => s).join(", "));
     }
     console.log(`  (the ${views.length} entrance views' ${summary.each.perVertex.length} projected vertices, cycles from each JSR to its return)`);
 }

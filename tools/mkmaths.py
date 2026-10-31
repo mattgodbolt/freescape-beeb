@@ -199,7 +199,7 @@ def variant(ibits=10, rbits=8, bias=1):
         r, k = table[m._shr(Z, n - ibits) - zi0]
         t = n - ibits + k
         return (m.XC + (m._shr(X, t) * r >> rbits) + bias,
-                m.YC - (m._shr(Y, t - 1) * r >> rbits) - bias)
+                m.YC + (~m._shr(Y, t - 1) * r >> rbits) + bias)
     return p
 
 
@@ -246,25 +246,31 @@ SURVEYED = [
 def survey(n=100000, seed=7):
     """The projection methods' errors against exact division, in
     sixteenths, over Driller's depths (docs/research/projection.md): each
-    method's worst and mean on the view (|X| <= 0.656 Z, the view's
-    half-width), its worst for |X| <= 4 Z and 16 Z, and how often it goes
-    backwards as X or Z grows."""
+    method's worst and mean on the view (|X| <= 0.656 Z and |Y| <= 0.328
+    Z, the view's half-width and half-height), x's worst for |X| <= 4 Z
+    and 16 Z, and how often x goes backwards as X or Z grows."""
     import random
     m = maths
     depth = (m.ZNEAR, 742000)
+    lim = m.ZLIMIT - 1
     assert variant()(12345, -678, 98765) == m.project(12345, -678, 98765)
     for name, make in SURVEYED:
         p = make()
         rnd = random.Random(seed)
-        worst, mean = {}, 0
+        worst, mean, yworst, ymean = {}, 0, 0, 0
         for band in (0.656, 4, 16):
             w = 0
             for _ in range(n):
                 z = int(depth[0] * (depth[1] / depth[0]) ** rnd.random())
-                x = rnd.randint(-int(band * z), int(band * z))
-                e = abs(p(x, 0, z)[0] - m.XC - m.FX * x / z)
+                a = min(lim, int(band * z))
+                x = rnd.randint(-a, a)
+                y = rnd.randint(-int(0.328 * z), int(0.328 * z))
+                sx, sy = p(x, y, z)
+                e = abs(sx - m.XC - m.FX * x / z)
                 w = max(w, e)
-                mean += e if band < 1 else 0
+                if band < 1:
+                    ey = abs(sy - m.YC + m.FY * y / z)
+                    mean, ymean, yworst = mean + e, ymean + ey, max(yworst, ey)
             worst[band] = w
         back_x = back_z = 0
         for _ in range(200):
@@ -280,8 +286,9 @@ def survey(n=100000, seed=7):
                 v = p(x, 0, z)[0]
                 back_z += prev is not None and v > prev
                 prev, z = v, z + max(1, z // 2000)
-        print(f"{name:50} view {worst[0.656]:5.2f} (mean {mean / n:4.2f}), 4Z {worst[4]:6.2f}, "
-              f"16Z {worst[16]:6.2f}; backwards in X {back_x}, in Z {back_z}")
+        print(f"{name:50} view x {worst[0.656]:5.2f} (mean {mean / n:4.2f}), y {yworst:5.2f} "
+              f"(mean {ymean / n:4.2f}); x 4Z {worst[4]:6.2f}, 16Z {worst[16]:6.2f}; "
+              f"backwards in X {back_x}, in Z {back_z}")
 
 
 def flicker(step=2, frames=40):
