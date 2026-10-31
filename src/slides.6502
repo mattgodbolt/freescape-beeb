@@ -196,16 +196,20 @@ FIXED_BYTES = P% - fixed_text
 \ before for a key, or the next once this one has been held slide_hold
 \ fields. SPACE, cursor right and cursor down step on, cursor left and up
 \ back.
-ASSERT K_CUR_UP DIV 8 = K_CUR_LEFT DIV 8 AND K_CUR_DOWN DIV 8 = K_CUR_UP DIV 8 AND K_CUR_RIGHT DIV 8 = K_CUR_UP DIV 8
-ASSERT K_MODE DIV 8 <> K_CUR_UP DIV 8
+\ The keys are the ZX's half-rows (src/input.6502): the cursor keys read as
+\ the ZX's 5 (left), 6 (down), 7 (up) and 8 (right).
+ASSERT K_6 DIV 8 = K_7 DIV 8 AND K_8 DIV 8 = K_7 DIV 8
+ASSERT K_5 DIV 8 <> K_7 DIV 8 AND K_SPACE DIV 8 <> K_7 DIV 8 AND K_SPACE DIV 8 <> K_5 DIV 8
 .slide_keys
 {
-    ZA_AUTO1 space, cursor
-    LDX #K_MODE DIV 8 : JSR key_take : STA space
-    LDX #K_CUR_UP DIV 8 : JSR key_take : STA cursor
-    LDA space : AND #1 << (K_MODE AND 7) : BNE next
-    LDA cursor : AND #(1 << (K_CUR_RIGHT AND 7)) OR (1 << (K_CUR_DOWN AND 7)) : BNE next
-    LDA cursor : AND #(1 << (K_CUR_LEFT AND 7)) OR (1 << (K_CUR_UP AND 7)) : BNE back
+    ZA_AUTO1 space, cursor, left
+    LDX #K_SPACE DIV 8 : JSR key_take : STA space
+    LDX #K_7 DIV 8 : JSR key_take : STA cursor
+    LDX #K_5 DIV 8 : JSR key_take : STA left
+    LDA space : AND #1 << (K_SPACE AND 7) : BNE next
+    LDA cursor : AND #(1 << (K_8 AND 7)) OR (1 << (K_6 AND 7)) : BNE next
+    LDA cursor : AND #1 << (K_7 AND 7) : BNE back
+    LDA left : AND #1 << (K_5 AND 7) : BNE back
     \ held long enough?
     LDA slide_fresh : BNE stay
     LDA slide_hold : BEQ stay
