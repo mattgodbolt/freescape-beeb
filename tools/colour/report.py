@@ -7,6 +7,7 @@ sky and ground table carries the originals' colours, so it stays in build/.
 """
 
 import json
+import os
 import sys
 
 VERSIONS = ["dos", "cpc", "st", "amiga"]
@@ -84,6 +85,37 @@ def main(src_path, study_path, out_path):
                          f"{r['mean']:.1f}, {r['worst']:.1f} / "
                          f"{p['mean']:.1f}, {p['worst']:.1f}")
         w(f"| {aid} | {a['name']} | " + " | ".join(cells) + " |")
+    w("")
+
+    w("## Carrying a table for each display\n")
+    tables = {}
+    for d in FOR:
+        path = os.path.join(os.path.dirname(study_path), f"bbc-{d}.json")
+        tables[d] = json.load(open(path))["areas"]
+    n_areas = len(src["areas"])
+    full = 4 * 17 * n_areas
+    bare = 4 * 15 * n_areas
+    pool = {tuple(p) for t in tables.values() for e in t.values()
+            for p in e["patterns"] + [e["sky"], e["ground"]]}
+    differ = {(a, b): sum(tables[a][k]["patterns"][i] != tables[b][k]["patterns"][i]
+                          for k in tables[a] for i in range(15))
+              for a, b in (("rgb", "pal"), ("rgb", "both"), ("pal", "both"))}
+    sky_black = all(e["sky"] == [0, 0, 0, 0] for t in tables.values()
+                    for e in t.values())
+    ground_floor = all(e["ground"] == (e["patterns"][e["ground_index"] - 1]
+                                       if e["ground_index"] else e["sky"])
+                       for t in tables.values() for e in t.values())
+    w(f"- A table: {n_areas} areas of 15 patterns, a sky and a ground, four "
+      f"bytes each: {full} bytes; {3 * full} for all three.")
+    w(f"- The sky is black in every area of every table: {sky_black}. The "
+      f"ground is its floor index's pattern, or the sky's without a floor: "
+      f"{ground_floor}. So 15 patterns an area carry it all: {bare} bytes "
+      f"a table, {3 * bare} for three.")
+    w(f"- Distinct patterns across the three tables: {len(pool)}; as a "
+      f"shared pool and a byte an index, {4 * len(pool)} + "
+      f"{3 * 15 * n_areas} = {4 * len(pool) + 3 * 15 * n_areas} bytes.")
+    w("- Entries (area and index, of " + f"{15 * n_areas}" + ") that differ: "
+      + ", ".join(f"{a} and {b} {n}" for (a, b), n in differ.items()) + ".")
     w("")
 
     w("## Sky and ground\n")

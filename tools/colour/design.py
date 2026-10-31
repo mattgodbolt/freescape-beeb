@@ -13,7 +13,9 @@ Every choice is then seen on both displays. It writes:
   the RGB monitor's;
 - OUTDIR/bbc-VERSION-FOR.json: that version's patterns in the chosen
   scheme, chosen for display FOR;
-- OUTDIR/bbc.json: the one the model uses (CHOSEN and patterns.DISPLAY).
+- OUTDIR/bbc-FOR.json: the model's tables, one for each display (CHOSEN's
+  version and scheme), which tools/model/colours.py reads and the engine
+  carries, to switch between.
 
 A bbc json holds, for each area id, "patterns": 15 patterns for indices
 1-15 (index 0 is never drawn), then "sky" and "ground", each four MODE 2
@@ -38,8 +40,8 @@ SCHEMES = ["solid", "bayer2", "pair", "triple"]
 VARIANTS = {"solid": ("solid", False), "bayer2": ("bayer2", True),
             "pair-nearest": ("pair", False), "pair": ("pair", True),
             "triple": ("triple", True)}
-# The model's source and scheme: decision 8 as proposed. The display they
-# are chosen for is patterns.DISPLAY.
+# The model's source and scheme (decision 8). It has a table for each
+# display; which one shows is the model's and the engine's choice.
 CHOSEN = ("st", "triple")
 CHOOSE_FOR = ("rgb", "pal", "both")
 SEEN_ON = ("rgb", "pal")
@@ -125,6 +127,10 @@ def choose(cols, used, cands, distinct=True, display=None):
             for k in g:
                 out[k] = (cands[j],
                           float(P.scores(targets[k], cands, display)[1][j]))
+    # The ground is the floor's top face (decision 8a): its pattern.
+    floor = cols.get("ground_index")
+    if floor in out:
+        out["ground"] = out[floor]
     for k in targets:
         if k not in out:
             out[k] = P.best(targets[k], cands, display)
@@ -283,8 +289,8 @@ def main(src_path, outdir):
             t = table_json(src, v, tables[(d, v, CHOSEN[1])], scheme, d)
             with open(os.path.join(outdir, f"bbc-{v}-{d}.json"), "w") as f:
                 json.dump(t, f, indent=1)
-            if v == CHOSEN[0] and d == P.DISPLAY:
-                with open(os.path.join(outdir, "bbc.json"), "w") as f:
+            if v == CHOSEN[0]:
+                with open(os.path.join(outdir, f"bbc-{d}.json"), "w") as f:
                     json.dump(t, f, indent=1)
 
 
