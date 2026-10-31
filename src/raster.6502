@@ -96,6 +96,7 @@ SECTION RasterState
 .bg_was     SKIP 256
 .bg_sig     SKIP 16
 .f_dir      SKIP 1                  ; the way the last face's left chain walked
+.hz_sky     SKIP 1                  ; hsplit holds the all-sky splits
 ENDSECTION
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * 256
@@ -157,6 +158,7 @@ SECTION RasterCode
 .normed
     STA nrm,X
     INX : BNE shift
+    STZ hz_sky
     JSR raster_forget
     JMP writer_init
 }
@@ -166,10 +168,12 @@ SECTION RasterCode
 {
     ZA_ENTRY
     ZA_AUTO1 f
-    LDX #VIEW_H - 1
+    LDX #VIEW_H DIV 8 - 1
     LDA #UNTOUCHED
 .heads
-    STA head,X
+    FOR i = 0..7
+        STA head + i * (VIEW_H DIV 8),X
+    NEXT
     DEX : BPL heads
     LDA #1
     FOR k = 0..3
@@ -947,13 +951,16 @@ ASSERT VIEW_H <= BG_SCREEN
 \ forget_screen: no line of the screen whose records start at X is known.
 .forget_screen
 {
-    LDY #VIEW_H
+    LDY #VIEW_H DIV 8
     LDA #0
 .line
-    STA bg_was,X
+    FOR i = 0..7
+        STA bg_was + i * (VIEW_H DIV 8),X
+    NEXT
     INX : DEY : BNE line
     RTS
 }
+ASSERT VIEW_H MOD 8 = 0
 
 \ The gap [g_s, g_e), its neighbours' halves in g_h, split at bg_split,
 \ with phase k's patterns. Keeps X.
@@ -1075,6 +1082,7 @@ ZA_AUTO 4, hz_n
     LDA rs_sky : STA bg_l
     LDA rs_ground : STA bg_r
     LDA rs_horizon : BEQ all_sky
+    STZ hz_sky
     LDA rs_hdy : BNE sloping
     \ Level: a line is ground when its centre is on the horizon or on the
     \ ground's side, so with hdx > 0 ground starts at the first centre at or
@@ -1112,6 +1120,9 @@ ZA_AUTO 4, hz_n
     STA hsplit,X
     INX : BRA bottom
 .all_sky
+    \ (No more to do if the last frame was all sky too, as Driller's are.)
+    LDA hz_sky : BNE done
+    DEC hz_sky
     LDA #VIEW_W
     LDX #VIEW_H - 1
 .sky
