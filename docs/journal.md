@@ -70,3 +70,28 @@ a redraw takes a median of 2,293,923 T-states (0.66s), from 670,879 to
 4,273,507 over the 65 views. Projection is 63% of it, the sort 11% and
 drawing 26%. The start view matches the frame the game drew at boot byte
 for byte.
+
+## 2026-10-31: the data and the Python model (track E)
+
+`tools/freescape.py` reads Driller's database straight off the ZX tape
+(`make data`, with its checks). `tools/model/` renders any view with the
+6502's integer arithmetic (`docs/research/model.md` has the conventions),
+with the maths, the rasteriser and writer, and the colours as stand-ins
+until their tracks land (`tools/model/parts.py` switches).
+
+Checked that day against the original (`make model-zx`, `make
+model-check`):
+
+- every entrance's camera lands where the game puts it;
+- the objects drawn agree in 64 of the 65 views (area 27's entrance 22
+  draws one extra sliver);
+- 99.95% of pixels away from edges agree with the original's images;
+- the projected vertices are within 13/16 of a pixel of a floating-point
+  reference in the entrance views, and within 4 pixels over every yaw with
+  pitch and roll, all of it from the byte matrix the original shares.
+
+The work a view takes, over the 65 entrance views (median, 90th
+percentile, maximum): objects drawn 10, 15, 19; vertices transformed 63,
+92, 121; vertices projected 43, 70, 99; faces drawn 14, 25, 36;
+face-lines 249, 521, 878; runs written 302, 495, 951; bytes where two
+runs meet 94, 173, 424.

@@ -17,11 +17,19 @@ one does; jsbeeb's settings switch it to an RGB monitor), or write
 shadow RAM with the flip at the vertical sync, and draws a moving test
 pattern where the 3D view will go. Driller's own
 ZX code runs headless as the oracle and draws every entrance view, so the
-engine has its reference. The Python model of the renderer, the maths,
-the span buffer and row writer, and the colours are being built in
+engine has its reference. The Python model of the renderer, which the 6502
+must match byte for byte, renders all of Driller's entrance views and
+agrees with the original's. The maths, the span buffer and row writer, the
+object pipeline, the colours and the player's movement are being built in
 parallel. `docs/journal.md` has the story as it goes.
 
 ![The disc today: MODE 2's eight colours in the view's place, double-buffered](docs/images/disc_testcard.png)
+
+![The model's render of two Driller views, in placeholder colours at MODE 2's half width (left), beside Driller's own ZX drawing of them (right)](docs/images/model_vs_zx.png)
+
+*Left: the Python model's render of two of Driller's entrance views, in
+placeholder colours at MODE 2's half width. Right: Driller's own ZX code
+drawing the same views, run headless. Driller is Incentive Software's.*
 
 ## How it works
 

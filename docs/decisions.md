@@ -83,6 +83,12 @@ share its layout).
 
 Open: the colour study (`docs/research/colour.md`) proposes it.
 
+## 8a. The background
+
+Open, with decision 8: the ZX clears the view to its paper colour and has
+no ground; the colour versions are being read for a sky and a ground. The
+rasteriser takes a horizon either way (`docs/engine.md`, section 9).
+
 ## 9. Where the screen sits (2026-10-31, autonomous)
 
 The screen sits where MOS 3.20 puts MODE 2 at `*TV 0,1`: the CRTC's
@@ -131,3 +137,30 @@ version than a pixel correct one." So the oracle checks the model's views
 against the original's within a tolerance at edges, and speed wins
 wherever exactness against the original would cost it. The 6502 still
 matches the model byte for byte.
+
+## 13. Which faces are drawn (2026-10-31, autonomous)
+
+A face is drawn when the camera is on its front side by an exact test
+against its plane in world space; the original decides from the turn of
+the face's first three projected points (`docs/research/model.md`).
+The two disagree only on faces seen edge-on or smaller than a pixel: over
+the 65 entrance views, 891 faces drawn against the original's 892.
+
+## 14. Lines and sensors (2026-10-31, autonomous)
+
+A line is drawn as a quadrilateral a pixel wide, and a sensor as a single
+pixel, so both go through the one rasteriser. The original draws sensors
+(ScummVM doesn't) and sorts them with the objects, and so does the
+engine.
+
+## 15. A near plane (2026-10-31, autonomous)
+
+The original's view volume is a pyramid with its apex at the eye; the
+engine clips at `ZNEAR`, a few world units in front of it
+(`tools/model/view.py`), so the projection never divides by a tiny `Z`.
+
+## 16. The coarse cull (2026-10-31, autonomous)
+
+The engine's coarse cull is a test against the view's cone, not the
+original's box round the view's octant. It never removes an object that
+draws: checked over 10,920 camera orientations (journal, 2026-10-31).
