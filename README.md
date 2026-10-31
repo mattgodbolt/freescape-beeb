@@ -20,28 +20,32 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 ## Where it's up to
 
-*2026-10-31.* The disc boots into MODE 2, double-buffered in main and
-shadow RAM with each frame shown as soon as the beam has left the view,
-and draws a moving test pattern where the 3D view will go. Driller's own
-ZX code runs headless as the oracle and draws every entrance view, so the
-engine has its reference. The Python model of the renderer, which the 6502
-must match byte for byte, renders all of Driller's entrance views and
-agrees with the original's, in the ST's colours. The maths is built and
-checked on the 6502. Driller's player logic (the keys, moving and
-colliding, climbing and falling, the jet, and the FCL that joins the
-areas) is transcribed in Python and checked pass by pass against the
-original. The span buffer and row writer draw Driller's views on the
-6502 exactly as the model does, and are being made faster; the object
-pipeline, a faster projection and the 6502 player logic are being built
-in parallel. `docs/journal.md` has the story as it goes.
+*2026-10-31.* **The disc draws Driller's views on the BBC itself.** It's a
+slideshow of all 65 of Driller's entrance views: each view's faces are
+worked out ahead of time by the Python model, and the Master's own
+rasteriser and row writer draw them into MODE 2 every frame,
+double-buffered, flipping as soon as the beam leaves the view. Every frame
+it draws matches the model byte for byte. SPACE or the cursor keys step
+between views, and the screen shows the frame rate as it's measured.
+
+![The disc: the Master drawing three of Driller's views, through PAL](docs/images/disc_slides.png)
+
+*The disc in jsbeeb through PAL: the Master drawing three of Driller's
+entrance views itself. Driller is Incentive Software's.*
+
+It's correct and not yet fast: a frame takes a median of about three
+fields. The rest of the renderer (the object pass, the transform, the
+projection and the clips) is built in 6502 and matches the model exactly
+too, and every stage is now being made fast. Driller's own ZX code runs
+headless as the oracle, and Driller's player logic is transcribed and
+checked pass by pass against it, with its 6502 version under way.
+`docs/journal.md` has the story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
 
 *Nine of Driller's 65 entrance views from the model, through PAL: the
 MODE 2 dithers blend on a television as they would on a real one. Driller
 is Incentive Software's.*
-
-![The disc today: MODE 2's eight colours in the view's place, double-buffered](docs/images/disc_testcard.png)
 
 ![Two Driller views: the original's ZX drawing, the model's MODE 2 render in the ST's colours, and the same through PAL](docs/images/model_views.png)
 

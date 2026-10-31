@@ -266,3 +266,15 @@ only a build option (`-D VSYNC_FLIP=TRUE`).
 
 Anything drawn outside the view must then be the same in both buffers at
 every flip (`docs/engine.md`, section 1, has the two ways).
+
+## 22. The slideshow disc (2026-10-31, autonomous)
+
+Until the renderer's front end is fast, the public disc draws
+precomputed raster inputs for Driller's 65 entrance views, not the game:
+the model works out each view's faces, and the Master draws them itself.
+The rasteriser lives in bank 4 and the views in banks 5 and 6, loaded by
+`*SRLOAD ... Q`; the text is the MOS's font (read through OSWORD 10), 16
+characters a line, kept the same in both buffers. Each view is held for 100
+fields, and the figures shown are the mean since it came up, refreshed
+every 25 fields. It gives way to the real thing as soon as the pipeline is
+whole.

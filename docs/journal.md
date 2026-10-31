@@ -268,3 +268,20 @@ band 59K, the 2D clip 48K, outcodes 35K, the projection 25K, an area test
 model's clipping where the picture stays as good: reciprocal tables for
 crossings, outcodes from projected vertices, and the area's floor drawn as
 the horizon instead of as a face.
+
+## 2026-10-31: the first disc that draws Driller (track K)
+
+`freescape.ssd` is now a slideshow: `tools/mkslides.py` takes each of the 65
+entrance views' raster inputs from the model, `!BOOT` loads the
+rasteriser into bank 4 and the views into banks 5-6 (`*SRLOAD ... Q`), and
+`src/slides.6502` draws the current view every frame, holding each for 100
+fields, with the area's name and the measured frame rate drawn in the
+MOS's font below the view, in both buffers inside the beam's window
+(decision 21). `make slides` checks it: all 65 views shown, 2,011 frames
+each the model's view byte for byte, both buffers the same outside the view
+at every flip, the text against the font, and the keys.
+
+Measured that day, flipping at the view's end: a median of 3.2 fields a
+frame over every frame (15.65 frames a second), the worst 12.9; views'
+medians from 1.05 (Beryl, entrance 25) to 10.18 (Stores, entrance 7).
+`raster_frame` takes a median of 126,253 cycles, the worst 401,680.
