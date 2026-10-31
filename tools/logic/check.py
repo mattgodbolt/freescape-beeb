@@ -12,6 +12,10 @@ every variable in tools/logic/state.py and the whole database must be the
 same on both sides; the "sync" variables are taken from the original as
 each pass starts.
 
+--fix-corner runs the transcription with decision 18's fix
+(tools/logic/move.py's FIX_CORNER), to see what the fix changes against
+the original: only walks that meet the corner bug should differ.
+
 --fuzz runs N random walks: a random entrance, then random movement keys,
 one to three held a pass, and now and then a minute. A failing walk is
 written to DIR (tests/logic/fuzz-<seed>.txt by default) as a scenario.
@@ -26,7 +30,7 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from logic import fcl, scenario  # noqa: E402
+from logic import fcl, move, scenario  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.move import Freeze  # noqa: E402
 from logic.oracle import Original, SCRIPT, Waiting  # noqa: E402
@@ -247,8 +251,10 @@ def main():
     ap.add_argument("--passes", type=int, default=60)
     ap.add_argument("--keep", default="tests/logic")
     ap.add_argument("--arith", type=int, metavar="N", help="check the multiplies and divide too")
+    ap.add_argument("--fix-corner", action="store_true", help="decision 18's fix on (move.FIX_CORNER)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    move.FIX_CORNER = args.fix_corner
     bad = 0
     if args.arith:
         from logic.arith import _check

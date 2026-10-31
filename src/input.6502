@@ -7,64 +7,78 @@
 \ took that byte). The logic reads keys as it is: the interrupt writes
 \ each byte whole.
 \
-\ The keys are Driller's own (ScummVM's Driller keymap,
-\ games/driller/driller.cpp and movement.cpp, the 8-bit versions' keys),
-\ all of which the BBC has, and the BBC's cursor keys and COPY as the
-\ ZX's cursor-key joystick and its fire, kept apart (K_CUR_*) for the
-\ logic to read as Driller reads a joystick: moving, or the sight in its
-\ cursor mode.
+\ The keys are Driller's own, the ZX's (decision 10, from its key table in
+\ docs/research/zx-logic.md), and the bitmap is the ZX's keyboard: byte r
+\ is the ZX's half-row r (ports &FEFE to &7FFE) and bit b its key b, as
+\ the original reads them (CPL AND &1F), so the logic takes them in the
+\ ZX's order (decision 19; src/logic/pass.6502). K_x is the ZX's key x.
+\ Each BBC key is the ZX key of the same name, but ESCAPE, which is the
+\ ZX's 1 (the information screen's key), and COPY and the cursor keys,
+\ which are the ZX's cursor joystick: 0 fires, and 5, 6, 7 and 8 are left,
+\ down, up and right.
 \
 \ The interrupt leaves port A as the sound chip wants it (the keyboard on
 \ auto-scan, the port an output).
 \ ***************************************************************************
 
-    \ the turns and looks
-K_FORWARD    = 0            ; O
-K_BACK       = 1            ; K
-K_TURN_LEFT  = 2            ; Q
-K_TURN_RIGHT = 3            ; W
-K_LOOK_UP    = 4            ; P
-K_LOOK_DOWN  = 5            ; L
-K_ROLL_LEFT  = 6            ; N
-K_ROLL_RIGHT = 7            ; M
-    \ the rest of the moves, and the steps' and turns' sizes
-K_RISE       = 8            ; R: rise, or fly up in the jet
-K_FALL       = 9            ; F: lower, or fly down
-K_UTURN      = 10           ; U
-K_FIRE       = 11           ; 0, 5 or COPY
-K_ANGLE_UP   = 12           ; A: a bigger turn
-K_ANGLE_DOWN = 13           ; Z
-K_STEP_UP    = 14           ; S: a bigger step
-K_STEP_DOWN  = 15           ; X
-    \ the game's commands
-K_DRILL      = 16           ; D: deploy a rig
-K_COLLECT    = 17           ; C: collect it
-K_MODE       = 18           ; SPACE: movement or the sight
-K_INFO       = 19           ; I: the information screen
-K_SOUND      = 20           ; T
-K_ESCAPE     = 21           ; ESCAPE: the ZX's 1, out of the game
-    \ the cursor keys, the ZX's cursor joystick
-K_CUR_UP     = 24
-K_CUR_DOWN   = 25
-K_CUR_LEFT   = 26
-K_CUR_RIGHT  = 27
-KEYS_BYTES   = 4
+\ The ZX's keyboard (tools/logic/passes.py's MATRIX): K_x = 8 * its
+\ half-row + its bit.
+    \ &FEFE: CAPS Z X C V
+K_Z     = 0 * 8 + 1         ; the turn's size down
+K_X     = 0 * 8 + 2         ; the step's size down
+K_C     = 0 * 8 + 3         ; collect a rig
+    \ &FDFE: A S D F G
+K_A     = 1 * 8 + 0         ; the turn's size up
+K_S     = 1 * 8 + 1         ; the step's size up
+K_D     = 1 * 8 + 2         ; drill
+K_F     = 1 * 8 + 3         ; fall
+    \ &FBFE: Q W E R T
+K_Q     = 2 * 8 + 0         ; turn left
+K_W     = 2 * 8 + 1         ; turn right
+K_R     = 2 * 8 + 3         ; rise
+K_T     = 2 * 8 + 4         ; (nothing in play)
+    \ &F7FE: 1 2 3 4 5
+K_1     = 3 * 8 + 0         ; the information screen's
+K_5     = 3 * 8 + 4         ; cursor left: turn left
+    \ &EFFE: 0 9 8 7 6
+K_0     = 4 * 8 + 0         ; fire
+K_8     = 4 * 8 + 2         ; cursor right: turn right
+K_7     = 4 * 8 + 3         ; cursor up: forward
+K_6     = 4 * 8 + 4         ; cursor down: back
+    \ &DFFE: P O I U Y
+K_P     = 5 * 8 + 0         ; look up
+K_O     = 5 * 8 + 1         ; forward
+K_I     = 5 * 8 + 2         ; information
+K_U     = 5 * 8 + 3         ; turn round
+K_Y     = 5 * 8 + 4         ; (nothing in play)
+    \ &BFFE: ENTER L K J H
+K_L     = 6 * 8 + 1         ; look down
+K_K     = 6 * 8 + 2         ; back
+    \ &7FFE: SPACE SYM M N B
+K_SPACE = 7 * 8 + 0         ; shooting mode
+K_M     = 7 * 8 + 2         ; roll
+K_N     = 7 * 8 + 3         ; roll the other way
+K_B     = 7 * 8 + 4         ; the crosshair
+KEYS_BYTES = 8              ; the ZX's half-rows
 
 \ Each BBC key read (its internal key number, row * 16 + column) and the
-\ key it is. A K_ may have more than one.
+\ ZX key it is. A K_ may have more than one.
 KEY_MAP = {
-    {&36, K_FORWARD}, {&46, K_BACK}, {&10, K_TURN_LEFT}, {&21, K_TURN_RIGHT},
-    {&37, K_LOOK_UP}, {&56, K_LOOK_DOWN}, {&55, K_ROLL_LEFT}, {&65, K_ROLL_RIGHT},
-    {&33, K_RISE}, {&43, K_FALL}, {&35, K_UTURN},
-    {&27, K_FIRE}, {&13, K_FIRE}, {&69, K_FIRE},
-    {&41, K_ANGLE_UP}, {&61, K_ANGLE_DOWN}, {&51, K_STEP_UP}, {&42, K_STEP_DOWN},
-    {&32, K_DRILL}, {&52, K_COLLECT}, {&62, K_MODE}, {&25, K_INFO},
-    {&23, K_SOUND}, {&70, K_ESCAPE},
-    {&39, K_CUR_UP}, {&29, K_CUR_DOWN}, {&19, K_CUR_LEFT}, {&79, K_CUR_RIGHT}
+    {&36, K_O}, {&46, K_K}, {&10, K_Q}, {&21, K_W},
+    {&37, K_P}, {&56, K_L}, {&55, K_N}, {&65, K_M},
+    {&33, K_R}, {&43, K_F}, {&35, K_U},
+    {&41, K_A}, {&61, K_Z}, {&51, K_S}, {&42, K_X},
+    {&27, K_0}, {&13, K_5}, {&34, K_6}, {&24, K_7}, {&15, K_8},
+    {&32, K_D}, {&52, K_C}, {&62, K_SPACE}, {&64, K_B}, {&25, K_I},
+    {&23, K_T}, {&44, K_Y},
+    {&70, K_1},                                 ; ESCAPE
+    {&69, K_0},                                 ; COPY
+    {&39, K_7}, {&29, K_6}, {&19, K_5}, {&79, K_8}  ; the cursor keys: up, down, left, right
 }
 KEY_COUNT = LEN(KEY_MAP)
 ASSERT KEY_COUNT <= 128                                 ; (input_irq's index counts down to BPL)
 ASSERT MAX(KEY_MAP[.., 1]) < KEYS_BYTES * 8
+ASSERT MAX(KEY_MAP[.., 1] AND 7) < 5                    ; five keys a half-row
 ASSERT MIN(KEY_MAP[.., 0] AND &F0) >= &10               ; none on row 0, which auto-scan leaves out
 
 .key_number EQUB KEY_MAP[.., 0]

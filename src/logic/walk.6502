@@ -1,0 +1,494 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the move: a walk through the cells
+\ (tools/logic/move.py: the original's $9F42, and $9DCF, one crossing)
+\
+\ The walk goes from the camera toward the target a cell boundary at a
+\ time, nearest first, and tests each crossing against the objects
+\ (src/logic/touch.6502). On the probe it climbs and falls. The one change
+\ from the original is decision 18's (next_crossing).
+\ ***************************************************************************
+
+\ --- $9DCF: one crossing ---------------------------------------------------
+
+\ cross: cross into the next cell (the bits of crc), if nothing's there.
+\ In the jet an object stops it (1). On the probe, an object it can climb
+\ (a clear column of BodyHeight cells starting at most ClimbLimitScaled
+\ cells up) lifts the target that far (2), else it stops (1); and once
+\ across, the probe falls to whatever is below, lowering the target (2),
+\ and dying if it fell more than FallLimitScaled cells. A = 0 when it
+\ crossed on the level, else 1 or 2, with Z set by it.
+ZA_AUTO1 crc
+.cross
+{
+    ZA_AUTO1 hh, ll, d, b
+    STZ b
+    LDA crc : STA tc : JSR touch : BCC miss
+    STA Collided
+    LDA InJet : BEQ hit_probe
+    LDA #1 : STA Blocked
+    RTS
+.hit_probe
+    STZ hh
+    LDA #1 : STA ll
+    BRA climb
+.miss
+    LDA InJet : BEQ miss_probe
+    JMP across
+.miss_probe
+    LDA #1 : STA hh
+    STZ ll
+    CMP BodyHeight : BNE climb
+    JMP across                                  ; one cell high, nothing in the way
+    \ $9E51: the step up failed.
+.blocked
+    LDA SavedCellY : STA CellY
+    LDA #1 : STA Blocked
+    RTS
+.climb
+    \ Up from the feet: BodyHeight clear cells in a row in the next column,
+    \ the lowest at most ClimbLimitScaled up, each cell above clear.
+    LDA #1 : STA d
+    LDA CellY : STA SavedCellY
+.column
+    LDA BodyHeight : CMP hh : BEQ climbed
+    LDA ClimbLimitScaled : CMP ll : BMI blocked
+    INC d
+    LDA CellY : INC A : CMP AreaExtent+2 : BEQ blocked     ; the area's top
+    LDA #Y_MOVES OR Y_UP : STA tc : JSR touch : BCS blocked ; (not Collided)
+    INC CellY
+    LDA crc : STA tc : JSR touch : BCC clear
+    STA Collided
+    STZ hh
+    LDA d : STA ll
+    BRA column
+.clear
+    INC hh
+    BRA column
+.climbed
+    LDA d : SEC : SBC BodyHeight : STA d        ; the cells climbed
+    CLC : ADC SavedCellY : STA CellY
+    LDA d : BEQ across
+    JSR cells
+    LDA TargetY : CLC : ADC cells.lo : STA TargetY
+    LDA TargetY+1 : ADC cells.hi : STA TargetY+1
+    LDA #2 : STA b
+    LDA #4 : STA Sound
+    \ $9E8B: across.
+.across
+    LDA crc : AND #X_MOVES : BEQ x_done
+    LDA crc : AND #X_UP : BEQ x_down
+    INC CellX
+    BRA x_done
+.x_down
+    DEC CellX
+.x_done
+    LDA crc : AND #Z_MOVES : BEQ z_done
+    LDA crc : AND #Z_UP : BEQ z_down
+    INC CellZ
+    BRA z_done
+.z_down
+    DEC CellZ
+.z_done
+    LDA InJet : BEQ fall
+    LDA crc : AND #Y_MOVES : BEQ y_done
+    LDA crc : AND #Y_UP : BEQ y_down
+    INC CellY
+    BRA y_done
+.y_down
+    DEC CellY
+.y_done
+    LDA #0
+    RTS
+    \ $9ECA: the fall, to an object below or the area's floor.
+.fall
+    LDA AreaExtent+3 : CMP CellY : BEQ level
+    STZ d
+.down
+    LDA #Y_MOVES : STA tc : JSR touch : BCC air
+    STA Collided
+    BRA landed
+.air
+    INC d
+    DEC CellY
+    LDA AreaExtent+3 : CMP CellY : BNE down
+.landed
+    LDA d : BEQ level
+    LDA #3 : STA Sound
+    JSR cells
+    LDA TargetY : SEC : SBC cells.lo : STA TargetY
+    LDA TargetY+1 : SBC cells.hi : STA TargetY+1
+    LDA FallLimitScaled : CMP d : BPL fell
+    LDA #&12 : STA Roll                         ; too far: the game's over
+    STZ Pitch
+    LDA #4 : STA GameOver
+.fell
+    LDA #2
+    RTS
+.level
+    LDA b
+    RTS
+
+    \ cells: lo, hi = d * 64, d cells in world units.
+.cells
+{
+    ZA_AUTO1 lo, hi
+    LDA d : STA hi
+    LDA #0
+    LSR hi : ROR A
+    LSR hi : ROR A
+    STA lo
+    RTS
+}
+}
+
+\ --- $9F42: the move -------------------------------------------------------
+
+\ move: move the camera toward (TargetX, TargetY, TargetZ), a cell
+\ boundary at a time, nearest crossing first; stop at the area's extent or
+\ where cross says. Then keep clear of faces at each of the body's cells,
+\ and take the target as the camera. A = 1 if the camera moved, else 0.
+\ With Margin 0 it only walks.
+ZA_AUTO1 mc                                     ; the axes the move crosses, as crossing bits
+.move
+{
+    ZA_AUTO1 body, moved
+    STZ mc
+    LDA PlayerX : LDX PlayerX+1 : JSR cell_of : STA CellX
+    LDA TargetX : LDX TargetX+1 : JSR cell_of : STA MoveScratch
+    CMP CellX : BEQ y
+    LDA #X_MOVES : TSB mc
+    LDA MoveScratch : CMP CellX : BMI y
+    LDA #X_UP : TSB mc
+.y
+    LDA PlayerY : LDX PlayerY+1 : JSR cell_of : STA CellY
+    LDA TargetY : LDX TargetY+1 : JSR cell_of : STA MoveScratch+1
+    CMP CellY : BEQ z
+    LDA #Y_MOVES : TSB mc
+    LDA MoveScratch+1 : CMP CellY : BMI z
+    LDA #Y_UP : TSB mc
+.z
+    LDA PlayerZ : LDX PlayerZ+1 : JSR cell_of : STA CellZ
+    LDA TargetZ : LDX TargetZ+1 : JSR cell_of : STA MoveScratch+2
+    CMP CellZ : BEQ axes
+    LDA #Z_MOVES : TSB mc
+    LDA MoveScratch+2 : CMP CellZ : BMI axes
+    LDA #Z_UP : TSB mc
+.axes
+    LDA mc : BNE walk
+    JMP margin
+.walk
+    STZ next_crossing.known : STZ next_crossing.known+1 : STZ next_crossing.known+2
+    \ the deltas
+    LDA TargetX : SEC : SBC PlayerX : STA MoveScratch+9
+    LDA TargetX+1 : SBC PlayerX+1 : STA MoveScratch+10
+    LDA TargetY : SEC : SBC PlayerY : STA MoveScratch+11
+    LDA TargetY+1 : SBC PlayerY+1 : STA MoveScratch+12
+    LDA TargetZ : SEC : SBC PlayerZ : STA MoveScratch+13
+    LDA TargetZ+1 : SBC PlayerZ+1 : STA MoveScratch+14
+.crossing
+    JSR next_crossing                           ; (the point into MoveScratch+3)
+    LDA next_crossing.b : JSR at_extent : BCS extent
+    LDA next_crossing.b : STA crc : JSR cross
+    BNE stopped
+    \ (A crossing on no axis that changes nothing comes to the same
+    \ crossing again: the original hangs, and so does this.)
+    LDA MoveScratch : CMP CellX : BNE crossing
+    LDA MoveScratch+2 : CMP CellZ : BNE crossing
+    LDA MoveScratch+1 : CMP CellY : BNE crossing
+    BRA margin
+.extent
+    LDA #1
+.stopped
+    \ $A1D8: where it stopped, a unit back into the current cell when the
+    \ crossing point is in the next one; y only when stopped (1), as the
+    \ step up or the fall (2) has set it.
+    CMP #1 : BNE xz
+    LDA MoveScratch+5 : STA pull.v
+    LDA MoveScratch+6 : STA pull.v+1
+    LDA CellY : JSR pull
+    LDA pull.v : STA TargetY
+    LDA pull.v+1 : STA TargetY+1
+.xz
+    LDA MoveScratch+3 : STA pull.v
+    LDA MoveScratch+4 : STA pull.v+1
+    LDA CellX : JSR pull
+    LDA pull.v : STA TargetX
+    LDA pull.v+1 : STA TargetX+1
+    LDA MoveScratch+7 : STA pull.v
+    LDA MoveScratch+8 : STA pull.v+1
+    LDA CellZ : JSR pull
+    LDA pull.v : STA TargetZ
+    LDA pull.v+1 : STA TargetZ+1
+.margin
+    \ $A220
+    LDA Margin : BNE keep
+    LDA #0
+    RTS
+.keep
+    JSR keep_clear
+    LDA InJet : BNE commit
+    LDA BodyHeight : DEC A : BEQ commit         ; each of the probe's cells above the feet
+    STA body
+.cells
+    INC CellY
+    JSR keep_clear
+    DEC body : BNE cells
+.commit
+    STZ moved
+    LDX #4
+.axis
+    LDA TargetX,X : CMP PlayerX,X : BNE differ
+    LDA TargetX+1,X : CMP PlayerX+1,X : BEQ same
+.differ
+    LDA TargetX,X : STA PlayerX,X
+    LDA TargetX+1,X : STA PlayerX+1,X
+    LDA #1 : STA moved
+.same
+    DEX : DEX : BPL axis
+    LDA moved
+    RTS
+
+    \ pull: v less one if Margin and v's cell isn't A.
+.pull
+{
+    ZA_AUTO2 v
+    ZA_AUTO1 cur
+    STA cur
+    LDA Margin : BEQ done
+    LDA v : LDX v+1 : JSR cell_of
+    CMP cur : BEQ done
+    LDA v : BNE low
+    DEC v+1
+.low
+    DEC v
+.done
+    RTS
+}
+}
+ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
+ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
+
+\ at_extent: C set if the crossing A would leave the area's extent
+\ (AreaExtent: x max, x min, y max, y min, z max, z min, in cells).
+.at_extent
+{
+    ZA_AUTO1 ab
+    STA ab
+    AND #X_MOVES : BEQ z
+    LDA ab : AND #X_UP : BEQ x_down
+    LDA CellX : INC A : CMP AreaExtent : BEQ out
+    BRA z
+.x_down
+    LDA CellX : CMP AreaExtent+1 : BEQ out
+.z
+    LDA ab : AND #Z_MOVES : BEQ y
+    LDA ab : AND #Z_UP : BEQ z_down
+    LDA CellZ : INC A : CMP AreaExtent+4 : BEQ out
+    BRA y
+.z_down
+    LDA CellZ : CMP AreaExtent+5 : BEQ out
+.y
+    LDA ab : AND #Y_MOVES : BEQ in
+    LDA ab : AND #Y_UP : BEQ y_down
+    LDA CellY : INC A : CMP AreaExtent+2 : BEQ out
+    BRA in
+.y_down
+    LDA CellY : CMP AreaExtent+3 : BEQ out
+.in
+    CLC
+    RTS
+.out
+    SEC
+    RTS
+}
+
+\ next_crossing ($9FCA-$A157): the next boundary the walk crosses: the axes
+\ that cross there in b, as crossing bits, and the point, into
+\ MoveScratch+3 (x, y, z, two bytes each). x first if x has a crossing
+\ left, unless another axis crosses before it; then z likewise; then y.
+\ Where another axis is exactly on its boundary at the point, it crosses
+\ too, unless it's already at its target cell (decision 18).
+.next_crossing
+{
+    ZA_AUTO1 b
+    ZA_AUTO2 t
+    LDA mc : AND #X_MOVES OR X_UP : BEQ to_z
+    LDA MoveScratch : CMP CellX : BNE x_first
+.to_z
+    JMP z_first
+.x_first
+    LDA mc : AND #X_MOVES OR X_UP : STA b
+    LDX #0 : LDA CellX : JSR recall : BCS x_known
+    LDA mc : AND #X_UP : CMP #X_UP              ; (C: going up)
+    LDA CellX : JSR boundary
+    STA MoveScratch+3 : STX MoveScratch+4
+    SEC : SBC PlayerX : STA t
+    TXA : SBC PlayerX+1 : STA t+1
+    LDX #11 : LDY #9 : JSR coord_at             ; y at the x boundary
+    LDA cres : STA MoveScratch+5
+    LDA cres+1 : STA MoveScratch+6
+    LDX #13 : LDY #9 : JSR coord_at             ; z
+    LDA cres : STA MoveScratch+7
+    LDA cres+1 : STA MoveScratch+8
+    LDX #0 : JSR keep
+.x_known
+    LDA mc : AND #Z_MOVES : BEQ x_y
+    LDX #7 : LDA CellZ : LDY #Z_UP : JSR boundary_with
+    CMP #1 : BCC x_y : BNE z_first              ; (2: z crosses first)
+    LDA MoveScratch+2 : CMP CellZ : BEQ x_y     ; (decision 18)
+    LDA mc : AND #Z_MOVES OR Z_UP : TSB b
+.x_y
+    LDA mc : AND #Y_MOVES : BEQ done
+    LDX #5 : LDA CellY : LDY #Y_UP : JSR boundary_with
+    CMP #1 : BCC done : BNE z_first
+    LDA MoveScratch+1 : CMP CellY : BEQ done    ; (decision 18)
+    LDA mc : AND #Y_MOVES OR Y_UP : TSB b
+.done
+    RTS
+    \ $A07E: z, if z has a crossing left.
+.z_first
+    LDA mc : AND #Z_MOVES OR Z_UP : BEQ to_y
+    LDA MoveScratch+2 : CMP CellZ : BNE z_on
+.to_y
+    JMP y_only
+.z_on
+    LDA mc : AND #Z_MOVES OR Z_UP : STA b
+    LDX #2 : LDA CellZ : JSR recall : BCS z_known
+    LDA mc : AND #Z_UP : CMP #Z_UP
+    LDA CellZ : JSR boundary
+    STA MoveScratch+7 : STX MoveScratch+8
+    SEC : SBC PlayerZ : STA t
+    TXA : SBC PlayerZ+1 : STA t+1
+    LDX #9 : LDY #13 : JSR coord_at             ; x at the z boundary
+    LDA cres : STA MoveScratch+3
+    LDA cres+1 : STA MoveScratch+4
+    LDX #11 : LDY #13 : JSR coord_at            ; y
+    LDA cres : STA MoveScratch+5
+    LDA cres+1 : STA MoveScratch+6
+    LDX #2 : JSR keep
+.z_known
+    LDA mc : AND #Y_MOVES : BEQ done
+    LDX #5 : LDA CellY : LDY #Y_UP : JSR boundary_with
+    CMP #1 : BCC z_done : BNE to_y
+    LDA MoveScratch+1 : CMP CellY : BEQ z_done  ; (decision 18)
+    LDA mc : AND #Y_MOVES OR Y_UP : TSB b
+.z_done
+    RTS
+    \ $A107: y.
+.y_only
+    LDA mc : AND #Y_MOVES OR Y_UP : STA b
+    LDX #1 : LDA CellY : JSR recall : BCS y_known
+    LDA mc : AND #Y_UP : CMP #Y_UP
+    LDA CellY : JSR boundary
+    STA MoveScratch+5 : STX MoveScratch+6
+    SEC : SBC PlayerY : STA t
+    TXA : SBC PlayerY+1 : STA t+1
+    LDX #9 : LDY #11 : JSR coord_at             ; x at the y boundary
+    LDA cres : STA MoveScratch+3
+    LDA cres+1 : STA MoveScratch+4
+    LDX #13 : LDY #11 : JSR coord_at            ; z
+    LDA cres : STA MoveScratch+7
+    LDA cres+1 : STA MoveScratch+8
+    LDX #1 : JMP keep
+.y_known
+    RTS
+
+    \ An axis's next crossing point depends on nothing that changes in the
+    \ walk but its cell, so each axis's (0 x, 1 y, 2 z) is kept, with the
+    \ cell it was for, until the cell moves on (known: the walk has one).
+    \ recall: C set and the point of axis X's crossing from cell A into
+    \ MoveScratch+3 if it's kept; else C clear, and A noted as the cell.
+.recall
+{
+    LDY known,X : BEQ unknown
+    CMP cell,X : BNE unknown
+    LDY offset,X
+    FOR i = 0..5
+        LDA point + i,Y : STA MoveScratch + 3 + i
+    NEXT
+    SEC
+    RTS
+.unknown
+    STA cell,X
+    CLC
+    RTS
+}
+    \ keep: the point in MoveScratch+3 kept as axis X's.
+.keep
+{
+    LDY offset,X
+    FOR i = 0..5
+        LDA MoveScratch + 3 + i : STA point + i,Y
+    NEXT
+    LDA #1 : STA known,X
+    RTS
+}
+.known  SKIP 3                                  ; non-zero: the axis's point is kept ...
+.cell   SKIP 3                                  ; ... for this cell
+.point  SKIP 3 * 6                              ; x, y and z at its crossing
+.offset EQUB 0, 6, 12
+
+    \ boundary: A (low), X (high) = the boundary of cell A: the next cell's
+    \ first unit if C is set (going up), else this cell's.
+.boundary
+{
+    ZA_AUTO1 hi
+    ADC #0 : STZ hi
+    ASL A : ROL hi
+    ASL A : ROL hi
+    ASL A : ROL hi
+    ASL A : ROL hi
+    ASL A : ROL hi
+    ASL A : ROL hi
+    LDX hi
+    RTS
+}
+
+    \ coord_at: cross_coord of t by the delta at MoveScratch+X over the main
+    \ delta at MoveScratch+Y, from the camera's coordinate on the axis of
+    \ the delta at X (MoveScratch+9, x's delta, goes with PlayerX).
+.coord_at
+{
+    LDA t : STA ct
+    LDA t+1 : STA ct+1
+    LDA MoveScratch,X : STA cd
+    LDA MoveScratch+1,X : STA cd+1
+    LDA MoveScratch,Y : STA cD
+    LDA MoveScratch+1,Y : STA cD+1
+    LDA PlayerX - 9,X : STA cs
+    LDA PlayerX - 8,X : STA cs+1
+    JMP cross_coord
+}
+}
+
+\ boundary_with ($A026-$A04F and its copies): at a crossing, does the axis
+\ whose current cell is A, whose up bit in mc is Y, and whose coordinate at
+\ the point is at MoveScratch+X, stay in its cell (A = 0), cross at the
+\ same point (1), or cross first (2)?
+.boundary_with
+{
+    ZA_AUTO1 cur, e, up, h
+    STA cur : STY up
+    LDA MoveScratch+1,X : PHA
+    LDA MoveScratch,X : STA e
+    PLX
+    JSR cell_of : STA h                         ; the coordinate's cell
+    LDA mc : AND up : BEQ going_down
+    LDA cur : SEC : SBC h                       ; cur - h
+    BEQ stays
+    CMP #&FF : BNE first
+    LDA e : AND #&3F : BNE first
+    LDA #1
+    RTS
+.going_down
+    LDA cur : CMP h : BNE first
+    LDA e : AND #&3F : BNE stays
+    LDA #1
+    RTS
+.stays
+    LDA #0
+    RTS
+.first
+    LDA #2
+    RTS
+}
