@@ -129,15 +129,20 @@ vertical sync at the row MOS 3.20 computes (its table's row plus the
 moves. Following the machine's CMOS `*TV` setting at start-up is the
 alternative, if a real display wants it.
 
-## 10. The keys (2026-10-31, autonomous)
+## 10. The keys (2026-10-31, autonomous; corrected the same day)
 
-Driller's own, from ScummVM's key map: O and K forward and back, Q and W
-turn, P and L look up and down, N and M roll, R and F rise and fall, U
-turns round, A and Z the angle, S and X the step; 0 or 5 fire, D drills,
-C collects, SPACE changes mode, I shows information, T the sound, ESCAPE
-for the ZX's 1. COPY fires too, and the cursor keys are read as the ZX's
-cursor joystick. Driller has no key to centre the view, so there isn't
-one. The keys are read once a field (`src/input.6502`).
+Driller's own, from the ZX's key table (`docs/research/zx-logic.md`):
+O and K forward and back, Q and W turn, P and L look up and down, N and M
+roll, R and F rise and fall, U turns round, A and Z the angle, S and X
+the step; 0 fires (5 is the ZX cursor-left, so it turns), D drills, C
+collects, SPACE changes mode, B shows or hides the crosshair, I shows
+information (where 1 is its key), ESCAPE for the ZX's 1 in play. T and Y
+do nothing in play. COPY fires too, and the cursor keys are read as the
+ZX's cursor joystick. Driller has no key to centre the view, so there
+isn't one. The keys are read once a field (`src/input.6502`).
+
+The first version of this decision followed ScummVM's key map, which
+differs; the ZX's table is the specification (decision 1).
 
 ## 11. Rounding in the matrix and transform (2026-10-31, autonomous)
 
@@ -216,3 +221,22 @@ takes any Z from one world unit, and the near clip cuts at four
 vertex far to the side of a near one projects past 16 bits, and a
 saturated vertex bends the 2D clip's edges; the band is wide enough that
 few faces need it, and its planes are shifts on the 6502.
+
+## 18. The corner that throws the probe out (2026-10-31, autonomous)
+
+The original has a bug: a step that ends exactly on a cell corner while
+moving down an axis overshoots that axis, throws the probe out of the
+area, and the next move hangs the game (`docs/research/zx-logic.md`). The
+port fixes it: the rule that moves the axes across together never moves
+an axis already at its target cell. That removes the overshoot and the
+hang, and changed nothing else in 1,000 random walks (110,359 passes)
+compared with the original. The Python transcription
+(`tools/logic/`) reproduces the bug, so the oracle checks it; the fix goes
+into the port's own logic, with a switch in the transcription to model
+it, when the 6502 logic is built.
+
+## 19. Held keys act in the ZX's order (2026-10-31, autonomous)
+
+The original reads up to five keys a pass and acts on them in its
+keyboard's order, so turning and stepping together always turn first.
+The port does the same, so combinations behave as they did.
