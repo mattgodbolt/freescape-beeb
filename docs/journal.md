@@ -169,3 +169,23 @@ routines, 2,000 random cases each, none differing; the 22 scenarios,
 entrances (seed 100000), 110,359 passes, none differing. Those walks
 changed area 537 times (87 across an edge), climbed 189 times, fell 225
 times (52 of them too far) and were stopped by an object 4,272 times.
+
+## 2026-10-31: the rasteriser and writer (track G)
+
+`src/raster.6502` and `src/writer.6502` match `tools/model/raster.py` and
+`writer.py` byte for byte (`make raster`): 148 synthetic scenes, 7
+multi-frame sequences, and all 65 of Driller's entrance views from the
+model, with every screen write watched. The design: exact edge stepping in
+sixteenths; per-line gap lists in four pools; each piece written at once
+through the row runs, every byte once, no screen reads and no clear; a
+background line left alone when the back buffer already holds it. A bug
+only Driller's real views showed (a span on line 0 stopped after the
+line's first gap) is fixed, with regression scenes.
+
+It's correct but too slow. Measured that day on Driller's 65 views: a
+median of 138,079 cycles for the rasteriser alone (54,712 to 399,750),
+about three and a half fields, against two for the whole frame. The fit
+over the views: 95.6 a line, 76.9 a face-line, 271.9 a run, 1.3 a byte and
+894 an edge (rms error 6.3%). Runs and edge set-up are the cost. The track
+went back to restructure it for speed, free to change the model's fill
+method where the picture stays as good (decisions 11 and 12).

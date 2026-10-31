@@ -240,3 +240,14 @@ it, when the 6502 logic is built.
 The original reads up to five keys a pass and acts on them in its
 keyboard's order, so turning and stepping together always turn first.
 The port does the same, so combinations behave as they did.
+
+## 20. The rasteriser's edge cases (2026-10-31, autonomous)
+
+- A pixel centre exactly on the horizon is ground.
+- When a line's pool of gaps is full (a pathological scene), the
+  face-line that doesn't fit isn't drawn and `rs_overflow` is set; the
+  model does the same.
+- The rasteriser's code, row runs and work go in one sideways RAM bank,
+  with its inputs in main RAM, leaving HAZEL to the maths tables.
+- A background line the back buffer already holds isn't rewritten, so
+  anything else that draws on the screens calls `raster_forget`.
