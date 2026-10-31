@@ -62,8 +62,8 @@ node tools/logiccheck.mjs build/logic6502 TRACE --profile                       
   game loads it afresh.
 - **`LOGIC_CODE_BANK`**, sideways RAM (file `LOGICC`): the rest of the
   logic, the original's tables it reads (the sine table, the key codes,
-  each key code's actions), and the object test's lists by face. It has
-  room to share.
+  each key code's actions), the quarter squares its multiplies use, and
+  the object test's lists by face. It has room to share.
 - The code and the database come to more than a bank: the two halves call
   each other through main RAM (`far_events`, `far_answer`), which is where
   the frame calls in too (`src/logic/call.6502`, with the hooks).
@@ -151,6 +151,8 @@ ways of getting there faster or into the memory, each the same result:
   magnitudes' quotient; `cross_coord` divides by the quickest of three
   ways that give it, and takes the original's own way for a divisor of 0
   (a crossing on no axis), whose remainder runs on in its own way.
+- **The multiplies** are by quarter squares (`mul88`), and exact, as
+  the original's are.
 - **The key table**: the original searches it for each key; the build
   makes each code's two actions into tables by the same search.
 - **The FCL**: the instruction loop keeps an offset and derives the
