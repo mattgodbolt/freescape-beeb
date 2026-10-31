@@ -6,9 +6,10 @@ engine of *Driller* (1987), *Dark Side*, *Total Eclipse* and *Castle
 Master*. It never came out for the BBC. This engine is proved on
 *Driller*: its data, its camera and its views are the benchmark.
 
-**[Run the disc in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&disc1=github:mattgodbolt/freescape-beeb/freescape.ssd)**
-(a Master 128), or write `freescape.ssd` to a disc and SHIFT-BREAK a
-Master. The disc follows the work as it lands, so it's in progress.
+**[Run the disc in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&displayMode=pal&disc1=github:mattgodbolt/freescape-beeb/freescape.ssd)**
+(a Master 128 on a PAL television, whose blur blends the dithers as a real
+one does; jsbeeb's settings switch it to an RGB monitor), or write
+`freescape.ssd` to a disc and SHIFT-BREAK a Master. The disc follows the work as it lands, so it's in progress.
 
 ## Where it's up to
 
