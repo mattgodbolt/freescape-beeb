@@ -12,7 +12,7 @@ writes into that directory:
 
 tools/model/maths.py builds every table, so the 6502 reads the model's own
 bytes. A change of field of view is a change of FX and FY there: only
-PROJ_RECIP depends on them.
+PROJ_M and PROJ_T depend on them.
 """
 import os
 import sys
@@ -38,11 +38,12 @@ def consts():
         "PROJ_XC": m.XC,
         "PROJ_YC": m.YC,
         "PROJ_ZNEAR": m.ZNEAR,
-        "PROJ_ZBITS": m.PROJ_ZBITS,
         "PROJ_IBITS": m.PROJ_IBITS,
-        "PROJ_SMIN": m.PROJ_SMIN,
-        "PROJ_SMAX": m.PROJ_SMAX,
-        "PROJ_SLOW": m.PROJ_SLOW,
+        "PROJ_T": m.PROJ_T,
+        "PROJ_NMIN": m.PROJ_NMIN,
+        "PROJ_NMAX": m.PROJ_NMAX,
+        "PROJ_XBAND": m.PROJ_XBAND,
+        "PROJ_YBAND": m.PROJ_YBAND,
     }
     return "\n".join([
         HEADER,
@@ -53,8 +54,12 @@ def consts():
         blist("MATHS_SQ", m.SQ),
         blist("MATHS_NG", m.NG),
         "",
-        "\\ the projection's reciprocals, for Zi = 512..1023",
-        blist("PROJ_RECIP", m.RECIP),
+        "\\ the projection's: f(j + 128) + XC and f(j - 639), to sixteen bits",
+        blist("PROJ_SQC", [v & 0xFFFF for v in m.SQC]),
+        blist("PROJ_NGC", [v & 0xFFFF for v in m.NGC]),
+        "",
+        "\\ the projection's reciprocals less 256, for Zi = 512..1023",
+        blist("PROJ_M", m.PROJ_M),
         "",
         "\\ twice the bit length of each byte, for the projection's dispatch",
         blist("PROJ_BL2", [2 * b.bit_length() for b in range(256)]),
@@ -71,8 +76,11 @@ ALIGN 256
 .sq_hi      EQUB HI(MATHS_SQ)
 .ng_lo      EQUB LO(MATHS_NG)
 .ng_hi      EQUB HI(MATHS_NG)
-.proj_rlo   EQUB LO(PROJ_RECIP)
-.proj_rhi   EQUB HI(PROJ_RECIP)
+.sqc_lo     EQUB LO(PROJ_SQC)
+.sqc_hi     EQUB HI(PROJ_SQC)
+.ngc_lo     EQUB LO(PROJ_NGC)
+.ngc_hi     EQUB HI(PROJ_NGC)
+.proj_m     EQUB PROJ_M
 .proj_bl2   EQUB PROJ_BL2
 .maths_tables_end
 """
@@ -114,129 +122,310 @@ def cases(seed=1987):
         dot.append((row, v))
     dot = [[*row, *v, m.dot3(row, v)] for row, v in dot]
 
-    lim = 1 << 23
+    # project: edges at every power of two of Z, at ZNEAR and either side
+    # of each Zi where the region or proj_m's half changes, by X and Y at
+    # the band's edges, the bytes' edges and in the view; then random over
+    # four ranges of X / Z
+    lim = m.ZLIMIT
+    xb, yb = m.PROJ_XBAND, m.PROJ_YBAND
+
+    def c24(v):
+        return max(-lim, min(lim - 1, v))
+
     zs = [m.ZNEAR, m.ZNEAR + 1, lim - 1]
-    for k in range(m.ZNEAR.bit_length(), 23):
-        zs += [(1 << k) - 1, 1 << k, (1 << k) + 1]
-    xs = [0, 1, -1, 2, -2, 255, -256, 65535, -65536, lim - 1, -lim]
+    for k in range(m.ZNEAR.bit_length(), 24):
+        zs += [(1 << (k - 1)) - 1, 1 << (k - 1), (1 << (k - 1)) + 1]
+        for zi in (m.PROJ_T - 1, m.PROJ_T, 767, 768):
+            lo = m._shr(zi, m.PROJ_IBITS - k)
+            hi = m._shr(zi + 1, m.PROJ_IBITS - k) - 1
+            zs += [z for z in (lo, hi) if m.ZNEAR <= z < lim]
     proj = []
-    for z in zs:
-        for x in xs:
-            for y in (0, x, -x if -x < lim else 0, z, -z):
-                proj.append((x, y, z))
-        for r in (0.5, 0.656, 1, 3.9, 4.1, 8, 16, 25, 40, 300):
-            a = min(lim - 1, int(r * z))
-            proj += [(a, a // 2, z), (-a, -a // 2, z), (a, -a, z)]
-    for band in (0.7, 4, 40, None):
+    for z in sorted({z for z in zs if m.ZNEAR <= z < lim}):
+        edges = {0, 1, -1, 2, -2, 255, -255, 256, -256, 257, -257, z, -z}
+        for x in {c24(v) for v in edges | {xb * z, -xb * z}}:
+            for y in {c24(v) for v in edges | {yb * z, -yb * z}}:
+                if abs(x) <= xb * z and abs(y) <= yb * z:
+                    proj.append((x, y, z))
+        for r in (0.5, 0.656, 1, 3.9, 4.1, 8, 12, 16, 24.9):
+            a = int(r * z)
+            for x, y in ((a, a // 2), (-a, -a // 2), (a, -a // 2), (-a, a // 2)):
+                if abs(y) <= yb * z:
+                    proj.append((c24(x), c24(y), z))
+    for band in (0.7, 4, 16, xb):
         for _ in range(25000):
-            if band is None:
-                z = rnd.randint(m.ZNEAR, lim - 1)
-                x, y = rnd.randint(-lim, lim - 1), rnd.randint(-lim, lim - 1)
-            else:
-                # Z log-uniform over Driller's depths (docs/research/maths.md)
+            # Z log-uniform over Driller's depths (docs/research/maths.md),
+            # or anywhere
+            if rnd.random() < 0.9:
                 z = int(m.ZNEAR * (742000 / m.ZNEAR) ** rnd.random())
-                a = min(lim - 1, int(band * z))
-                x = rnd.randint(-a, a)
-                y = rnd.randint(-a // 2, a // 2)
-            proj.append((x, y, z))
+            else:
+                z = rnd.randint(m.ZNEAR, lim - 1)
+            a, b = min(lim - 1, int(band * z)), min(lim - 1, int(min(band, yb) * z))
+            proj.append((rnd.randint(-a, a), rnd.randint(-b, b), z))
     proj = [[x, y, z, *m.project(x, y, z)] for x, y, z in proj]
-    return {"dot": dot, "proj": proj}
+
+    # project_z and project_y after project: a second vertex at the first's
+    # Z, and a third at the second's X and Z
+    share = []
+    for i in range(0, len(proj) - 2, 3):
+        x, y, z = proj[i][:3]
+        x2, y2, z2 = proj[i + 1][:3]
+        y3 = proj[i + 2][1]
+        # the others' X / Z and Y / Z at this Z
+        x2 = c24(x2 * z // z2)
+        y2, y3 = c24(y2 * z // z2), c24(y3 * z // proj[i + 2][2])
+        share.append([x, y, z, x2, y2, y3, *m.project(x, y, z), *m.project(x2, y2, z),
+                      m.project(x2, y3, z)[1]])
+    return {"dot": dot, "proj": proj, "share": share}
+
+
+def variant(ibits=10, rbits=8, bias=1):
+    """The chosen method's family (docs/research/projection.md): Zi of
+    ibits bits, R with rbits bits under its implicit one, P floored and
+    bias added. (10, 8, 1) is project's own."""
+    from fractions import Fraction
+    m = maths
+    one, zi0 = 1 << rbits, 1 << (ibits - 1)
+    table = []
+    for zi in range(zi0, 2 * zi0):
+        k = 0
+        while round(Fraction(one * m.FX * 2 ** k) / (zi + Fraction(1, 2))) >= 2 * one:
+            k -= 1
+        while round(Fraction(one * m.FX * 2 ** k) / (zi + Fraction(1, 2))) < one:
+            k += 1
+        table.append((round(Fraction(one * m.FX * 2 ** k) / (zi + Fraction(1, 2))), k))
+
+    def p(X, Y, Z):
+        n = Z.bit_length()
+        r, k = table[m._shr(Z, n - ibits) - zi0]
+        t = n - ibits + k
+        return (m.XC + (m._shr(X, t) * r >> rbits) + bias,
+                m.YC - (m._shr(Y, t - 1) * r >> rbits) - bias)
+    return p
+
+
+def logmethod(mbits, abits):
+    """P = 2^(log2 F + log2 |X| - log2 Z), the logs from mbits-bit
+    mantissas, their difference truncated to abits bits of fraction for
+    the antilog's table (Elite's LL28: 8 and 5)."""
+    import math
+    m = maths
+
+    def ilog2(v):
+        e = v.bit_length() - mbits
+        return e + math.log2(m._shr(v, e))
+
+    def one(x, z, f):
+        if x == 0:
+            return 0
+        d = math.log2(f) + ilog2(abs(x)) - ilog2(z)
+        q = math.floor(d * (1 << abits)) / (1 << abits)
+        return int(2 ** q) * (1 if x > 0 else -1)
+
+    def p(X, Y, Z):
+        return m.XC + one(X, Z, m.FX), m.YC - one(Y, Z, m.FY)
+    return p
+
+
+def exact(X, Y, Z):
+    """Exact division, rounded to the nearest sixteenth."""
+    m = maths
+    return (m.XC + (2 * m.FX * X + Z) // (2 * Z), m.YC - (2 * m.FY * Y + Z) // (2 * Z))
+
+
+SURVEYED = [
+    ("chosen: Zi 10 bits, R 9 (two byte products)", lambda: maths.project),
+    ("Zi 9 bits (proj_m one page)", lambda: variant(ibits=9)),
+    ("Zi 11 bits", lambda: variant(ibits=11)),
+    ("R 17 bits (four byte products)", lambda: variant(rbits=16)),
+    ("no bias", lambda: variant(bias=0)),
+    ("log/antilog, 8-bit mantissas, 1/32 octave (Elite)", lambda: logmethod(8, 5)),
+    ("log/antilog, 10-bit mantissas, 1/1024 octave", lambda: logmethod(10, 10)),
+]
 
 
 def survey(n=100000, seed=7):
     """The projection methods' errors against exact division, in
-    sixteenths, over Driller's depths (docs/research/maths.md): each
-    method's worst on screen (|X| <= 0.66 Z, the view's half-width), its
-    worst for |X| <= 4 Z, and whether it ever goes backwards as X or Z
-    grows."""
-    import math
+    sixteenths, over Driller's depths (docs/research/projection.md): each
+    method's worst and mean on the view (|X| <= 0.656 Z, the view's
+    half-width), its worst for |X| <= 4 Z and 16 Z, and how often it goes
+    backwards as X or Z grows."""
     import random
     m = maths
-    rnd = random.Random(seed)
-
-    def ilog2(v, mbits):
-        # v's log2 from its top mbits bits, truncated (a table's index)
-        e = v.bit_length() - mbits
-        return e + math.log2(m._shr(v, e))
-
-    def logmethod(mbits, abits):
-        # P = 2^(log2 FX + log2 |X| - log2 Z), logs from mbits-bit
-        # mantissas, the difference truncated to abits bits of fraction
-        # for the antilog's table (Elite's LL28: 8 and 5)
-        def p(x, z):
-            if x == 0:
-                return 0
-            d = math.log2(m.FX) + ilog2(abs(x), mbits) - ilog2(z, mbits)
-            q = math.floor(d * (1 << abits)) / (1 << abits)
-            return int(2 ** q) * (1 if x > 0 else -1)
-        return p
-
-    def recip(rbits):
-        # the chosen shifts with R kept to rbits significant bits, exactly
-        def p(x, z):
-            s = z.bit_length() - m.PROJ_ZBITS
-            r = m.RECIP[m._shr(z, s + 3) - 512]
-            drop = r.bit_length() - rbits
-            r = (r >> drop) << drop
-            xp = m._shr(abs(x), s)
-            v = (xp * r) >> 16
-            return v if x >= 0 else -v
-        return p
-
-    def chosen(x, z):
-        return m.project(x, 0, z)[0] - m.XC
-
-    def exact3(x, z):
-        s = z.bit_length() - m.PROJ_ZBITS
-        r = m.RECIP[m._shr(z, s + 3) - 512]
-        xp = m._shr(abs(x), s)
-        x1, x0, r1, r0 = xp >> 8, xp & 255, r >> 8, r & 255
-        v = x1 * r1 + ((x1 * r0 + x0 * r1) >> 8) + 1
-        return v if x >= 0 else -v
-
-    methods = [
-        ("chosen: R 16-bit, three high-byte products", chosen),
-        ("R 16-bit, middle products summed exactly", exact3),
-        ("R kept to 9 bits (two products)", recip(9)),
-        ("log/antilog, 8-bit mantissas, 1/32 octave (Elite)", logmethod(8, 5)),
-        ("log/antilog, 10-bit mantissas, 1/1024 octave", logmethod(10, 10)),
-    ]
     depth = (m.ZNEAR, 742000)
-    for name, p in methods:
-        worst = {}
-        for band in (0.656, 4):
+    assert variant()(12345, -678, 98765) == m.project(12345, -678, 98765)
+    for name, make in SURVEYED:
+        p = make()
+        rnd = random.Random(seed)
+        worst, mean = {}, 0
+        for band in (0.656, 4, 16):
             w = 0
             for _ in range(n):
                 z = int(depth[0] * (depth[1] / depth[0]) ** rnd.random())
-                a = int(band * z)
-                x = rnd.randint(-a, a)
-                v = p(x, z)
-                if v is None or abs(v) > 30000:
-                    continue
-                w = max(w, abs(v - float(m.FX * x / z)))
+                x = rnd.randint(-int(band * z), int(band * z))
+                e = abs(p(x, 0, z)[0] - m.XC - m.FX * x / z)
+                w = max(w, e)
+                mean += e if band < 1 else 0
             worst[band] = w
         back_x = back_z = 0
         for _ in range(200):
             z = int(depth[0] * (depth[1] / depth[0]) ** rnd.random())
             prev = None
             for x in range(0, 4 * z, max(1, z // 2000)):
-                v = p(x, z)
+                v = p(x, 0, z)[0]
                 back_x += prev is not None and v < prev
                 prev = v
             x = rnd.randint(1, 1 << 21)
-            prev, z = None, m.ZNEAR
+            prev, z = None, max(m.ZNEAR, x // 16)
             while z < depth[1]:
-                v = p(x, z)
+                v = p(x, 0, z)[0]
                 back_z += prev is not None and v > prev
                 prev, z = v, z + max(1, z // 2000)
-        print(f"{name:52} on screen {worst[0.656]:6.2f}, |X| <= 4Z {worst[4]:6.2f}, "
-              f"backwards in X {back_x}, in Z {back_z}")
+        print(f"{name:50} view {worst[0.656]:5.2f} (mean {mean / n:4.2f}), 4Z {worst[4]:6.2f}, "
+              f"16Z {worst[16]:6.2f}; backwards in X {back_x}, in Z {back_z}")
+
+
+def flicker(step=2, frames=40):
+    """Camera walks rendered by the model with each projection, and what
+    flickers (docs/research/projection.md): from every entrance, forward,
+    sideways and up, step world units a frame; a pixel's flips over a walk
+    are the frames it changes in, and a method's excess is the flips it
+    makes beyond exact division's, pixel by pixel."""
+    import dataclasses
+    import json
+    import math
+    import random
+    frames = int(frames)
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, root)
+    from tools.model import camera as cam, parts, render
+    with open(os.path.join(root, "build/data/driller.json")) as f:
+        db = json.load(f)
+
+    def noisy(a):
+        # exact, then a pseudo-random offset of up to a sixteenths, a
+        # different one for each camera-space vertex: jitter
+        def p(X, Y, Z):
+            r = random.Random(hash((X, Y, Z)))
+            ex, ey = exact(X, Y, Z)
+            return ex + r.randint(-a, a), ey + r.randint(-a, a)
+        return p
+
+    def smooth(eps):
+        # exact times 1 + e, e in [-eps, eps] fixed for each Zi of ten
+        # bits: what a reciprocal table's rounding does
+        def p(X, Y, Z):
+            n = Z.bit_length()
+            e = random.Random(maths._shr(Z, n - 10)).uniform(-eps, eps)
+            return (maths.XC + round(maths.FX * X / Z * (1 + e)),
+                    maths.YC - round(maths.FY * Y / Z * (1 + e)))
+        return p
+
+    def grid(g):
+        # exact, to the nearest multiple of g sixteenths
+        def p(X, Y, Z):
+            m = maths
+            return (g * ((2 * (m.XC * Z + m.FX * X) + g * Z) // (2 * g * Z)),
+                    g * ((2 * (m.YC * Z - m.FY * Y) + g * Z) // (2 * g * Z)))
+        return p
+
+    methods = [(name, make()) for name, make in SURVEYED]
+    methods += [("exact, to 1/8 px", grid(2)), ("exact, to 1/4 px", grid(4)),
+                ("exact, to 1/2 px", grid(8)), ("exact, to whole pixels", grid(16)),
+                ("exact, then 1 in 512 smooth error", smooth(1 / 512)),
+                ("exact, then 1 in 256 smooth error", smooth(1 / 256)),
+                ("exact, then 1/8 px jitter", noisy(2)), ("exact, then 1/4 px jitter", noisy(4))]
+
+    def walk(c0):
+        a = math.radians(5 * c0.yaw)
+        for d in ((math.sin(a), 0, math.cos(a)), (math.cos(a), 0, -math.sin(a)), (0, 1, 0)):
+            cams = []
+            for t in range(frames):
+                q = [round(c0.position[k] + d[k] * step * t) for k in range(3)]
+                if all(0 <= v < 65536 for v in q):
+                    cams.append(dataclasses.replace(c0, x=q[0], y=q[1], z=q[2]))
+            yield cams
+
+    def render_all(area, cams, proj):
+        parts.project = proj
+        return [render.render(db, area, c).bytes for c in cams]
+
+    def flips(imgs):
+        out = [0] * (2 * len(imgs[0]))
+        for a, b in zip(imgs, imgs[1:]):
+            for i, (x, y) in enumerate(zip(a, b)):
+                d = x ^ y
+                out[2 * i] += bool(d & 0xAA)
+                out[2 * i + 1] += bool(d & 0x55)
+        return out
+
+    def differ(a, b):
+        return sum(bool((x ^ y) & 0xAA) + bool((x ^ y) & 0x55) for x, y in zip(a, b))
+
+    tot = {name: [0, 0] for name, _ in methods}
+    nframes = own = 0
+    for area, _, c0 in cam.entrance_views(db):
+        for cams in walk(c0):
+            ref = render_all(area, cams, exact)
+            fr = flips(ref)
+            nframes += len(cams)
+            own += sum(fr)
+            for name, p in methods:
+                imgs = render_all(area, cams, p)
+                tot[name][0] += sum(max(0, a - b) for a, b in zip(flips(imgs), fr))
+                tot[name][1] += sum(differ(a, b) for a, b in zip(imgs, ref))
+    print(f"{nframes} frames, {step} world units a frame: exact division's own flips "
+          f"{own / nframes:.2f} a frame")
+    for name, (excess, diff) in tot.items():
+        print(f"{name:50} excess flips {excess / nframes:6.3f} a frame, "
+              f"pixels unlike exact's {diff / nframes:6.2f}")
+
+
+def views(db_path):
+    """Every entrance view's projected vertices, object by object, in the
+    order the model projects them (tools/model/render.py), with the
+    model's answers: what make maths times, a view at a time."""
+    import json
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, root)
+    from tools.model import camera as cam, parts, render
+    with open(db_path) as f:
+        db = json.load(f)
+    objects = []
+    project, draw_faces = parts.project, render.draw_faces
+
+    def recorded(X, Y, Z):
+        s = project(X, Y, Z)
+        objects[-1].append([X, Y, Z, *s])
+        return s
+
+    def drawn(*args, **kw):
+        objects.append([])
+        return draw_faces(*args, **kw)
+
+    parts.project, render.draw_faces = recorded, drawn
+    out = []
+    try:
+        for area, entrance, camera in cam.entrance_views(db):
+            objects.clear()
+            render.render(db, area, camera)
+            out.append({"view": render.name(area, entrance), "objects": [o for o in objects if o]})
+    finally:
+        parts.project, render.draw_faces = project, draw_faces
+    return out
 
 
 def main():
     out = sys.argv[1]
+    if out == "--views":
+        import json
+        with open(sys.argv[3], "w") as f:
+            json.dump(views(sys.argv[2]), f)
+        return
     if out == "--survey":
         survey()
+        return
+    if out == "--flicker":
+        flicker(*(float(a) for a in sys.argv[2:]))
         return
     if len(sys.argv) > 2 and sys.argv[2] == "--cases":
         import json

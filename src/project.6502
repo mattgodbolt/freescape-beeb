@@ -1,23 +1,39 @@
 \ ***************************************************************************
 \ FREESCAPE for the BBC Master - the projection (docs/engine.md, stage 5
 \ and section 9; tools/model/maths.py's project, which this matches bit for
-\ bit)
+\ bit; docs/research/projection.md for the method and its figures)
 \
 \ sx = XC + FX X / Z and sy = YC - FY Y / Z in sixteenths of a pixel, by a
-\ normalised reciprocal and quarter-square products:
+\ reciprocal of nine bits, the top one implicit, and two byte products a
+\ coordinate:
 \
-\ - s = bitlen(Z) - PROJ_ZBITS picks a case, one for each s, which shifts
-\   by constant amounts: Zi = Z's top PROJ_IBITS bits, X' = |X| >> s and
-\   Y' = |Y| >> (s - 1), sixteen bits each (FY = 2 FX: Y has a bit more);
-\ - R = proj_rlo/proj_rhi[Zi], about 2^16 FX / (Z >> s), is patched into
+\ - n = bitlen(Z) picks a case: Zi = Z's top PROJ_IBITS bits indexes
+\   proj_m, R = 256 + M, and Zi against PROJ_T picks the region, whose
+\   shift t is n - PROJ_IBITS (high) or one less (low); M is patched into
 \   pmul's operands, once for x and y both;
-\ - pmul: P = X' R / 2^16 from three byte products: x1 r1, and the high
-\   bytes of x1 r0 and x0 r1, plus 1;
-\ - proj_putx and proj_puty add P to the centre or take it off, by the
-\   coordinate's sign, and clamp to sixteen bits.
+\ - each t has a block: X' = X >> t and Y' = Y >> (t - 1), signed, sixteen
+\   bits each (FY = 2 FX: Y has a bit more), each through pmul:
+\   XC + floor(v R / 256) + 1 = (XC + x1 R) + x0 + hi(x0 M) + 1, v =
+\   x1:x0. sx is that for X'; sy for NOT Y', which is YC less it for Y'
+\   (YC = XC), so y needs no code of its own and ends on pmul's RTS.
 \
-\ Where X' wouldn't fit sixteen bits, proj_slow takes X PROJ_SLOW bits
-\ further down, and P that many times bigger.
+\ Three entries:
+\
+\ - project: proj_x, proj_y, proj_z to proj_sx, proj_sy;
+\ - project_z: the same for a vertex with the last one's Z (proj_z isn't
+\   read): no case, no look-up, no patch;
+\ - project_y: proj_sy for a vertex with the last one's X and Z (only
+\   proj_y is read, and proj_sx is left as it was): no x either.
+\
+\ "The last one" is the last project's, or a project_z's after it. Each
+\ gives exactly what project would (the result depends only on X, Y and
+\ Z), so the model has only project. A level camera's vertical edges have
+\ both ends at one X and Z, and a view-aligned face's vertices one Z
+\ (docs/research/projection.md).
+\
+\ The input is inside PROJ_XBAND and PROJ_YBAND, wider than the clip's
+\ guard band (decision 17), and Z >= PROJ_ZNEAR; nothing is checked or
+\ clamped.
 \
 \ Needs: build/maths/consts.6502 first; build/maths/tables.6502 readable
 \ (HAZEL, which the caller pages in); src/maths.6502 included first (its
@@ -25,7 +41,7 @@
 \ ***************************************************************************
 
 \ The arguments and results (baron's, by liveness).
-ZA_AUTO 9, proj_v           ; X, Y, Z: 24-bit signed, ZNEAR <= Z; clobbered
+ZA_AUTO 9, proj_v           ; X, Y, Z: 24-bit signed, PROJ_ZNEAR <= Z; clobbered
 proj_x = proj_v
 proj_y = proj_v + 3
 proj_z = proj_v + 6
@@ -34,33 +50,23 @@ proj_sx = proj_s
 proj_sy = proj_s + 2
 
 \ The projection's own.
-ZA_AUTO 4, pj_m             ; pmul's products; proj_slow's shifted coordinate
-ZA_AUTO1 pj_pl              ; proj_slow's P, low byte
-ZA_AUTO1 pj_t
-ZA_AUTO1 pj_idx             ; pmul's result: 0 sx, 1 sy; bit 7, back to proj_slow
-ZA_AUTO1 pj_k               ; proj_slow's shift
+pj_t = proj_sy              ; pmul's result, so y's needs no copy
+pj_u = proj_sy + 1
+ZA_AUTO1 pj_l               ; pmul's x0
+ZA_AUTO1 pj_blk             ; the last project's block, for project_y and project_z
 
-ASSERT PROJ_XC = PROJ_YC            ; PROJ_PUT has the one centre
-ASSERT PROJ_IBITS = 10 AND PROJ_ZBITS - PROJ_IBITS = 3
+PROJ_TMIN = PROJ_NMIN - PROJ_IBITS - 1      ; the blocks' shifts
+PROJ_TMAX = PROJ_NMAX - PROJ_IBITS
+ASSERT PROJ_XC = PROJ_YC                    ; sy is x's sum, by SQC's XC
+ASSERT PROJ_IBITS = 10 AND PROJ_T >= 512 AND PROJ_T < 768
+ASSERT PROJ_NMIN = 7 AND PROJ_NMAX = 23     ; the cases and blocks spelt out below
+ASSERT LO(sqc_lo) = 0 AND LO(sqc_hi) = 0 AND LO(ngc_lo) = 0 AND LO(ngc_hi) = 0
+ASSERT LO(proj_m) = 0
 
 \ project: (proj_sx, proj_sy) for (proj_x, proj_y, proj_z). Clobbers A,
 \ X, Y and proj_v.
 .project
 {
-    \ |X|; X's sign waits in sx's high byte for proj_putx
-    LDA proj_x+2 : STA proj_sx+1 : BPL xpos
-    SEC
-    LDA #0 : SBC proj_x : STA proj_x
-    LDA #0 : SBC proj_x+1 : STA proj_x+1
-    LDA #0 : SBC proj_x+2 : STA proj_x+2
-.xpos
-    \ |Y|, and the sign its offset goes with, the other way from X's
-    LDA proj_y+2 : EOR #&80 : STA proj_sy+1 : BMI ypos
-    SEC
-    LDA #0 : SBC proj_y : STA proj_y
-    LDA #0 : SBC proj_y+1 : STA proj_y+1
-    LDA #0 : SBC proj_y+2 : STA proj_y+2
-.ypos
     \ the case for Z's bit length n, at proj_cases + 2n
     LDY proj_z+2 : BNE top2
     LDY proj_z+1 : BNE top1
@@ -78,273 +84,259 @@ ASSERT PROJ_IBITS = 10 AND PROJ_ZBITS - PROJ_IBITS = 3
     ZA_CANJUMP PROJ_CASES
 }
 
-\ PROJ_ZI k: Zi = Z >> k (or << -k), PROJ_IBITS bits: its high byte in A
-\ and its low byte in X. Each shift goes whichever way is fewer cycles.
-MACRO PROJ_ZI k
-    IF k >= 8                           ; Z >> 8 holds it
+\ project_z: (proj_sx, proj_sy) for (proj_x, proj_y) and the last Z.
+.project_z
+    LDX pj_blk
+    JMP (pj_xytab,X)
+    ZA_CANJUMP PJ_XY
+
+\ project_y: proj_sy for proj_y and the last X and Z.
+.project_y
+    LDX pj_blk
+    JMP (pj_ytab,X)
+    ZA_CANJUMP PJ_Y
+
+\ PROJ_ZI q: Zi = Z >> q (or << -q): its low byte in X, its bit 8 (which
+\ half of proj_m) in C. Each shift goes whichever way is fewer cycles.
+MACRO PROJ_ZI q
+    IF q >= 8                           ; (Z >> 8) >> (q - 8)
         LDA proj_z+2
-        FOR i = 0..<k-8 : LSR A : ROR proj_z+1 : NEXT
+        FOR i = 0..<q-8 : LSR A : ROR proj_z+1 : NEXT
+        LSR A
         LDX proj_z+1
-    ELIF k >= 6                         ; left 8 - k, from Z's bottom byte
-        LDA proj_z+2
-        FOR i = 0..<8-k : ASL proj_z : ROL proj_z+1 : ROL A : NEXT
-        LDX proj_z+1
-    ELIF k >= 0                         ; Z < 65536
+    ELIF q >= 4                         ; the low two bytes left 8 - q: bit 8 out last
         LDA proj_z+1
-        FOR i = 0..<k : LSR A : ROR proj_z : NEXT
-        LDX proj_z
-    ELSE
+        FOR i = 0..<8-q : ASL proj_z : ROL A : NEXT
+        TAX
+    ELIF q >= 0
         LDA proj_z+1
-        FOR i = 0..<-k : ASL proj_z : ROL A : NEXT
+        FOR i = 0..<q : LSR A : ROR proj_z : NEXT
+        LSR A
         LDX proj_z
+    ELSE                                ; Z < 512: the low byte left
+        LDA proj_z
+        FOR i = 0..<-q : ASL A : NEXT
+        TAX
     ENDIF
 ENDMACRO
 
-\ PROJ_SHIFT v, k, ovf: v >> k (or << -k), v a 24-bit magnitude: its high
-\ byte in Y and its low byte in X; or, with v as it was, on to ovf if that
-\ doesn't fit sixteen bits.
-MACRO PROJ_SHIFT v, k, ovf
-    ASSERT k >= -8
-    IF k >= 16
+\ PROJ_EXT v, s, hx, lx: v >> s (or << -s), v a signed 24-bit value whose
+\ result fits sixteen bits: its high byte EOR hx in Y, its low byte EOR lx
+\ in X. (hx = &80 biases the high byte for SQC; &7F and lx = &FF take NOT
+\ too.) Clobbers v. EOR leaves C, which the shifts carry between bytes.
+MACRO PROJ_LO lo, lx
+    IF lx
+        LDA lo : EOR #lx : TAX
+    ELSE
+        LDX lo
+    ENDIF
+ENDMACRO
+
+MACRO PROJ_EXT v, s, hx, lx
+    IF s > 8                            ; v's top two bytes, arithmetic right
         LDA v+2
-        FOR i = 0..<k-16 : LSR A : NEXT
-        TAX : LDY #0
-    ELIF k >= 14                        ; left 16 - k, into a fourth byte
-        LDA v+2 : STZ pj_t
-        FOR i = 0..<16-k : ASL v+1 : ROL A : ROL pj_t : NEXT
-        TAX : LDY pj_t
-    ELIF k >= 8
+        FOR i = 0..<s-8 : CMP #&80 : ROR A : ROR v+1 : NEXT
+        EOR #hx : TAY
+        PROJ_LO v+1, lx
+    ELIF s = 8
+        LDA v+2 : EOR #hx : TAY
+        PROJ_LO v+1, lx
+    ELIF s = 7                          ; left one, from v's bottom byte's top bit
+        LDA v : ASL A
+        LDA v+1 : ROL A
+        IF lx : EOR #lx : ENDIF
+        TAX
+        LDA v+2 : ROL A : EOR #hx : TAY
+    ELIF s >= 4                         ; left 8 - s
         LDA v+2
-        FOR i = 0..<k-8 : LSR A : ROR v+1 : NEXT
-        TAY : LDX v+1
-    ELIF k >= 5                         ; left 8 - k
-        LDA v+2 : CMP #1 << k : BCS ovf
-        FOR i = 0..<8-k : ASL v : ROL v+1 : ROL A : NEXT
-        TAY : LDX v+1
-    ELIF k >= 2                         ; the low two bytes right, with the top's k bits
-        LDA v+2 : CMP #1 << k : BCS ovf
-        TAY
+        FOR i = 0..<8-s : ASL v : ROL v+1 : ROL A : NEXT
+        EOR #hx : TAY
+        PROJ_LO v+1, lx
+    ELIF s = 1
+        LDA v+2 : LSR A
+        LDA v+1 : ROR A : EOR #hx : TAY
+        LDA v : ROR A
+        IF lx : EOR #lx : ENDIF
+        TAX
+    ELIF s >= 2                         ; right s
+        LDA v+2
+        FOR i = 0..<s : LSR A : ROR v+1 : ROR v : NEXT
+        LDA v+1 : EOR #hx : TAY
+        PROJ_LO v, lx
+    ELIF s = 0
+        LDA v+1 : EOR #hx : TAY
+        PROJ_LO v, lx
+    ELSE                                ; left -s, the low two bytes
         LDA v+1
-        FOR i = 0..<k : LSR A : ROR v : NEXT
-        ORA proj_or2 + (1 << k) - 4,Y
-        TAY : LDX v
-    ELIF k = 1
-        LDA v+2 : CMP #2 : BCS ovf
-        LSR A : ROR v+1 : ROR v
-        LDY v+1 : LDX v
-    ELIF k = 0
-        LDA v+2 : BNE ovf
-        LDY v+1 : LDX v
-    ELIF k > -8
-        LDA v+2 : BNE ovf
-        LDA v+1 : CMP #1 << (8 + k) : BCS ovf
-        FOR i = 0..<-k : ASL v : ROL A : NEXT
-        TAY : LDX v
-    ELSE
-        LDA v+2 : ORA v+1 : BNE ovf
-        LDY v : LDX #0
+        FOR i = 0..<-s : ASL v : ROL A : NEXT
+        EOR #hx : TAY
+        PROJ_LO v, lx
     ENDIF
 ENDMACRO
 
-\ PROJ_CASE s: the projection for s = bitlen(Z) - PROJ_ZBITS; none for an
-\ s no Z from ZNEAR gives.
-MACRO PROJ_CASE s
-    IF s >= PROJ_SMIN
-        PROJ_ZI s + PROJ_ZBITS - PROJ_IBITS
-        JSR proj_recip
-        PROJ_SHIFT proj_x, s, ox
-        JSR proj_mx
-.ax
-        PROJ_SHIFT proj_y, s - 1, oy
-        JMP proj_my
-.ox
-        LDA #s + PROJ_SLOW : LDX #0 : LDY #0
-        JSR proj_slow
-        BRA ax
-.oy
-        LDA #s - 1 + PROJ_SLOW : LDX #3 : LDY #1
-        JMP proj_slow
-    ENDIF
+\ PROJ_CASE n, low: Zi, M (patched into pmul) and the region for
+\ bitlen(Z) = n; on into the block after it (the high region, t = n -
+\ PROJ_IBITS), or to low's (one less). The patch keeps C.
+MACRO PROJ_CASE n, low
+    PROJ_ZI n - PROJ_IBITS
+    BCC lower
+    LDA proj_m+256,X                    ; Zi >= 768: the high region (C = 1)
+    BCS patch
+    ZA_UNREACHABLE
+.lower
+    CPX #PROJ_T - 512                   ; C: Zi >= PROJ_T, the high region
+    LDA proj_m,X
+.patch
+    STA pmul.a1+1 : STA pmul.a3+1 : STA pmul.b1+1 : STA pmul.b3+1
+    EOR #&FF                            ; (NGC and NG are indexed by x + NOT M)
+    STA pmul.a2+1 : STA pmul.a4+1 : STA pmul.b2+1 : STA pmul.b4+1
+    BCS high
+    JMP low
+.high
+ENDMACRO
+
+\ A block, for shift t: its head notes it for project_y and project_z ...
+MACRO PROJ_BHEAD t
+    LDA #2 * (t - PROJ_TMIN) : STA pj_blk
+ENDMACRO
+
+\ ... then sx from X >> t ...
+MACRO PROJ_BX t
+    PROJ_EXT proj_x, t, &80, 0
+    JSR pmul
+    STA proj_sx : LDA pj_u : STA proj_sx+1
+ENDMACRO
+
+\ ... then sy from NOT (Y >> (t - 1)), pmul's result being proj_sy.
+MACRO PROJ_BY t
+    PROJ_EXT proj_y, t - 1, &7F, &FF
+    JMP pmul
 ENDMACRO
 
 \ The cases, at proj_cases + 2 bitlen(Z). Bit lengths below ZNEAR's go to
 \ the first (they're not to be asked).
-ASSERT PROJ_SMIN = -6 AND PROJ_SMAX = 10
-PROJ_CASES = {proj_c_m6, proj_c_m5, proj_c_m4, proj_c_m3, proj_c_m2, proj_c_m1, proj_c_0, proj_c_1, proj_c_2, proj_c_3, proj_c_4, proj_c_5, proj_c_6, proj_c_7, proj_c_8, proj_c_9, proj_c_10}
+PROJ_CASES = {proj_c7, proj_c8, proj_c9, proj_c10, proj_c11, proj_c12, proj_c13, proj_c14, proj_c15, proj_c16, proj_c17, proj_c18, proj_c19, proj_c20, proj_c21, proj_c22, proj_c23}
 .proj_cases
-    FOR n = 0..<PROJ_SMIN + PROJ_ZBITS : EQUW proj_c_m6 : NEXT
+    FOR n = 0..<PROJ_NMIN : EQUW proj_c7 : NEXT
     EQUW PROJ_CASES
-ASSERT (P% - proj_cases) DIV 2 = PROJ_SMAX + PROJ_ZBITS + 1
+ASSERT (P% - proj_cases) DIV 2 = PROJ_NMAX + 1
 
-\ PROJ_SHIFT's top bytes for a right shift by k = 2, 3, 4: t << (8 - k)
-\ for t < 2^k, one after the other.
-.proj_or2   FOR t = 0..<4 : EQUB t << 6 : NEXT
-.proj_or3   FOR t = 0..<8 : EQUB t << 5 : NEXT
-.proj_or4   FOR t = 0..<16 : EQUB t << 4 : NEXT
-ASSERT proj_or3 = proj_or2 + 4 AND proj_or4 = proj_or2 + 12
+\ The blocks' entries for project_z and project_y, by pj_blk.
+PJ_XY = {pj_xy_m4, pj_xy_m3, pj_xy_m2, pj_xy_m1, pj_xy_0, pj_xy_1, pj_xy_2, pj_xy_3, pj_xy_4, pj_xy_5, pj_xy_6, pj_xy_7, pj_xy_8, pj_xy_9, pj_xy_10, pj_xy_11, pj_xy_12, pj_xy_13}
+PJ_Y = {pj_y_m4, pj_y_m3, pj_y_m2, pj_y_m1, pj_y_0, pj_y_1, pj_y_2, pj_y_3, pj_y_4, pj_y_5, pj_y_6, pj_y_7, pj_y_8, pj_y_9, pj_y_10, pj_y_11, pj_y_12, pj_y_13}
+.pj_xytab   EQUW PJ_XY
+.pj_ytab    EQUW PJ_Y
+ASSERT PROJ_TMIN = -4 AND PROJ_TMAX = 13
+ASSERT pj_ytab - pj_xytab = 2 * (PROJ_TMAX - PROJ_TMIN + 1)
 
-.proj_c_m6 PROJ_CASE -6
-.proj_c_m5 PROJ_CASE -5
-.proj_c_m4 PROJ_CASE -4
-.proj_c_m3 PROJ_CASE -3
-.proj_c_m2 PROJ_CASE -2
-.proj_c_m1 PROJ_CASE -1
-.proj_c_0 PROJ_CASE 0
-.proj_c_1 PROJ_CASE 1
-.proj_c_2 PROJ_CASE 2
-.proj_c_3 PROJ_CASE 3
-.proj_c_4 PROJ_CASE 4
-.proj_c_5 PROJ_CASE 5
-.proj_c_6 PROJ_CASE 6
-.proj_c_7 PROJ_CASE 7
-.proj_c_8 PROJ_CASE 8
-.proj_c_9 PROJ_CASE 9
-.proj_c_10 PROJ_CASE 10
+\ Each case n, then the block for t = n - 10, which its high region falls
+\ into; its low region goes on to the block before.
+.pj_b_m4    PROJ_BHEAD -4
+.pj_xy_m4   PROJ_BX -4
+.pj_y_m4    PROJ_BY -4
+.proj_c7    PROJ_CASE 7, pj_b_m4
+.pj_b_m3    PROJ_BHEAD -3
+.pj_xy_m3   PROJ_BX -3
+.pj_y_m3    PROJ_BY -3
+.proj_c8    PROJ_CASE 8, pj_b_m3
+.pj_b_m2    PROJ_BHEAD -2
+.pj_xy_m2   PROJ_BX -2
+.pj_y_m2    PROJ_BY -2
+.proj_c9    PROJ_CASE 9, pj_b_m2
+.pj_b_m1    PROJ_BHEAD -1
+.pj_xy_m1   PROJ_BX -1
+.pj_y_m1    PROJ_BY -1
+.proj_c10   PROJ_CASE 10, pj_b_m1
+.pj_b_0     PROJ_BHEAD 0
+.pj_xy_0    PROJ_BX 0
+.pj_y_0     PROJ_BY 0
+.proj_c11   PROJ_CASE 11, pj_b_0
+.pj_b_1     PROJ_BHEAD 1
+.pj_xy_1    PROJ_BX 1
+.pj_y_1     PROJ_BY 1
+.proj_c12   PROJ_CASE 12, pj_b_1
+.pj_b_2     PROJ_BHEAD 2
+.pj_xy_2    PROJ_BX 2
+.pj_y_2     PROJ_BY 2
+.proj_c13   PROJ_CASE 13, pj_b_2
+.pj_b_3     PROJ_BHEAD 3
+.pj_xy_3    PROJ_BX 3
+.pj_y_3     PROJ_BY 3
+.proj_c14   PROJ_CASE 14, pj_b_3
+.pj_b_4     PROJ_BHEAD 4
+.pj_xy_4    PROJ_BX 4
+.pj_y_4     PROJ_BY 4
+.proj_c15   PROJ_CASE 15, pj_b_4
+.pj_b_5     PROJ_BHEAD 5
+.pj_xy_5    PROJ_BX 5
+.pj_y_5     PROJ_BY 5
+.proj_c16   PROJ_CASE 16, pj_b_5
+.pj_b_6     PROJ_BHEAD 6
+.pj_xy_6    PROJ_BX 6
+.pj_y_6     PROJ_BY 6
+.proj_c17   PROJ_CASE 17, pj_b_6
+.pj_b_7     PROJ_BHEAD 7
+.pj_xy_7    PROJ_BX 7
+.pj_y_7     PROJ_BY 7
+.proj_c18   PROJ_CASE 18, pj_b_7
+.pj_b_8     PROJ_BHEAD 8
+.pj_xy_8    PROJ_BX 8
+.pj_y_8     PROJ_BY 8
+.proj_c19   PROJ_CASE 19, pj_b_8
+.pj_b_9     PROJ_BHEAD 9
+.pj_xy_9    PROJ_BX 9
+.pj_y_9     PROJ_BY 9
+.proj_c20   PROJ_CASE 20, pj_b_9
+.pj_b_10    PROJ_BHEAD 10
+.pj_xy_10   PROJ_BX 10
+.pj_y_10    PROJ_BY 10
+.proj_c21   PROJ_CASE 21, pj_b_10
+.pj_b_11    PROJ_BHEAD 11
+.pj_xy_11   PROJ_BX 11
+.pj_y_11    PROJ_BY 11
+.proj_c22   PROJ_CASE 22, pj_b_11
+.pj_b_12    PROJ_BHEAD 12
+.pj_xy_12   PROJ_BX 12
+.pj_y_12    PROJ_BY 12
+.proj_c23   PROJ_CASE 23, pj_b_12
+.pj_b_13    PROJ_BHEAD 13
+.pj_xy_13   PROJ_BX 13
+.pj_y_13    PROJ_BY 13
 
-\ proj_recip: R for Zi (A its high byte, 2 or 3; X its low byte), patched
-\ into pmul: r1 for x1 r1 and x0 r1, r0 for x1 r0. Clobbers A, Y.
-.proj_recip
-{
-    LSR A : BCS high
-    LDA proj_rlo,X : LDY proj_rhi,X
-    BRA got
-.high
-    LDA proj_rlo+256,X : LDY proj_rhi+256,X
-.got
-    STA pmul.c1+1 : STA pmul.c3+1
-    EOR #&FF
-    STA pmul.c2+1 : STA pmul.c4+1
-    TYA
-    STA pmul.a1+1 : STA pmul.a3+1 : STA pmul.b1+1 : STA pmul.b3+1
-    EOR #&FF
-    STA pmul.a2+1 : STA pmul.a4+1 : STA pmul.b2+1 : STA pmul.b4+1
-    RTS
-}
-
-
-\ proj_mx, proj_my: sx, sy from X' or Y' (Y its high byte, X its low).
-.proj_my
-    LDA #1 : STA pj_idx
-    BRA pmul
-.proj_mx
-    STZ pj_idx
-    \ (on into pmul)
-
-\ pmul: P = x1 r1 + hi(x1 r0) + hi(x0 r1) + 1, R = r1:r0 (proj_recip's),
-\ X' = x1:x0 (Y:X): P's low byte in A, its high byte in pj_ph; then the
-\ result, sx if pj_idx is 0, sy if 1, or back to proj_slow if its bit 7 is
-\ set. A high byte alone takes its low byte's borrow from a CMP. Each
-\ product is >= 0, so C = 1 after each.
-pj_ph = pj_m+1
+\ pmul: XC + floor(v R / 256) + 1, R = 256 + M (patched by the case), v =
+\ x1:x0 signed, x1 + 128 in Y and x0 in X, to sixteen bits: in pj_u:pj_t
+\ (proj_sy), its low byte in A too. XC + x1 R is SQC less NGC; x0 M's
+\ high byte takes its low byte's borrow from a CMP, and is >= 0, so C = 1
+\ after it, the + 1.
 .pmul
 {
+    CPY #&80 : BEQ small
     SEC
-.a1 LDA sq_lo,Y                         ; x1 r1
-.a2 SBC ng_lo,Y
-    STA pj_m
-.a3 LDA sq_hi,Y
-.a4 SBC ng_hi,Y
-    STA pj_ph
-.b1 LDA sq_lo,X                         ; hi(x0 r1)
+.a1 LDA sqc_lo,Y                        ; XC + x1 R
+.a2 SBC ngc_lo,Y
+    STA pj_t
+.a3 LDA sqc_hi,Y
+.a4 SBC ngc_hi,Y
+    STA pj_u
+.x0
+    STX pj_l
+.b1 LDA sq_lo,X                         ; hi(x0 M)
 .b2 CMP ng_lo,X
 .b3 LDA sq_hi,X
 .b4 SBC ng_hi,X
-    STA pj_t
-.c1 LDA sq_lo,Y                         ; hi(x1 r0)
-.c2 CMP ng_lo,Y
-.c3 LDA sq_hi,Y
-.c4 SBC ng_hi,Y
-    CLC : ADC pj_t
-    BCC no_c
-    INC pj_ph                           ; (x1 r1 <= 255 * 255: no carry out)
-.no_c
-    SEC : ADC pj_m
-    BCC no_c2
-    INC pj_ph
-.no_c2
-    LDX pj_idx : BMI back
-    BNE proj_puty
-    \ (on into proj_putx)
-}
-
-\ PROJ_PUT res: res = the centre plus P (A low, pj_ph high), or minus P if
-\ the sign project left in res's high byte is negative, clamped to sixteen
-\ bits.
-MACRO PROJ_PUT res
-    BIT res+1 : BMI minus
-    CLC : ADC #LO(PROJ_XC) : STA res
-    LDA pj_ph : ADC #HI(PROJ_XC)
-    BCS over                            ; (the slow path's P can be 65535)
-    BMI over
-    STA res+1
+    ADC pj_l                            ; + x0 + 1, the ninth bit in C
+    BCC nine
+    INC pj_u
+.nine
+    CLC : ADC pj_t : STA pj_t
+    BCC done
+    INC pj_u
+.done
     RTS
-.over
-    LDA #&FF : STA res
-    LDA #&7F : STA res+1
-    RTS
-.minus
-    STA pj_t
-    LDA #LO(PROJ_XC) : SEC : SBC pj_t : STA res
-    LDA #HI(PROJ_XC) : SBC pj_ph
-    BCS fits                            ; P <= the centre: not negative
-    BPL under                           ; below -32768, it wrapped
-.fits
-    STA res+1
-    RTS
-.under
-    STZ res
-    LDA #&80 : STA res+1
-    RTS
-ENDMACRO
-
-.proj_putx
-    PROJ_PUT proj_sx
-.proj_puty
-    PROJ_PUT proj_sy
-.back
-    RTS
-
-\ proj_slow: P for a coordinate whose X' doesn't fit: A = its shift k
-\ (the case's plus PROJ_SLOW), X = its offset in proj_v (0 or 3), Y = 0
-\ for sx, 1 for sy. P = 2^PROJ_SLOW pmul(|v| >> k), saturated.
-.proj_slow
-{
-    STA pj_k : STY pj_idx
-    LDA proj_v,X : ZA_INDEXEDBY {0, 3}
-    STA pj_m
-    LDA proj_v+1,X : ZA_INDEXEDBY {0, 3}
-    STA pj_m+1
-    LDA proj_v+2,X : ZA_INDEXEDBY {0, 3}
-    STA pj_m+2
-    LDX pj_k : BEQ shifted : BMI left
-.right
-    LSR pj_m+2 : ROR pj_m+1 : ROR pj_m
-    DEX : BNE right
-    BRA shifted
-.left
-    LDA pj_m+2 : BNE most               ; >= 2^16 << 1
-.leftbit
-    ASL pj_m : ROL pj_m+1 : ROL pj_m+2
-    INX : BNE leftbit
-.shifted
-    LDA pj_m+2 : BNE most
-    LDA pj_idx : ORA #&80 : STA pj_idx
-    LDX pj_m : LDY pj_m+1
-    JSR pmul
-    \ P << PROJ_SLOW, or the most there is
-    STA pj_pl
-    FOR i = 0..<PROJ_SLOW
-        ASL pj_pl : ROL pj_ph : BCS most
-    NEXT
-    LDA pj_pl
-    BRA put
-.most
-    LDA #&FF : STA pj_ph
-.put
-    LSR pj_idx : BCS y
-    JMP proj_putx
-.y
-    JMP proj_puty
+.small                                  ; x1 = 0: XC + x1 R is XC
+    LDA #LO(PROJ_XC) : STA pj_t
+    LDA #HI(PROJ_XC) : STA pj_u
+    BRA x0
 }
 
 .proj_end
