@@ -70,3 +70,37 @@ a redraw takes a median of 2,293,923 T-states (0.66s), from 670,879 to
 4,273,507 over the 65 views. Projection is 63% of it, the sort 11% and
 drawing 26%. The start view matches the frame the game drew at boot byte
 for byte.
+
+## 2026-10-31: the player logic (track I)
+
+Driller's player logic is transcribed in `tools/logic/` and checked pass
+by pass against the original (`make logic`); `docs/research/zx-logic.md`
+has what it does. A pass of the main loop reads up to five keys and does
+each one's action in the keyboard's order; a step moves the camera
+through the cells a boundary at a time, testing each crossing against the
+objects' faces, climbing and falling on the probe; and the areas connect
+through FCL, so the interpreter is transcribed whole, its renderer's and
+sound's parts left as hooks.
+
+The oracle runs the original a pass at a time with keys held, holding
+only the clock and the sensors' fire, and every variable and the whole
+database must agree after every pass. What the first fuzzes found:
+
+- a transcription slip (the rise sets its target before testing the
+  level), at once;
+- that the FCL's REDRAW runs the renderer, the copy and the sensors in
+  the middle of a pass, so their outputs, the copy's clearing of the
+  pending sound among them, are the original's after such a pass;
+- that a minute ending with no energy goes straight to the game's end;
+- a bug of the original's: a step ending exactly on two cells' corners
+  going down can run the walk past its target and throw the probe out of
+  the area (to x 20016), and a move from there hangs the game. The
+  transcription hangs in the same place, and the checker requires the
+  original to.
+
+Measured that day: the multiplies and the divide against the original's
+routines, 2,000 random cases each, none differing; the 22 scenarios,
+1,921 passes; and a fuzz of 1,000 walks of 120 passes from random
+entrances (seed 100000), 110,359 passes, none differing. Those walks
+changed area 537 times (87 across an edge), climbed 189 times, fell 225
+times (52 of them too far) and were stopped by an object 4,272 times.

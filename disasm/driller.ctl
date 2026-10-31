@@ -207,15 +207,203 @@ c $9179 DE,HL = HL * DE, signed
 
 @ $97A4 label=Start
 c $97A4 The game's start: the loader jumps here
+@ $9807 label=MainRedraw
 @ $9825 label=MainLoop
 c $9825 The main loop's top: input (#R$9990), events (#R$9B6E), then the redraw
+D $9825 A pass: the input waits for keys or a minute of the clock and does each key's action; the events run the collided object's FCL and the conditions; then (at #R$9807) the redraw, the copy and the sensors (#R$9841) if something moved or changed, and the panel (#R$B72B). See docs/research/zx-logic.md.
+  $9825 The input: the keys' actions.
+  $9828 The events.
+  $982B GameFlags bit 1: the game has ended; start again.
 @ $9BF7 label=CopyBuffer
 c $9BF7 Copy buffer rows 0-103 to the screen, one LDIR a row
+D $9BF7 Then plays the sound left in #R$8A1F, and clears it.
 @ $9D1C label=GoToEntrance
 c $9D1C Put the camera at entrance #R$8911 of the current area
-@ $A364 label=Step
+D $9D1C Loads the area (#R$BE18), then looks the entrance up by id (#R$A8BA: the globals, then the area's objects, any type). The cell's centre in x and z, the eye #R$8776-1 cells above the entrance's cell on the probe (the cell itself in the jet), and the entrance's pitch, yaw and roll. If there's no such object (entrance 0 is none), the camera has crossed the area's edge: x cell 126 becomes 1 and 0 becomes 125, or else z likewise, and nothing else changes.
+  $9D3C No entrance: wrap the cell the last move left in #R$88B5 or #R$88B7.
+@ $A364 label=MoveStep
 c $A364 A step forward (A=3) or back (A=4)
+D $A364 x += floor(step*sin(yaw)/64), z += floor(step*cos(yaw)/64), each negated after the floor for a step back. In the jet the step first splits by the pitch: y -= floor(step*sin(pitch)/64), and the horizontal step is floor(step*|cos(pitch)|/64). On the probe the move (#R$9F42) is made from the feet, #R$8776-1 cells below the eye, and the eye put back above wherever the feet end up.
+  $A378 The jet: split the step by the pitch.
+  $A437 The probe: down to the feet.
+  $A452 Move; C bits 2 and 4 if the camera moved.
 @ $BE18 label=LoadArea
 c $BE18 Enter area #R$8862: its objects, its scale and the per-scale values
+D $BE18 Resets the minute counters (#R$889D, #R$88AE), hides three globals, places the rig (#R$CD3B) and scales the step (#R$8768), the probe's height (#R$8776) and its limits (#R$8775-#R$8778) by the area's scale (#R$8779).
 @ $CB7A label=Protection
 c $CB7A The protection: a word from the manual, chosen by #R$8A1D from the table at #R$ABC1
+
+; ----------------------------------------------------------------------------
+; The player logic (docs/research/zx-logic.md; transcribed in tools/logic/)
+; ----------------------------------------------------------------------------
+
+; The input.
+@ $9990 label=Input
+c $9990 A pass's input: clear the pass's flags, wait for keys or a minute, do each key's action
+D $9990 Clears #R$8920, #R$8A69, #R$8BF1, #R$8BF0, #R$8A64, #R$8A1F, #R$8A1E. Reads the keys (#R$943C) until one is held; a minute of the clock (#R$889D changed from #R$88AE) ends the pass at once with only the events due. Each key's action comes from the key table (#R$8FC8): the first part's third byte in shooting mode (#R$88AC). Then the actions in the keys' order: 1-$14 move (#R$A279), $15-$1E the crosshair and fire (#R$A95C), $28 and $2A the rigs (#R$BEFA), $29 the information screen (#R$C3DC).
+  $99C0 Wait for a key or a minute.
+  $99C8 The game is over: its end.
+  $99CB A minute has ended: the events only.
+  $99E4 Each key's action.
+  $9A63 Do each action in turn.
+@ $9AB7 label=GameEnd
+c $9AB7 The game is over (#R$8BF2): its end, then a new game
+@ $943C label=ReadKeys
+c $943C Read up to five keys held, in the keyboard's order, as codes into #R$8FBD (#R$8FBC of them)
+D $943C The half-rows from $FEFE to $7FFE, bit 0 first, through the code table at #R$9414; then the Kempston joystick if #R$8FC5 is 2. Carry set, A the first code, if any key is held. A set held since the last read is a repeat: it waits #R$8FC3 frames, then #R$8FC4 between repeats (both 0 in play).
+@ $9404 label=KeyRows
+g $9404 The half-rows as read, CPL AND $1F, less the keys taken
+B $9404,8,8
+@ $940C label=KeyRepeating
+g $940C The held keys were held last time too; the last keys read and their count; the repeat delay copied
+B $940C,8,8
+@ $9414 label=KeyCodes
+b $9414 A code for each key, five a half-row, from $FEFE's
+B $9414,40,5
+@ $8FBC label=KeyCount
+g $8FBC The keys this pass: their count and codes; the interrupt's countdown; the repeat's delay and rate; the controls; the key table's lengths
+B $8FBC,12,1
+@ $8FC8 label=KeyTable
+b $8FC8 Keys to actions: key, action, shooting mode's action ($8FC6 of them); then key, action ($8FC7 of them)
+B $8FC8,36,3
+B $8FEC,48,2
+@ $998A label=Actions
+g $998A The actions of this pass's keys, and the one being done
+B $998A,6,6
+@ $A95C label=CrosshairAction
+c $A95C Actions $15-$1E: B ($15) shows or hides the crosshair, SPACE ($1E) toggles shooting mode, $17-$1A move the crosshair, 0 ($16) fires
+D $A95C Fire draws the laser, finds the object under the crosshair (#R$B153) and sets #R$8BF1 so the events run its shot script.
+
+; Moving.
+@ $A279 label=Movement
+c $A279 Actions 1-$14: rise, fall, step, turn, look, roll, turn round, the turn's and the step's sizes
+D $A279 1 (R) rises: in the jet a step up; on the probe a level (#R$8779 cells) if the head's cells above are clear, to #R$8771. 2 (F) falls: in the jet a step down; on the probe a level, untested, to 1. 3 and 4 step (#R$A364). 5 and 6 (Q, W) turn by #R$876F, 7 and 8 (P, L) look up and down, 9 and $0A (N, M) roll; all mod 72. $0D (U) turns round, and in the jet turns the pitch round too. $0B and $0C (A, Z) and $11 and $12 (S, X) change the turn's and the step's sizes, then wait 7 frames. Exits at #R$A57C (the events due) or #R$A581, ORing C into #R$8920 and B into #R$8921.
+  $A2B0 The probe rises: test the head's way up as the jet would.
+  $A332 The probe falls: no test.
+  $A46C The turns.
+  $A4D6 Turn round.
+  $A505 The turn's and the step's sizes.
+  $A57C The events are due.
+  $A581 The flags.
+@ $A57C label=MovementDone
+@ $A581 label=MovementFlags
+@ $9F42 label=Move
+c $9F42 Move the camera toward #R$88AF-#R$88B3, a cell boundary at a time; returns A=1 if it moved
+D $9F42 The walk: of the axes with a boundary left to cross, the one crossed first (x, then z, then y, with the other two at its crossing point from #R$9179 and #R$92D7), and with it any axis crossed at the same point. Each crossing stops at the area's extent (#R$88DF), else goes to #R$9DCF. Stopped (1), the target is the crossing point a unit back into this cell; on a step up or a fall (2), the crossing point in x and z and the new y. Then #R$BCCB at each of the body's cells, and the target taken as the camera. With #R$88D0 = 0 (the sensors' test, #R$9841) it only walks.
+  $9FCA The next crossing: x first?
+  $A07E z first?
+  $A107 y.
+  $A158 The area's extent.
+  $A1A9 Cross.
+  $A1D8 Stopped.
+  $A1F0 Stepped up or fell.
+  $A220 Keep clear of faces, and move.
+@ $A220 label=MoveDone
+@ $9F33 label=MoveScratch
+g $9F33 The move's target cells, its crossing point and its delta
+B $9F33,3,3
+W $9F36,12,6
+@ $88AF label=Target
+g $88AF The move's target (x, y, z words), and the walk's current cell (x, y, z)
+W $88AF,6,2
+B $88B5,3,3
+@ $9DCF label=Cross
+c $9DCF Cross into the next cell (the bits of A, as C in #R$9F42): 0 crossed, 1 stopped, 2 stepped up or fell
+D $9DCF In the jet an object entered (#R$A597) stops it. On the probe, an object entered is climbed if there's a clear column #R$8776 cells high starting at most #R$8778 cells up, the cells above clear too; the target rises that far (sound 4). Across, the probe falls to whatever is below (sound 3), and a fall of more than #R$8777 cells ends the game (#R$8BF2 = 4, the view rolled 90 degrees and levelled). The object entered, and the one landed on, go to #R$8A69.
+  $9E0A The step up: count clear cells up the column.
+  $9E51 Too high: stopped.
+  $9E5F Climbed.
+  $9E8B Across.
+  $9ECA The fall.
+@ $9DC9 label=CrossScratch
+g $9DC9 The step-up's starting cell, and a dummy for the test above
+B $9DC9,2,1
+@ $A597 label=Touch
+c $A597 Does the crossing C from the current cell (#R$88B5) enter a visible object? A=1, its id at (IX)
+D $A597 The area's objects, then the globals. An object is entered through a face: going up, the next cell is its first; going down, this cell is the one past its last; and on each other axis the cell is within it, or entered across it at the same time. A rectangle (type 3) or a line or polygon (10 on) returns at once; any other type is remembered (#R$A596) and the last of them returned. Entrances (type 0) aren't skipped: their angles are their size.
+@ $A5C7 label=TouchScan
+c $A5C7 B objects from IY
+@ $A596 label=TouchRemembered
+g $A596 #R$A597's last hit of a solid type
+B $A596,1,1
+@ $BCCB label=KeepClear
+c $BCCB Keep the target #R$88D0 units from any face its cell's edges would cross into
+D $BCCB An axis whose target is within #R$88D0 (10) of its cell's low or high edge marks a crossing that way; if those crossings together enter an object (#R$A597), the target moves back to #R$88D0 from each marked edge. The first object's id goes to #R$8A69. This is how the rectangles on an area's edge are found: the walk stops at the extent, and this finds the face beyond.
+@ $BCCA label=KeepClearDummy
+g $BCCA A dummy for #R$BCCB's hit once #R$8A69 is set
+B $BCCA,1,1
+@ $88D0 label=Margin
+b $88D0 How near a face the camera stands; 0 makes #R$9F42 a test
+B $88D0,2,1
+@ $88DF label=AreaExtent
+b $88DF The area's extent in cells: x max, x min, y max, y min, z max, z min
+B $88DF,6,2
+
+; Areas, entrances and the events.
+@ $A8BA label=Lookup
+c $A8BA The object with id #R$8916: A=0, the globals then this area's objects; else in area A. A=0 if found, IX at it
+@ $CD3B label=PlaceRig
+c $CD3B Show the rig's five global parts at the area's rig (#R$877B, #R$882C), or hide them
+@ $877B label=RigPlaced
+g $877B A rig in each of areas 1-18, and a second byte each
+B $877B,36,18
+@ $882C label=RigPositions
+b $882C Each area's rig, in cells (x, y, z)
+B $882C,54,3
+@ $9B6E label=Events
+c $9B6E A pass's events, if #R$8A64: the collided object's FCL, the global conditions, the area's
+D $9B6E The object with id #R$8A69 runs its script (#R$B320); if it has none and the move was stopped (#R$8A1E), the bump's sound. Then each global condition (#R$8922) and each of the area's (#R$8868).
+@ $B320 label=RunFCL
+c $B320 Run A bytes of FCL from IX: the shot's instructions if #R$8BF1, else the others
+D $B320 An instruction is an opcode (bit 7: a shot's) and operands, its length from #R$8939. A test that fails, and any opcode not handled (0 among them), ends the script. $12 is GOTO area, entrance (#R$9D1C), how Driller's areas connect.
+  $B614 GOTO.
+  $B635 SWAPJET: into the jet or out.
+  $B6D0 REDRAW: the redraw, the copy, the sensors and the panel, there and then.
+  $B6FA The next instruction.
+@ $B31F label=FCLOpcode
+g $B31F The instruction being run
+B $B31F,1,1
+@ $8939 label=FCLLengths
+b $8939 Each FCL opcode's length, operands included
+B $8939,48,16
+@ $8929 label=ObjectHeader
+b $8929 Each object type's header length: its FCL starts there
+B $8929,16,16
+@ $887B label=FCLBits
+g $887B The FCL's 32 bits (bit 32, $887E bit 7, is in the jet), then its variables 1-32
+D $887B Variable 30 (#R$889C) counts minutes; variable 31 (#R$889D) minutes in this area, which the input watches.
+B $887B,4,4
+B $887F,32,16
+@ $88A0 label=Crosshair
+g $88A0 The crosshair (x, y, shown), the interrupt's frames, the clock, shooting mode, the crosshair wanted, the minute the input saw
+B $88A0,4,4
+T $88A4,8
+B $88AC,3,1
+@ $8A64 label=EventsDue
+g $8A64 The events are due this pass
+B $8A64,1,1
+@ $8A69 label=Collided
+g $8A69 The object the move hit, or the shot hit
+B $8A69,1,1
+@ $8A1E label=Blocked
+g $8A1E The move was stopped; a sound to play after the copy
+B $8A1E,2,1
+@ $8BF0 label=Wipe
+g $8BF0 The copy wipes; the events are a shot's; why the game ended (1 shield, 2 time, 3 energy, 4 a fall)
+B $8BF0,3,1
+@ $8911 label=EntranceId
+g $8911 The entrance #R$9D1C puts the camera at
+B $8911,1,1
+@ $8916 label=FoundId
+g $8916 The id #R$A8BA looks up; the colour being filled
+B $8916,2,1
+@ $8875 label=Energy
+g $8875 Energy (then the jet's and the probe's kept), shield (then the jet's and the probe's kept)
+B $8875,6,1
+
+; The interrupt.
+@ $BAB1 label=InterruptInit
+c $BAB1 IM 2, its table at $FE00, its handler at #R$BAE6
+@ $BAE6 label=Interrupt
+c $BAE6 The interrupt: frames (#R$8A1D, #R$8FC2), the clock a second a 50 frames, a minute's energy and #R$889D, and the sensors' shots
+@ $BB27 label=InterruptMinute

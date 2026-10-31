@@ -16,7 +16,10 @@ Master. The disc follows the work as it lands, so it's in progress.
 shadow RAM with the flip at the vertical sync, and draws a moving test
 pattern where the 3D view will go. Driller's own
 ZX code runs headless as the oracle and draws every entrance view, so the
-engine has its reference. The Python model of the renderer, the maths,
+engine has its reference. Driller's player logic (the keys, moving and
+colliding, climbing and falling, the jet, and the FCL that joins the
+areas) is transcribed in Python and checked pass by pass against the
+original. The Python model of the renderer, the maths,
 the span buffer and row writer, and the colours are being built in
 parallel. `docs/journal.md` has the story as it goes.
 
