@@ -9,7 +9,14 @@ Master*. It never came out for the BBC. This engine is proved on
 **[Run the disc in jsbeeb](https://bbc.xania.org/?autoboot&model=Master&displayMode=pal&disc1=github:mattgodbolt/freescape-beeb/freescape.ssd)**
 (a Master 128 on a PAL television, whose blur blends the dithers as a real
 one does; jsbeeb's settings switch it to an RGB monitor), or write
-`freescape.ssd` to a disc and SHIFT-BREAK a Master. The disc follows the work as it lands, so it's in progress.
+`freescape.ssd` to a disc and SHIFT-BREAK a Master. The disc follows the
+work as it lands, so it's in progress.
+
+![Driller's Beryl area, as the engine's model draws it in MODE 2 through a PAL television](docs/images/hero_pal.png)
+
+*A preview: Beryl, one of Driller's areas, as the engine's Python model renders it
+in MODE 2, the ST's colours dithered from the BBC's eight, seen through
+jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 ## Where it's up to
 
@@ -22,6 +29,12 @@ must match byte for byte, renders all of Driller's entrance views and
 agrees with the original's. The maths, the span buffer and row writer, the
 object pipeline, the colours and the player's movement are being built in
 parallel. `docs/journal.md` has the story as it goes.
+
+![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
+
+*Nine of Driller's 65 entrance views from the model, through PAL: the
+MODE 2 dithers blend on a television as they would on a real one. Driller
+is Incentive Software's.*
 
 ![The disc today: MODE 2's eight colours in the view's place, double-buffered](docs/images/disc_testcard.png)
 
