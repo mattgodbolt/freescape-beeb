@@ -290,3 +290,34 @@ either way, never more; an edge never passes its far vertex. The model's
 `raster.py` steps the same way, so the 6502 still matches it byte for
 byte. The rasteriser builds its own quarter-square table at `raster_init`
 (the slideshow has no HAZEL tables); the engine can share one later.
+
+## 24. Clip crossings by one 16-bit fraction (2026-10-31, autonomous)
+
+The guard band's and the 2D clip's new vertices come from one 16-bit
+fraction a crossing, taken from the edge's inside end so that two faces
+sharing an edge cut it at the same point; both distances are shifted
+until their difference fits 16 bits, so the 6502 always does one unrolled
+16-by-16 division. The near clip stays exact (its cut points are four
+units from the eye). Against the exact model, 149 of 32.6 million pixels
+differ over the views checked, and the order changes in 3 views
+(`docs/research/objects.md`).
+
+## 25. Outcodes from the projection, and the drawn test (2026-10-31, autonomous)
+
+A vertex's outcodes against the view come from its projected position by
+16-bit compares, and a face wholly beyond `x = ±z` or `2y = ±z` (outside
+the view's sides) is dropped first by compares, which changes no pixel.
+A face is drawn when it has three or more vertices not all on one line,
+decided by signs first; it replaces the area test.
+
+## 26. The floor stays a face (2026-10-31, autonomous)
+
+Drawing each area's floor as the horizon's ground (an amendment to
+decision 8a, built in the model behind `FLOOR_AS_HORIZON`, off) was
+measured and not taken: 0.43% of pixels change over the views, but near a
+platform's edge looking out up to a quarter of a view changes (the
+original's void past the edge becomes ground), and the thick floors of
+areas 14 and 18 uncover objects below their tops. Against the ZX oracle,
+99.37% of pixels agree against 99.95% with the floor as a face. The floor
+costs about a sixth of the front end (journal, 2026-10-31), so it gets a
+cheaper path instead.

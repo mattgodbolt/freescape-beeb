@@ -305,3 +305,15 @@ is small, and at 5 cycles a byte and a lean ~100 a face-line painter's
 should cost about half the span buffer. The picture is the same: the span
 buffer only reproduced the painter's image. The track went back to build
 it.
+
+## 2026-10-31: the object pipeline's speed round
+
+Measured over the 65 views and the walks: stages 1-7 from a median of
+293K cycles to 221K on a step frame (most 351K), and from 321K to 253K on a
+turn (most 394K), the model and the 6502 still exact over 2,485 views.
+Crossings by one 16-bit fraction, outcodes from the projection, a cheaper
+drawn test (decisions 24 and 25); the floor as the horizon measured and
+not taken (decision 26). Still about seven times the part's budget, at
+about 3.5K cycles a vertex, so a fresh track (M) took the front end on to
+restructure it: one pass over each object's vertices, trivial accept for
+faces wholly on screen, 16 bits downstream of the cached transform.
