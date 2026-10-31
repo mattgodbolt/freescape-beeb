@@ -20,23 +20,30 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 ## Where it's up to
 
-*2026-10-31.* **The disc draws Driller's views on the BBC itself.** It's a
-slideshow of all 65 of Driller's entrance views: each view's faces are
-worked out ahead of time by the Python model, and the Master's own
-rasteriser and row writer draw them into MODE 2 every frame,
-double-buffered, flipping as soon as the beam leaves the view. Every frame
-it draws matches the model byte for byte. SPACE or the cursor keys step
-between views, and the screen shows the frame rate as it's measured.
+*2026-10-31.* **The disc draws Driller's views on the BBC, but only the
+last step of the pipeline runs there yet.** It's a slideshow of all 65 of
+Driller's entrance views. The Python model works out each view's faces
+ahead of time, on the PC: the visible objects, the rotation, the
+projection and the clipping. The Master's own rasteriser and row writer
+then fill them into MODE 2 every frame, double-buffered, byte for byte as
+the model does. SPACE or the cursor keys step between views.
+
+**The frame rate on the screen is that drawing step alone, not the
+engine's.** The steps before it are built in 6502 too, and match the model
+exactly, but they aren't on the disc yet and they're slow: put together
+today, a median view takes roughly eleven fields, about four or five
+frames a second. Both halves are being made fast, and the next disc runs
+the whole pipeline on the BBC, so the figure it shows is the real one.
 
 ![The disc: the Master drawing three of Driller's views, through PAL](docs/images/disc_slides.png)
 
-*The disc in jsbeeb through PAL: the Master drawing three of Driller's
-entrance views itself. Driller is Incentive Software's.*
+*The disc in jsbeeb through PAL: the Master filling in three of Driller's
+entrance views, whose faces the model worked out on the PC. Its "frames/sec"
+is the fill alone. Driller is Incentive Software's.*
 
-It's correct and not yet fast: a frame takes a median of about three
-fields. The rest of the renderer (the object pass, the transform, the
-projection and the clips) is built in 6502 and matches the model exactly
-too, and every stage is now being made fast. Driller's own ZX code runs
+Measured on the jsbeeb disc check (journal, 2026-10-31), the drawing
+step alone takes a median of about three fields; the object pass,
+transform, projection and clips about seven more. Driller's own ZX code runs
 headless as the oracle, and Driller's player logic is transcribed and
 checked pass by pass against it, with its 6502 version under way.
 `docs/journal.md` has the story as it goes.
