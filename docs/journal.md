@@ -189,3 +189,18 @@ over the views: 95.6 a line, 76.9 a face-line, 271.9 a run, 1.3 a byte and
 894 an edge (rms error 6.3%). Runs and edge set-up are the cost. The track
 went back to restructure it for speed, free to change the model's fill
 method where the picture stays as good (decisions 11 and 12).
+
+## 2026-10-31: Rich Talbot-Watkins's sources
+
+Rich made a set of BBC game sources public that day; a review read eleven
+of them for tricks this engine can use (`docs/research/rtw-sources.md`):
+PORTAL's source and its polar branch, Rich's optimisation notes, Chase
+H.Q., Teddy Boy and its optimisation reviews, Exolon, Critical Mass, flow,
+Nevryon, spritescale and beebcrunch. The ranking, against our figures:
+flipping as soon as the beam has left the view rather than at the vertical
+sync; a level camera's zero and unit matrix entries skipped and one
+reciprocal shared by a vertical edge's two ends; PORTAL's polar front end
+for turns; reciprocals by lookup for gradients and clips; Chase H.Q.'s and
+Teddy Boy's row-run overheads; the sky skip by per-line records. Every
+source that skipped work by reading the screen measured it as a loss. Each
+item went to the track that owns its stage.
