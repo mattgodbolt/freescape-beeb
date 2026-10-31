@@ -21,8 +21,8 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 ## Where it's up to
 
 *2026-10-31.* The disc boots into MODE 2, double-buffered in main and
-shadow RAM with the flip at the vertical sync, and draws a moving test
-pattern where the 3D view will go. Driller's own
+shadow RAM with each frame shown as soon as the beam has left the view,
+and draws a moving test pattern where the 3D view will go. Driller's own
 ZX code runs headless as the oracle and draws every entrance view, so the
 engine has its reference. The Python model of the renderer, which the 6502
 must match byte for byte, renders all of Driller's entrance views and

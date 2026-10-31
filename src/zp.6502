@@ -13,8 +13,9 @@
 ZP_FIXED = &10
 SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
     \ the frame's protocol (src/screen.6502), shared with the interrupt
-.frame_ready    SKIP 1      ; non-zero: a frame is drawn in draw_buffer, for the next sync to show
+.frame_ready    SKIP 1      ; non-zero: a frame is drawn in draw_buffer, waiting to be shown
 .draw_buffer    SKIP 1      ; the buffer drawn last or being drawn: 0 main RAM's, 1 shadow's
+.view_shown     SKIP 1      ; non-zero once the buffer shown has had its view shown whole
 ENDSECTION
 
 \ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
