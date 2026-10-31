@@ -616,14 +616,14 @@ ASSERT sbg_3 - (sb3 + 2) = STEP_G AND sb_end3 - (sb3 + 2) = STEP_NONE
 \
 \ tools/model/raster.py's edge_crossings is the rule (decision 21): a
 \ vertical edge's boundary is (x + 7) >> 4; another's x is a DDA in 8.8,
-\ X = 16 (x0 - 8) + 255 + |dx| t0 r >> (12 + s) on the first line (the
-\ offset taken with dx's sign) and the gradient |dx| r >> (8 + s) a line
-\ after, where dy is n 2^s (n in [128, 255], rounded up) and r = 256 + f(n)
-\ its reciprocal, from recipf. The products are quarter squares, by the
-\ maths' tables with f patched in (mulf).
+\ X = 16 (x0 - 8) + 255 plus or minus g t0 >> 4 on the first line, and
+\ g = |dx| r >> (8 + s) a line after (with dx's sign), where dy is n 2^s
+\ (n in [128, 255], rounded up) and r = 256 + f(n) its reciprocal, from
+\ recipf. The products by r are quarter squares, by the maths' tables with
+\ f patched in (mulf).
 
 ZA_AUTO1 e_c, e_u, e_w, e_k1, e_t0, e_neg, e_sh
-ZA_AUTO2 e_dx, e_dy, e_x, e_q
+ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g
 
 .edge_setup
 {
@@ -711,12 +711,28 @@ ZA_AUTO2 e_dx, e_dy, e_x, e_q
 .reciprocal
     LDA recipf - 128,Y
     JSR mulf_set
-    \ The offset: |dx| t0 r >> (12 + s)
     LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
+    LDA e_dy+1 : BNE tall
+    LDA e_dy : CMP #SUB + 1 : BCS tall
+    \ No taller than a line, so no more than one line and no gradient: the
+    \ offset |dx| t0 r >> (12 + s).
     LDA e_t0 : JSR mul4
-    LDA m_r : STA m_v : LDA m_r+1 : STA m_v+1
+    LDA m_p : STA m_v : LDA m_p+1 : STA m_v+1
     JSR mulf
     LDA e_sh : CLC : ADC #4 : JSR shr24
+    BRA offset
+.tall
+    \ The gradient g = |dx| r >> (8 + s), and the offset g t0 >> 4.
+    JSR mulf
+    LDA e_sh : JSR shr24
+    LDA m_r : STA e_g : STA m_v
+    LDA m_r+1 : STA e_g+1 : STA m_v+1
+    LDA e_t0 : JSR mul4
+    LDY m_p
+    LDA m_p+1 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA m_r
+    LDY m_p+1
+    LDA m_p+2 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA m_r+1
+.offset
     \ X0 plus or minus it
     LDA e_neg : BMI minus
     CLC
@@ -732,50 +748,51 @@ ZA_AUTO2 e_dx, e_dy, e_x, e_q
     LDA e_x : STA ch_xl,X : ZA_INDEXEDBY 0..1
     LDA e_x+1 : STA ch_p,X : ZA_INDEXEDBY 0..1
     LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
-    \ An edge of one line needn't step (and one no taller than a line has
-    \ no gradient).
+    \ An edge of one line needn't step.
     SEC : SBC r_y : CMP #2 : BCS steps
     LDA #STEP_NONE : JSR patch_steps
     SEC
     RTS
 .steps
-    \ The gradient: |dx| r >> (8 + s), with dx's sign
-    LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
-    JSR mulf
-    LDA e_sh : JSR shr24
-    LDX e_c
+    \ The gradient, with dx's sign
     LDA e_neg : BMI down
-    LDA m_r : STA ch_gl,X : ZA_INDEXEDBY 0..1
-    LDA m_r+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
+    LDA e_g : STA ch_gl,X : ZA_INDEXEDBY 0..1
+    LDA e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
     BRA stepped
 .down
     SEC
-    LDA #0 : SBC m_r : STA ch_gl,X : ZA_INDEXEDBY 0..1
-    LDA #0 : SBC m_r+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
+    LDA #0 : SBC e_g : STA ch_gl,X : ZA_INDEXEDBY 0..1
+    LDA #0 : SBC e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
 .stepped
     LDA #STEP_G : JSR patch_steps
     SEC
     RTS
 }
 
-\ mul4: m_r = m_v * A, A 0..15, the product under 65536; m_v is changed.
+\ mul4: m_p = m_v A, 24 bits, A 0..15; m_v is changed.
 ZA_AUTO2 m_v, m_r
+ZA_AUTO 3, m_p
+ZA_AUTO1 m_v2
 .mul4
 {
-    STZ m_r : STZ m_r+1
-    LSR A : BCC b1
+    STZ m_p+2 : STZ m_v2
+    LSR A : BCS one
+    STZ m_p : STZ m_p+1
+    BRA b1
+.one
     TAY
-    LDA m_v : STA m_r : LDA m_v+1 : STA m_r+1
+    LDA m_v : STA m_p : LDA m_v+1 : STA m_p+1
     TYA
 .b1
     BEQ done
     FOR i = 1..3
-        ASL m_v : ROL m_v+1
+        ASL m_v : ROL m_v+1 : ROL m_v2
         LSR A : BCC skip
         TAY
         CLC
-        LDA m_r : ADC m_v : STA m_r
-        LDA m_r+1 : ADC m_v+1 : STA m_r+1
+        LDA m_p : ADC m_v : STA m_p
+        LDA m_p+1 : ADC m_v+1 : STA m_p+1
+        LDA m_p+2 : ADC m_v2 : STA m_p+2
         TYA
     .skip
         BEQ done
@@ -789,7 +806,6 @@ ZA_AUTO2 m_v, m_r
 \ f(u + f) - f(u - f) from sq (f(j)) and ng (f(j - 255)) for each byte u
 \ of m_v, f patched into the operands' low bytes (the tables are page-
 \ aligned), and m_v 256 added.
-ZA_AUTO 3, m_p
 ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
 .mulf_set
     STA mulf.a1+1 : STA mulf.a3+1 : STA mulf.a5+1 : STA mulf.a7+1

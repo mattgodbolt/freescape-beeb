@@ -432,7 +432,7 @@ def driller_views(db_path, out):
             "faces": [(list(parts.pattern(area, f.colour)), [list(p) for p in f.poly]) for f in v.faces],
         }))
     Path(out).write_text(json.dumps({"scenes": scenes}) + "\n")
-    print(f"{len(scenes)} of Driller's entrance views, each the same as the model's brute force")
+    print(f"{len(scenes)} of Driller's entrance views, checked against the model's brute force")
 
 
 def main():
@@ -449,7 +449,7 @@ def main():
     scenes = [built(s) for s in edge_scenes() + driller_scenes() + random_scenes()]
     seqs = [{"name": q["name"], "frames": [built(s) for s in q["frames"]]} for q in sequences()]
     Path(sys.argv[1]).write_text(json.dumps({"scenes": scenes, "sequences": seqs}) + "\n")
-    print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, each the same as the model's brute force")
+    print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, checked against the model's brute force")
 
 
 if __name__ == "__main__":

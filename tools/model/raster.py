@@ -123,14 +123,15 @@ def edge_crossings(x0, y0, x1, y1):
     The boundary is the exact one, (x + 7) >> 4, for a vertical edge, and
     otherwise a DDA in 8.8 fixed point (decision 21), as the 6502 steps it.
     With dy normalised to n at 2^s (normalise) and r = 256 + f(n), its
-    reciprocal: the gradient g = |dx| r >> (8 + s) pixels a line (0 for an
-    edge no taller than a line, which crosses one line at most), and the
-    first line's offset from the top vertex |dx| t0 r >> (12 + s), t0 the
-    line's distance below it in sixteenths. X starts at 16 (x0 - 8) + 255
-    plus or minus that, steps by g a line, and p is X >> 8. Every term
-    rounds toward x0, so an edge never passes its far vertex and p stays
-    inside the view; edge_crossings_exact is what it approximates, within
-    a pixel."""
+    reciprocal, the gradient is g = |dx| r >> (8 + s) pixels a line, and
+    the first line's offset from the top vertex g t0 >> 4, t0 the line's
+    distance below it in sixteenths. An edge no taller than a line crosses
+    one line at most, so it has no gradient, and its offset is
+    |dx| t0 r >> (12 + s) (which g needn't fit 16 bits for). X starts at
+    16 (x0 - 8) + 255 plus or minus the offset, steps by g a line, and p is
+    X >> 8. Every term rounds toward x0, so an edge never passes its far
+    vertex and p stays inside the view; edge_crossings_exact is what it
+    approximates, within a pixel."""
     if y0 == y1:
         return
     if y0 > y1:
@@ -148,8 +149,12 @@ def edge_crossings(x0, y0, x1, y1):
     n, s = normalise(dy)
     r = 256 + RECIPF[n - 128]
     t0 = SUB * k0 + HALF - y0
-    g = (adx * r) >> (8 + s) if dy > SUB else 0
-    off = (adx * t0 * r) >> (12 + s)
+    if dy > SUB:
+        g = (adx * r) >> (8 + s)
+        off = (g * t0) >> 4
+    else:
+        g = 0
+        off = (adx * t0 * r) >> (12 + s)
     if dx < 0:
         g, off = -g, -off
     x = (x0 - HALF) * 16 + 255 + off
