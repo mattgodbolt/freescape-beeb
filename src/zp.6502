@@ -1,0 +1,36 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - zero page and workspace (docs/engine.md,
+\ section 8)
+\
+\ Fixed zero page is for what lasts from frame to frame and what the
+\ interrupt shares with the main loop. Everything else in zero page is
+\ baron's (ZA_AUTO, from the pool), placed by when it's live. The
+\ workspace, in the OS's language pages (free once the engine owns the
+\ machine), holds what the harness reads and the keyboard's state.
+\ Each track adds its fixed bytes to these sections.
+\ ***************************************************************************
+
+ZP_FIXED = &10
+SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
+    \ the frame's protocol (src/screen.6502), shared with the interrupt
+.frame_ready    SKIP 1      ; non-zero: a frame is drawn in draw_buffer, for the next sync to show
+.draw_buffer    SKIP 1      ; the buffer drawn last or being drawn: 0 main RAM's, 1 shadow's
+ENDSECTION
+
+\ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
+ZA_POOL ZP_FIXED..&FB
+
+SECTION Work, org = &0400, guard = &0800, virtual = TRUE
+    \ the counters (src/irq.6502, src/screen.6502), for measuring: each
+    \ wraps, and the harness reads them between frames
+.fields         SKIP 2      ; vertical syncs since the start
+.frames         SKIP 2      ; frames shown: flips
+.frames_drawn   SKIP 2      ; frames handed over by frame_end
+    \ the keyboard (src/input.6502)
+.keys           SKIP KEYS_BYTES     ; the keys held at the last sync, a bit each (K_*)
+.keys_made      SKIP KEYS_BYTES     ; the keys that went down since key_take last took them
+.keys_scan      SKIP KEYS_BYTES     ; the interrupt's own: the keys as it reads them
+.keys_any       SKIP 1      ; non-zero while any key was held at the last read
+    \ the OS's IRQ1V, which the engine's handler passes on what isn't its own
+.os_irq1v       SKIP 2
+ENDSECTION

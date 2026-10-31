@@ -59,3 +59,56 @@ SUB         = 16
 \ The bits of a MODE 2 byte that hold its left and right pixels.
 PIX_LEFT    = &AA
 PIX_RIGHT   = &55
+\ A MODE 2 byte's bits for logical colour c as its left pixel (colour bits
+\ 3-0 in bits 7, 5, 3 and 1) and as its right (bits 6, 4, 2 and 0); a
+\ byte of two pixels is their OR. Each broadcasts over a list of colours.
+FUNCTION mode2_left(c) = ((c AND 8) << 4) OR ((c AND 4) << 3) OR ((c AND 2) << 2) OR ((c AND 1) << 1)
+FUNCTION mode2_right(c) = mode2_left(c) >> 1
+FUNCTION mode2_byte(l, r) = mode2_left(l) OR mode2_right(r)
+ASSERT mode2_byte(15, 0) = PIX_LEFT AND mode2_byte(0, 15) = PIX_RIGHT
+
+\ --- The display (docs/engine.md, section 1) ------------------------------
+\ MODE 2 in the hardware: the video ULA's control register as the MOS sets
+\ it for MODE 2 (the CRTC at 2MHz, four pixels a microsecond), and the
+\ CRTC's registers as MOS 3.20 sets them for MODE 2 with *TV 0,1, narrowed
+\ to SCREEN_COLS bytes a line and SCREEN_ROWS character rows from SCREEN,
+\ with the syncs moved so the picture keeps MODE 2's centre; not
+\ interlaced, and no cursor. MOS 3.20's vertical sync row is its table's
+\ (OS 1.20's) plus the *TV setting plus one, so it sits a row later than
+\ OS 1.20's MODE 2; the CMOS's own *TV setting isn't followed.
+\ screen_init (src/screen.6502) writes them; tools/frames.mjs reads them
+\ back from jsbeeb's CRTC and compares them with the MOS's own MODE 2.
+ULA_MODE2   = &F4
+MODE2_R1    = 80            ; MOS 3.20's MODE 2: bytes a line ...
+MODE2_R2    = 98            ; ... the horizontal sync's character ...
+MODE2_R6    = 32            ; ... character rows shown ...
+MODE2_R7    = 35            ; ... and the vertical sync's row, at *TV 0
+CRTC_R0     = 127           ; a line: 128 characters, 64us
+CRTC_R1     = SCREEN_COLS
+CRTC_R2     = MODE2_R2 - (MODE2_R1 - CRTC_R1) DIV 2
+CRTC_R3     = &28           ; the vertical sync 2 lines, the horizontal 8 characters
+CRTC_R4     = 38            ; 39 character rows a field ...
+CRTC_R5     = 0             ; ... and no extra lines
+CRTC_R6     = SCREEN_ROWS
+CRTC_R7     = MODE2_R7 - (MODE2_R6 - CRTC_R6) DIV 2
+CRTC_R8     = 0             ; not interlaced (as *TV 0,1), no display or cursor delay
+CRTC_R9     = 7             ; 8 lines a character row
+CRTC_R10    = &20           ; no cursor
+CRTC_R12    = HI(SCREEN DIV 8)
+CRTC_R13    = LO(SCREEN DIV 8)
+ASSERT (MODE2_R1 - CRTC_R1) MOD 2 = 0 AND (MODE2_R6 - CRTC_R6) MOD 2 = 0
+ASSERT CRTC_R7 > CRTC_R6 AND CRTC_R7 <= CRTC_R4
+\ The screen never reaches &8000, where the hardware's wrap-around (the
+\ System VIA latch's C0 and C1) would come in.
+ASSERT SCREEN + CRTC_R6 * CRTC_R1 * (CRTC_R9 + 1) <= &8000
+
+\ The field the CRTC makes, in 2MHz cycles: a line is R0 + 1 characters of
+\ its 2MHz clock. The System VIA flags the vertical sync at the sync's end
+\ (CA1's falling edge, as the MOS sets the PCR), VSYNC_LINES after it
+\ begins, and the field's first line shown comes FLAG_TO_TOP lines later:
+\ a flip made in that window shows a whole frame (src/irq.6502).
+LINE_CYCLES = CRTC_R0 + 1
+FIELD_LINES = (CRTC_R4 + 1) * (CRTC_R9 + 1) + CRTC_R5
+FIELD_CYCLES = FIELD_LINES * LINE_CYCLES
+VSYNC_LINES = CRTC_R3 >> 4
+FLAG_TO_TOP = (CRTC_R4 + 1 - CRTC_R7) * (CRTC_R9 + 1) + CRTC_R5 - VSYNC_LINES

@@ -1,0 +1,216 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the disc
+\
+\ !BOOT (*EXEC'd) runs FS, which owns the machine from then on and makes
+\ no OS call: its own interrupt (src/irq.6502), MODE 2 set in the hardware
+\ and double-buffered in main and shadow RAM (src/screen.6502), and the
+\ keyboard read from the System VIA (src/input.6502). For now the frames
+\ are a test scene (below), which the renderer replaces.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+INCLUDE "zp.6502"
+INCLUDE "macros.6502"
+
+\ The build stamp comes from the Makefile (-D BUILD="date time sha"), so a
+\ disc says what it is: *TYPE !BOOT shows it. A + after the sha means the
+\ tree had uncommitted changes.
+IF DEFINED(BUILD)
+    build_stamp = BUILD
+ELSE
+    build_stamp = "DEV"
+ENDIF
+
+SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
+    EQUS "*| FREESCAPE for the BBC Master ", build_stamp, 13
+    EQUS "*RUN FS", 13
+ENDSECTION
+
+\ FS: the engine, all below &3000, which ACCCON's X moves to shadow RAM.
+SECTION FS, org = &0E00, load = &FFFF0E00, exec = &FFFF0000 OR start, filename = "FS", guard = &3000, cmos = TRUE
+
+\ start: the machine set up, then the frames, for ever.
+.start
+    ZA_ENTRY
+    SEI
+    LDX #&FF : TXS                              ; (nothing returns to the OS)
+    JSR screen_init
+    LDA #ACCCON_X : TSB acccon
+    JSR scene_init                              ; shadow RAM's buffer ...
+    LDA #ACCCON_X : TRB acccon
+    JSR scene_init                              ; ... and main RAM's
+    JSR frame_init
+    JSR input_init
+    JSR irq_install
+    \ (on into main_loop)
+
+\ main_loop: a frame at a time. What a frame computes without writing the
+\ screen goes before frame_begin, to overlap the wait for the last flip
+\ (src/screen.6502).
+.main_loop
+    JSR scene_prepare
+    JSR frame_begin
+    JSR scene_write
+    JSR frame_end
+    BRA main_loop
+
+INCLUDE "screen.6502"
+INCLUDE "irq.6502"
+INCLUDE "input.6502"
+
+\ ---------------------------------------------------------------------------
+\ The test scene: in the view (VIEW_ADDR, VIEW_W x VIEW_H), bars of the
+\ eight colours, SCENE_BAR pixels each, moved a pixel right a frame, inside
+\ a border of SCENE_BORDER, so that a frame shown while drawn (a tear) or
+\ not shown (a step of two) shows; and round the whole screen, in both
+\ buffers once, a line of SCENE_EDGE, so a screenshot shows where the view
+\ lies on it. scene_rows (1 to VIEW_H DIV 8) and scene_delay vary the
+\ frame's cost for tools/frames.mjs: the view's first scene_rows character
+\ rows are drawn, and scene_prepare waits scene_delay times 256 loops of
+\ its own.
+SCENE_BAR    = 8
+SCENE_CYCLE  = SCENE_BAR * 8                    ; pixels before the bars repeat
+SCENE_BORDER = 7                                ; white
+SCENE_EDGE   = 6                                ; cyan
+ASSERT SCENE_CYCLE = 64                         ; (scene_prepare's AND)
+
+SECTION Work
+.scene_phase    SKIP 1      ; the frame's: the bars' move right, in pixels
+.scene_rows     SKIP 1      ; character rows of the view drawn, from the top
+.scene_delay    SKIP 1      ; scene_prepare's extra wait
+.scene_line     SKIP VIEW_BYTES     ; each line of the view, this frame
+ENDSECTION
+
+\ scene_init: the screen's edges on the buffer X selects, and the scene's
+\ state as its first frame wants it.
+.scene_init
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 n
+    \ the top line and the bottom
+    LDA #LO(SCREEN) : STA line_fill.p : LDA #HI(SCREEN) : STA line_fill.p+1
+    LDA #SCREEN_COLS : LDX #mode2_byte(SCENE_EDGE, SCENE_EDGE)
+    JSR line_fill
+    BOTTOM = SCREEN + (SCREEN_ROWS - 1) * SCREEN_ROW + 7
+    LDA #LO(BOTTOM) : STA line_fill.p : LDA #HI(BOTTOM) : STA line_fill.p+1
+    LDA #SCREEN_COLS : LDX #mode2_byte(SCENE_EDGE, SCENE_EDGE)
+    JSR line_fill
+    \ the left side, the first byte column's left pixel, and the right,
+    \ the last's right pixel, a character row at a time
+    RIGHT = (SCREEN_COLS - 1) * 8
+    ASSERT RIGHT >= 256 AND RIGHT + 7 < SCREEN_ROW AND LO(SCREEN_ROW) = 0
+    LDA #LO(SCREEN) : STA p : LDA #HI(SCREEN) : STA p+1
+    LDA #SCREEN_ROWS : STA n
+.row
+    LDY #7
+.left
+    LDA (p),Y : ORA #mode2_left(SCENE_EDGE) : STA (p),Y
+    DEY : BPL left
+    INC p+1
+    LDY #RIGHT - 256 + 7
+.right
+    LDA (p),Y : ORA #mode2_right(SCENE_EDGE) : STA (p),Y
+    DEY : CPY #RIGHT - 256 - 1 : BNE right
+    LDA p+1 : CLC : ADC #HI(SCREEN_ROW) - 1 : STA p+1
+    DEC n : BNE row
+    STZ scene_phase : STZ scene_delay
+    LDA #VIEW_H DIV 8 : STA scene_rows
+    RTS
+}
+
+\ line_fill: A bytes along a line from line_fill.p, a byte column (8
+\ bytes) apart, ORed with X.
+.line_fill
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 v, count
+    STA count : STX v
+    LDY #0
+.byte
+    LDA (p),Y : ORA v : STA (p),Y
+    TYA : CLC : ADC #8 : TAY
+    BCC next
+    INC p+1
+.next
+    DEC count : BNE byte
+    RTS
+}
+
+\ scene_prepare: the next frame's line of the view in scene_line: the bars,
+\ pixel x of colour ((x - scene_phase) MOD SCENE_CYCLE) DIV SCENE_BAR, with
+\ the border's left and right pixels; then scene_delay's wait.
+.scene_prepare
+{
+    ZA_AUTO1 q, t
+    INC scene_phase
+    LDA #0 : SEC : SBC scene_phase : AND #SCENE_CYCLE - 1 : STA q
+    LDX #0
+.byte
+    LDA q : LSR A : LSR A : LSR A : TAY         ; the left pixel's bar
+    LDA bar_left,Y : STA t
+    LDA q : INC A : AND #SCENE_CYCLE - 1 : STA q
+    LSR A : LSR A : LSR A : TAY                 ; the right pixel's
+    LDA bar_right,Y : ORA t : STA scene_line,X
+    LDA q : INC A : AND #SCENE_CYCLE - 1 : STA q
+    INX : CPX #VIEW_BYTES : BNE byte
+    LDA scene_line : AND #PIX_RIGHT : ORA #mode2_left(SCENE_BORDER) : STA scene_line
+    LDA scene_line + VIEW_BYTES - 1 : AND #PIX_LEFT : ORA #mode2_right(SCENE_BORDER)
+    STA scene_line + VIEW_BYTES - 1
+    LDY scene_delay : BEQ done
+.delay
+    LDX #0
+.spin
+    DEX : BNE spin
+    DEY : BNE delay
+.done
+    RTS
+.bar_left
+    EQUB mode2_left(0..7)
+.bar_right
+    EQUB mode2_right(0..7)
+}
+
+\ scene_write: scene_line into every line of the view's first scene_rows
+\ character rows, then the border's top line, and its bottom if the last
+\ row was drawn.
+.scene_write
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 rows
+    LDA #LO(VIEW_ADDR) : STA p : LDA #HI(VIEW_ADDR) : STA p+1
+    LDA scene_rows : STA rows
+.row
+    LDX #0 : LDY #0
+.column
+    LDA scene_line,X
+    FOR l = 0..7
+        STA (p),Y : INY
+    NEXT
+    BNE same                                    ; (Y steps 8 a column, so it wraps
+    INC p+1                                     ; only after a column's last line)
+.same
+    INX : CPX #VIEW_BYTES : BNE column
+    \ the next row: p a character row on, less the pages Y has passed
+    LDA p+1 : CLC : ADC #HI(SCREEN_ROW) - (VIEW_BYTES * 8) DIV 256 : STA p+1
+    DEC rows : BNE row
+    \ the border's top and bottom lines
+    LDA #LO(VIEW_ADDR) : STA p : LDA #HI(VIEW_ADDR) : STA p+1
+    JSR edge
+    LDA scene_rows : CMP #VIEW_H DIV 8 : BNE done
+    VIEW_LAST = VIEW_ADDR + (VIEW_H DIV 8 - 1) * SCREEN_ROW + 7
+    LDA #LO(VIEW_LAST) : STA p : LDA #HI(VIEW_LAST) : STA p+1
+.edge
+    LDY #0 : LDX #VIEW_BYTES
+.edge_byte
+    LDA #mode2_byte(SCENE_BORDER, SCENE_BORDER) : STA (p),Y
+    TYA : CLC : ADC #8 : TAY
+    BCC edge_next
+    INC p+1
+.edge_next
+    DEX : BNE edge_byte
+.done
+    RTS
+}
+ASSERT LO(SCREEN_ROW) = 0
+
+ENDSECTION

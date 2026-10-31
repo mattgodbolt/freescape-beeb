@@ -1,0 +1,59 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the interrupt
+\
+\ The engine owns IRQ1V and only the vertical sync's interrupt is on (the
+\ System VIA's CA1). At each sync the handler counts the field, shows the
+\ frame frame_end handed over if there is one (ACCCON's D to draw_buffer,
+\ the flip), and reads the keyboard (src/input.6502).
+\
+\ The flip comes FLAG_TO_TOP lines before the field's first line shown
+\ (src/defs.6502), so the frame is shown whole from that field on, as long
+\ as nothing holds interrupts off for longer than that: keep SEI short.
+\
+\ D is changed by TSB and TRB, and the main loop changes X the same way
+\ (src/screen.6502): each is one instruction, which an interrupt can't
+\ split, so neither undoes the other's bit.
+\ ***************************************************************************
+
+\ irq_install: irq_handler on IRQ1V, every VIA interrupt off but the
+\ vertical sync's, and interrupts on. The OS's handler is kept in os_irq1v:
+\ an interrupt that isn't the sync's goes on to it.
+.irq_install
+    SEI
+    LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would hold IRQ
+    LDA irq1v : STA os_irq1v
+    LDA irq1v+1 : STA os_irq1v+1
+    LDA #LO(irq_handler) : STA irq1v
+    LDA #HI(irq_handler) : STA irq1v+1
+    LDA #2 : STA sysvia_ifr                     ; a sync already flagged
+    LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
+    CLI
+    RTS
+
+\ irq_handler: from the MOS's IRQ entry, which keeps A in &FC.
+.irq_handler
+{
+    ZA_INTERRUPT
+    LDA sysvia_ifr : AND #2 : BEQ not_sync
+    STA sysvia_ifr                              ; acknowledged
+    PHX : PHY
+    INCW fields
+    LDA frame_ready : BEQ shown
+    LDA #ACCCON_D
+    LDX draw_buffer : BEQ show_main
+    TSB acccon
+    BRA flipped
+.show_main
+    TRB acccon
+.flipped
+    STZ frame_ready
+    INCW frames
+.shown
+    JSR input_irq
+    PLY : PLX
+    LDA &FC                                     ; the interrupted A, which the MOS kept
+    RTI
+.not_sync
+    JMP (os_irq1v)
+}
+ASSERT P% <= &3000                              ; (X moves &3000-&7FFF)
