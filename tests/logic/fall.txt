@@ -1,0 +1,11 @@
+# A fall of more than FallLimitScaled cells (2 at the start) ends the game:
+# GameOver 4, the view rolled 90 degrees and levelled. Area 1's cube 23 is
+# three cells high: the probe stood on it (feet in cell 4, the eye a cell
+# above) walks off its side.
+at 5152 352 6432
+angles 0 18 0
+X x2
+O x3
+expect GameOver 4
+expect Roll 18
+expect Pitch 0

@@ -1,0 +1,31 @@
+# Several keys at once: the input reads at most five, in the keyboard's
+# order (half-rows $FEFE to $7FFE, bit 0 first), and does each key's
+# action in turn: Q (turn) before O (step) here, whichever is named first.
+Q O
+O Q
+expect KeyCount 2
+W P N O R
+expect KeyCount 5
+W P N O R L
+expect KeyCount 5
+Z S X A
+F x2
+L P M N
+expect KeyCount 4
+# The same keys held again count as a repeat ($940C); in play the repeat
+# waits nothing (RepeatDelay and RepeatRate are 0).
+expect Repeating 0
+O
+expect Repeating 0
+O
+expect Repeating 1
+# Keys with no action: E, Y and T do nothing here.
+E
+expect EventsDue 0
+Y T
+O E
+# The cursor keys: 7 forward, 6 back, 5 left, 8 right.
+7
+6
+5 7
+8

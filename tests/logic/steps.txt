@@ -1,0 +1,57 @@
+# Steps forward (O) and back (K) at every step size, from the start (area
+# 1, entrance 19, yaw 34), turning between them so the steps' sines and
+# cosines vary in sign. X lowers the step a size a pass, S raises it; both
+# stop at the table's ends.
+expect StepIndex 7
+expect Step 250
+O
+K
+W O
+X
+expect Step 100
+O
+K
+Q Q O
+X
+expect Step 50
+O K
+W O
+X
+expect Step 25
+O
+K
+W W O
+X
+expect Step 10
+O
+K
+Q O
+X
+expect Step 5
+O
+K
+W O
+X
+expect Step 2
+O
+K
+Q O
+X
+expect Step 1
+expect StepIndex 0
+O
+K
+W O
+X
+expect StepIndex 0
+S
+expect Step 2
+S x5
+expect Step 100
+O
+S
+expect Step 250
+S
+expect StepIndex 7
+O x3
+K x3

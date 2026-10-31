@@ -1,0 +1,85 @@
+# Found by tools/logic/check.py --fuzz, seed 47.
+# The screen copy inside the FCL's REDRAW plays and clears the pending
+# sound ($9C24).
+goto 6 24
+fcl 15
+K W
+F
+O
+R O
+P
+W Q
+Q M
+P O
+Z O K
+W F
+S
+W
+L N
+F
+W
+P
+W O
+W X
+O
+F O K
+W F
+L
+W N
+L S F
+K
+O W
+F K Q
+L
+O
+R
+F
+W P
+U
+L
+O
+K
+K
+O P
+O W
+Q
+P
+O X
+L W
+tick
+R O
+W O K
+W
+W K
+M O P
+O
+Q R
+M L
+P
+Z O L
+W
+P
+F
+R Q
+S
+K
+U F
+S Q
+O
+Q
+L U
+O
+W
+P K
+N Q
+P
+L O
+O
+O Q
+S
+O
+W
+W
+Q A
+O N
+F Q

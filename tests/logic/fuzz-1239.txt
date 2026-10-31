@@ -1,0 +1,128 @@
+# Found by tools/logic/check.py --fuzz, seed 1239.
+# A bug of the original's. Line 26's step ends exactly on an x and a z
+# boundary going down z; the walk crosses both there, which leaves z a
+# cell past its target, and runs down z to the area's wall with x
+# extrapolated along the step to 20016, outside the area. Line 30's move
+# from there comes to a crossing on no axis and loops for ever: the
+# original hangs, and so does the transcription (move.Freeze).
+goto 3 26
+O
+O K
+O
+F R
+O R L
+A
+K
+O
+M
+L O K
+P O
+B P Q
+O
+A O
+L
+N O
+U O W
+W
+O Q
+N O K
+O W
+U R
+K P
+Q
+L O
+M L A
+Q
+X
+O P
+L
+O
+SPACE
+Q W
+O
+S
+O
+L Q
+P
+O
+Z
+O
+K
+M O
+L O
+Z
+K
+Z O
+K
+O
+Q S
+K L
+tick
+O
+R L
+K
+K
+A O F
+L F
+Q O
+W X
+L W M
+W P
+Q K
+W N K
+O
+O
+O
+U R
+K P
+A
+SPACE O L
+S
+S
+M
+M
+A R
+R
+A K
+O
+F
+Q U W
+K
+Z Q A
+K
+A
+O
+N
+O
+tick
+F W
+S
+K O
+W
+F O
+tick
+X
+F
+U
+SPACE
+Q
+R
+O
+O
+M
+O W A
+A K N
+O
+P
+Z Q
+tick
+O M
+K Q
+K
+Q L O
+R
+K X
+R
+O
+K
+K N

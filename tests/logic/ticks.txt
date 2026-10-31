@@ -1,0 +1,26 @@
+# The clock's minutes. The interrupt counts a minute into the FCL's
+# variables 30 and 31 (MinuteCount, minutes in this area) and spends a
+# unit of energy; the input then ends the pass with no keys, and the events
+# run. The global conditions show globals 248-250 at minute 8 and hide them
+# at minute 9, setting variable 31 back to 0, which the input then takes
+# for another minute.
+tick x7
+expect MinuteCount 7
+O
+tick
+expect MinuteCount 8
+O x2
+tick
+expect MinuteCount 0
+expect MinuteSeen 9
+# Variable 31 changed under the input, so this pass ends without its key.
+O
+expect MinuteSeen 0
+expect PlayerX 4766
+O
+# A new area starts the count again.
+tick x3
+goto 2 4
+expect MinuteCount 0
+tick
+O
