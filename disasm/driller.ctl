@@ -97,9 +97,18 @@ B $88D9,2,2
 @ $88DB label=BufferRows
 g $88DB The buffer's rows and bytes a row
 W $88DB,4,2
+@ $88E5 label=CullBox
+g $88E5 The coarse cull's box, in cells: x max, x min, y max, y min, z max, z min
+B $88E5,6,2
 @ $8920 label=GameFlags
 g $8920 Flags: bit 2 of the first byte, re-project (moved or turned); bit 3 of the second, redraw
 B $8920,2,1
+@ $8918 label=NDrawn
+g $8918 The objects in the draw list
+B $8918,1,1
+@ $8919 label=ScanTop
+g $8919 The face being filled: its top and bottom rows (screen y, up)
+W $8919,4,2
 @ $8A83 label=MultiplyCode
 g $8A83 Addresses of the nine compiled multiplies (#R$6E25), row-major
 W $8A83,18,2
@@ -163,8 +172,24 @@ c $7C9D Project #R$8A7F vertices from #R$5E9F to screen bytes at #R$8A6B
 D $7C9D x = XC + trunc(XC*x/z), y = YC + trunc(YC*y/z), with (XC, YC) at #R$88D9; clamped to 0 or 2*XC (2*YC) outside the side planes; z = 0 gives the centre.
 @ $7D46 label=ClassifyVertices
 c $7D46 Transform an object's vertices and classify them against the frustum
+@ $7D8C label=ClipFace
+c $7D8C Clip a face's vertices against the five frustum planes in turn (#R$7C37, #R$799E)
+@ $7EE5 label=Facing
+c $7EE5 Which way the first three screen points at HL turn: A=0 anticlockwise (y up), 1 clockwise
 @ $80C0 label=FillSpans
 c $80C0 Fill a face's spans from the edge table at ($8A9F) with its pattern
+D $80C0 From row #R$8919 (the top) down to #R$891B. Each row's span runs from its lower x to its higher x inclusive, at pixel column x-1, in the pattern byte for y AND 3, written opaquely through the masks at #R$80B2; the row's entry is cleared.
+@ $81B6 label=ProjectFaces
+c $81B6 Project an object's faces whose vertices are all inside the frustum, and add it to the draw list
+D $81B6 IY: the face definitions (colour, point count, vertex indices). A face of colour 0 is skipped; #R$5E60 picks the facing rule (0 none, 1 drop clockwise faces, 2 the colour by the facing).
+@ $828D label=ProjectFacesClipped
+c $828D Project an object's faces, clipping each, and add it to the draw list
+D $828D Marks a four-point face on the view's four corners as covering the whole view (#R$8A6A, and bit 7 of the object's face count).
+@ $83FC label=ScanPolygon
+c $83FC A face's edges into the edge table: one x a row for rows [y low, y high) of each edge
+D $83FC Bresenham from each edge's lower end; a row keeps its first two distinct x values; a horizontal edge counts only on the top or bottom row and overwrites it. #R$8919 and #R$891B get the top and bottom rows.
+@ $85FF label=ScanLine
+c $85FF A two-point face (a line) into the edge table
 @ $910E label=MulA_HL
 c $910E A,HL = A * HL, signed, exact
 @ $91F1 label=DivA_HL_DE

@@ -86,6 +86,51 @@ by a check.
   step first splits by pitch, `y −= ⌊step · sin(pitch) / 64⌋` and the
   horizontal step is `⌊step · |cos(pitch)| / 64⌋` (`$A364`) [read].
 
+## The object pass
+
+`$6B7C`, for each object of the area (then each global) [read]:
+
+- **Skipped**: type 0 (entrances), invisible (bit 6 of the type byte).
+- **The coarse cull** (`$6C53` builds it, once a redraw): a box in
+  cells, `$88E5-$88EA` as (x max, x min, y max, y min, z max, z min).
+  - The four directions (yaw ± 8, pitch ± 8), `$88D7` = 8 being 40°,
+    each pick an octant: the yaw's quadrant (0-17, 18-35, 36-53, 54-71)
+    gives x and z; pitch 0-17 (down) gives −y, 54-71 (up) +y, and
+    18-53 (past vertical) turns x and z round too.
+  - Each octant sets the box's bound on its side of each axis to the
+    area's extent that way (`$88DF-$88E4`: 127, 0, 63, 0, 127, 0 on a
+    platform). A bound no direction set is the camera's cell (`x / 64`;
+    plus 1 for a max).
+  - An object is culled if `min > box max` or `min + size < box min`
+    on any axis, as signed 8-bit compares.
+  - With the corners at ±40° and the view's half-angles 33° and 18°, it
+    culls only what the frustum would [inferred].
+- **The box relative to the camera**, 16-bit world units, `64·min −
+  camera` and `64·(min + size) − camera` an axis, kept for the sort; and
+  six side bits (`$5E62`): bit 0 if the camera is below x min
+  (`64·x − camera > 0`), bit 1 if above x max (`64·(x + dx) − camera <
+  0`), bits 2-3 for y, 4-5 for z.
+- **By type**: cuboid `$6FC2`, sensor `$7592`, rectangle `$74B7`,
+  pyramid (4-9) `$70B7`, line or polygon (10-14) `$742B`.
+  - **A cuboid** shows the faces its side bits allow: −X with bit 0, +X
+    with bit 1, and so on, coloured by its nibbles in the database's
+    order (−X, +X, −Y, +Y, −Z, +Z, low nibble first); colour 0 isn't
+    drawn, and an object with no face left is dropped. Its eight
+    corners all go through the matrix. No facing test.
+  - **A pyramid** drops a face whose first three screen points turn
+    clockwise (y up) (`$7EE5`, `$5E60` = 1).
+  - **A rectangle, line or polygon** has one face, coloured by its low
+    nibble when its first three screen points turn anticlockwise (y up)
+    and by its high nibble otherwise (`$5E60` = 2), not drawn if that
+    nibble is 0.
+  - `$7EE5` returns 0 for anticlockwise and 1 for clockwise; for
+    collinear points mostly 1 [measured: 20,000 random triangles; one
+    near-collinear one, cross product 5, came back clockwise].
+- **Vertices** are transformed and classified against the five planes
+  (`$7D46`); if all are inside, the faces are projected as they are
+  (`$81B6`), else each face is clipped plane by plane (`$7D8C`, `$799E`)
+  and then projected (`$828D`).
+
 ## The draw list and the sort
 
 - An object joins the draw list only if one of its faces survives (a
