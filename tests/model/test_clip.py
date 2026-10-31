@@ -44,16 +44,57 @@ class Near(unittest.TestCase):
 
 
 class Outcodes(unittest.TestCase):
+    W, H = SUB * VIEW_W, SUB * VIEW_H
+
     def test_edges(self):
-        z = 10000
-        # Exactly on the left edge is inside; a unit left of it is out.
-        x = -XC * z // FX
-        self.assertEqual(clip.outcode((x, 0, z)) & clip.LEFT, 0 if XC * z + FX * x >= 0 else clip.LEFT)
-        self.assertEqual(clip.outcode((-z, 0, z)), clip.LEFT)
-        self.assertEqual(clip.outcode((z, 0, z)), clip.RIGHT)
-        self.assertEqual(clip.outcode((0, z, z)), clip.TOP)
-        self.assertEqual(clip.outcode((0, -z, z)), clip.BOTTOM)
-        self.assertEqual(clip.outcode((0, 0, ZNEAR - 1)), clip.NEAR)
+        # The rectangle is closed: on an edge is inside.
+        self.assertEqual(clip.outcode2d((0, 0)), 0)
+        self.assertEqual(clip.outcode2d((self.W, self.H)), 0)
+        self.assertEqual(clip.outcode2d((-1, 5)), clip.LEFT)
+        self.assertEqual(clip.outcode2d((self.W + 1, 5)), clip.RIGHT)
+        self.assertEqual(clip.outcode2d((5, -1)), clip.TOP)
+        self.assertEqual(clip.outcode2d((5, self.H + 1)), clip.BOTTOM)
+        self.assertEqual(clip.outcode2d((-1, -1)), clip.LEFT | clip.TOP)
+
+
+class Crossings(unittest.TestCase):
+    def test_fraction(self):
+        self.assertEqual(clip.crossing_t(0, -5), 0)
+        self.assertEqual(clip.crossing_t(1, -1), 1 << (clip.T_BITS - 1))
+        rng = random.Random(23)
+        for _ in range(2000):
+            fp, fq = rng.randint(0, 1 << 28), -rng.randint(1, 1 << 28)
+            t = clip.crossing_t(fp, fq)
+            self.assertTrue(0 <= t < 1 << clip.T_BITS)
+            # within a unit or two of the exact fraction (normalised to 16 bits)
+            exact = (fp << clip.T_BITS) // (fp - fq)
+            self.assertLessEqual(abs(t - exact), 2)
+
+    def test_lerp_rounds_half_up(self):
+        h = 1 << (clip.T_BITS - 1)
+        self.assertEqual(clip.lerp(0, 1, h), 1)
+        self.assertEqual(clip.lerp(0, -1, h), 0)
+        self.assertEqual(clip.lerp(10, 20, 0), 10)
+
+    def test_shared_edge(self):
+        # Two faces that share an edge, each walking it its own way round,
+        # cut it at one point.
+        a, b = (0, 0), (700, 1900)
+        out1 = clip.clip2d([a, b, (900, 0)])
+        out2 = clip.clip2d([b, a, (-50, 1500)])
+        cut = [p for p in out1 if p[1] == self.H and p not in (a, b)]
+        self.assertTrue(cut and cut[0] in out2)
+
+    H = SUB * VIEW_H
+
+
+class Drawable(unittest.TestCase):
+    def test_lines_and_points(self):
+        self.assertFalse(clip.drawable([(0, 0), (16, 16)]))
+        self.assertFalse(clip.drawable([(0, 0), (16, 16), (32, 32), (48, 48)]))
+        self.assertFalse(clip.drawable([(0, 0), (0, 5), (0, 100)]))
+        self.assertTrue(clip.drawable([(0, 0), (0, 5), (1, 100)]))
+        self.assertTrue(clip.drawable([(0, 0), (16, 16), (32, 33)]))
 
 
 class Rect(unittest.TestCase):
@@ -103,9 +144,9 @@ class Guard(unittest.TestCase):
             out = clip.guard_clip(poly)
             for x, y, z in out:
                 self.assertGreaterEqual(z, ZNEAR)
-                # within the band, give or take the rounding of a new vertex
-                self.assertLessEqual(abs(x), clip.GUARD_X * z + clip.GUARD_X)
-                self.assertLessEqual(abs(y), clip.GUARD_Y * z + clip.GUARD_Y)
+                # within the band, give or take a crossing's 2^-15 of an edge
+                self.assertLessEqual(abs(x), clip.GUARD_X * z + (2 << 20 >> 14) + clip.GUARD_X)
+                self.assertLessEqual(abs(y), clip.GUARD_Y * z + (2 << 20 >> 14) + clip.GUARD_Y)
                 sx, sy = parts.project(x, y, z)
                 self.assertLess(abs(sx), (1 << 15) - 1)
                 self.assertLess(abs(sy), (1 << 15) - 1)

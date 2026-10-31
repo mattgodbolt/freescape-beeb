@@ -284,26 +284,6 @@ def build(db):
     return loops, globals_rec, areas
 
 
-def outcode_shifts(a, b):
-    """For the side test A p > B z with z >= ZNEAR, src/clip.6502's
-    oc_side compares p with w = z >> SHI and fractions of it, each rounded
-    down, before it multiplies: p >= w is outside, p < w/2 inside, p < 5w/8
-    (w/2 + w/8) inside and p >= 6w/8 (that plus w/8) outside. SHI is the
-    least shift with the ratio B 2^SHI / A in [5/8, 6/8); these assert that
-    each test holds however its shifts round down, for every z >= ZNEAR."""
-    shi = 0
-    while 5 * a > 8 * (b << shi):
-        shi += 1
-    w = 8 << shi                    # z per unit of the eighths
-    assert 5 * a <= 8 * (b << shi) < 6 * a, "the side's ratio isn't in [5/8, 6/8)"
-    # p >= w: w >= z / 2^shi - 1, so A p > B z if z (A - B 2^shi) > A 2^shi
-    assert view.ZNEAR * (a - (b << shi)) > a << shi
-    # p >= w/2 + 2 (w/2 >> 2), at least 6 z / w - 3: A p > B z if
-    # z (6 A - B w) > 3 A w
-    assert view.ZNEAR * (6 * a - b * w) > 3 * a * w
-    return shi + 1, shi
-
-
 def packed(rec):
     counts = [rec.count(s) for s in SPACES]
     out = list(counts)
@@ -329,16 +309,8 @@ def emit(db, loops, globals_rec, areas, out6502, outjson):
         assert slope & (slope - 1) == 0, "the guard band's slopes are shifts"
         w("%-11s = %d" % (name, slope.bit_length() - 1))
     w("")
-    w("\\ The side planes (tools/model/clip.py's outcode): a vertex is outside")
-    w("\\ one when A p > B z, p its distance across (x or y, the side's way).")
-    w("\\ It is when p >= z >> SHI and isn't when p < z >> SLO, so only")
-    w("\\ between those does the clip multiply (src/clip.6502).")
-    width, height = view.SUB * view.VIEW_W, view.SUB * view.VIEW_H
-    for side, a, b in (("L", view.FX, view.XC), ("R", view.FX, width - view.XC),
-                       ("T", view.FY, view.YC), ("B", view.FY, height - view.YC)):
-        slo, shi = outcode_shifts(a, b)
-        w("OC_%s_A = %d : OC_%s_B = %d : OC_%s_SLO = %d : OC_%s_SHI = %d" % (
-            side, a, side, b, side, slo, side, shi))
+    w("VIEW_FX     = %d             ; the focal lengths, sixteenths" % view.FX)
+    w("VIEW_FY     = %d" % view.FY)
     w("")
     w("K_CUBOID = %d : K_RECT = %d : K_GENERIC = %d : K_SENSOR = %d" % (CUBOID, RECT, GENERIC, SENSOR))
     w("K_MASK = 3 : F_LINE = &%02X : F_HIDDEN = &%02X" % (F_LINE, F_HIDDEN))
