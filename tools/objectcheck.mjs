@@ -5,7 +5,7 @@
 //
 //   node tools/objectcheck.mjs BUILD [--view TEXT] [--verbose] [--json OUT]
 //
-// BUILD holds the check build (OCODE, OCONST, OTMP, AREAS*, symbols.json) and
+// BUILD holds the check build (OCODE, OAREA, OCONST, OTMP, AREAS*, symbols.json) and
 // cases.json (mk/objects.mk). It checks:
 //   - stage 1: every matrix of cases.json's (matrix_build);
 //   - for each view, through objects_frame:
@@ -54,6 +54,7 @@ const S = (name) => m.sym(name);
 const has = (name) => name in m.syms;
 m.load(`${dir}/OCODE`, sections.ObjCode.org);
 m.load(`${dir}/OCONST`, sections.ObjConst.org);
+m.load(`${dir}/OAREA`, sections.AreaCode.org);
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
 m.load(`${dir}/OMATHS`, sections.ObjMaths.org, space(sections.ObjMaths.org));
 for (const name of Object.keys(sections)) {

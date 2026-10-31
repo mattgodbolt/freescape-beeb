@@ -18,8 +18,10 @@ SECTION ZeroPage, org = &00, guard = ZP_FIXED, virtual = TRUE
 .view_shown     SKIP 1      ; non-zero once the buffer shown has had its view shown whole
 ENDSECTION
 
-\ The pool stops short of &FC, where the MOS's IRQ entry keeps A.
-ZA_POOL ZP_FIXED..&FB
+\ The pool stops short of &FC, where the MOS's IRQ entry keeps A, and
+\ leaves out &F4, the OS's copy of romsel, which area_enter keeps
+\ (src/area.6502's ROMSEL_COPY).
+ZA_POOL ZP_FIXED..&F3, &F5..&FB
 
 SECTION Work, org = &0400, guard = &0800, virtual = TRUE
     \ the counters (src/irq.6502, src/screen.6502), for measuring: each

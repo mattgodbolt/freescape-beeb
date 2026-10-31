@@ -41,7 +41,7 @@ INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
 
-SECTION ObjCode, org = &0E00, guard = &5000, filename = "OCODE", cmos = TRUE
+SECTION ObjCode, org = &0E00, guard = &4F00, filename = "OCODE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
 \ The check's entry points, each called from the harness's stub.
@@ -80,6 +80,9 @@ ENDMACRO
 .check_area
     EQUB 0
 ENDSECTION
+\ area_enter pages the records' banks, so its code is never in one.
+SECTION AreaCode, org = &4F00, guard = &5000, filename = "OAREA", cmos = TRUE
+ENDSECTION
 SECTION ObjConst, org = &5000, guard = &5C00, filename = "OCONST"
 ENDSECTION
 SECTION ObjArea, org = &5C00, guard = &6600, virtual = TRUE
@@ -108,7 +111,7 @@ $(OBJ_DIR)/check.6502: mk/objects.mk
 	@mkdir -p $(@D)
 	printf '%s\n' "$$OBJECTS_CHECK_6502" > $@
 
-$(OBJ_DIR)/OCODE $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
+$(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
                                              src/maths.6502 src/project.6502 $(MATHS_GEN)
 	$(ASM) --warn 2 -p $(OBJ_DIR) --symbols $(OBJ_DIR)/symbols.json $<
 
