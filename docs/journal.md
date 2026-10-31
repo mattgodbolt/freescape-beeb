@@ -189,3 +189,58 @@ over the views: 95.6 a line, 76.9 a face-line, 271.9 a run, 1.3 a byte and
 894 an edge (rms error 6.3%). Runs and edge set-up are the cost. The track
 went back to restructure it for speed, free to change the model's fill
 method where the picture stays as good (decisions 11 and 12).
+
+## 2026-10-31: Rich Talbot-Watkins's sources
+
+Rich made a set of BBC game sources public that day; a review read eleven
+of them for tricks this engine can use (`docs/research/rtw-sources.md`):
+PORTAL's source and its polar branch, Rich's optimisation notes, Chase
+H.Q., Teddy Boy and its optimisation reviews, Exolon, Critical Mass, flow,
+Nevryon, spritescale and beebcrunch. The ranking, against our figures:
+flipping as soon as the beam has left the view rather than at the vertical
+sync; a level camera's zero and unit matrix entries skipped and one
+reciprocal shared by a vertical edge's two ends; PORTAL's polar front end
+for turns; reciprocals by lookup for gradients and clips; Chase H.Q.'s and
+Teddy Boy's row-run overheads; the sky skip by per-line records. Every
+source that skipped work by reading the screen measured it as a loss. Each
+item went to the track that owns its stage.
+
+## 2026-10-31: the flip as the beam leaves the view
+
+Rich Talbot-Watkins's Chase H.Q. and Teddy Boy show a frame as soon as
+the playfield's last line has gone, not at the vertical sync
+(`docs/research/rtw-sources.md`, section 3.1). Built as the frame loop's
+default, with the VSync flip one flag away (`-D VSYNC_FLIP=TRUE`). The
+design is in `docs/engine.md`, section 1. Measured with `make frames`,
+10s a run on jsbeeb's full video:
+
+| Scene | Flip | Frames a second | Fields a frame | Waiting in `frame_begin` |
+|---|---|---|---|---|
+| The test scene (its whole view a frame) | at the view's end | 33.40 | 1.50 | 479 c |
+| The test scene | at the vertical sync | 24.97 | 2.00 | 20,507 c |
+| The scene varied (1-13 rows, delays) | at the view's end | 34.00 | 1.47 | 468 c |
+| The scene varied | at the vertical sync | 32.10 | 1.56 | 4,544 c |
+
+- The varied scene gains less because many of its frames take under a
+  field, and both flips show a frame at most once a field.
+- At the view's end, the test scene's frames were shown for 1.40-1.60
+  fields each. The varied scene's were shown for 0.42-3.00: a frame
+  flipped in the blank above the view and replaced after it is shown
+  whole for less than a field.
+- Of the test scene's flips, 169 came at once in `frame_end` (lines
+  116-275) and 165 by T1's interrupt, all on line 114. No flip came in
+  lines 6-113, the view's lines and their margins.
+- `make frames` was run against deliberately broken copies again. It
+  failed each of these:
+  - a flip whatever the beam's place;
+  - the T1 time-out 20 lines early;
+  - a frame replaced before its view was shown whole;
+  - the screen's edge drawn in one buffer only;
+  - and every earlier mutation that still applies.
+
+  It passes these, rightly:
+  - interrupts held off for 100 lines: the old flip tore there, this
+    one only waits;
+  - the time-out later than it need be;
+  - the handler's lateness guard removed: it only matters past 200
+    lines.

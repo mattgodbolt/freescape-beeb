@@ -1,23 +1,26 @@
 \ ***************************************************************************
 \ FREESCAPE for the BBC Master - the interrupt
 \
-\ The engine owns IRQ1V and only the vertical sync's interrupt is on (the
-\ System VIA's CA1). At each sync the handler counts the field, shows the
-\ frame frame_end handed over if there is one (ACCCON's D to draw_buffer,
-\ the flip), and reads the keyboard (src/input.6502).
+\ The engine owns IRQ1V. Two interrupts are on:
 \
-\ The flip comes FLAG_TO_TOP lines before the field's first line shown
-\ (src/defs.6502), so the frame is shown whole from that field on, as long
-\ as nothing holds interrupts off for longer than that: keep SEI short.
+\ - The vertical sync's (the System VIA's CA1): the field counted and the
+\   keyboard read (src/input.6502); with FLIP_AT_VSYNC, the flip too.
+\ - User VIA T1's, at FLIP_LINE, as the view's last line has gone (not
+\   with FLIP_AT_VSYNC): the shown buffer's view marked shown whole, and a
+\   frame frame_end handed over shown (src/screen.6502). T1 runs free, a
+\   field a period, started in step with the sync by irq_install, so a
+\   late interrupt is only late: the handler reads T1 and shows the frame
+\   only if the beam is still outside the view, as frame_end does.
 \
-\ D is changed by TSB and TRB, and the main loop changes X the same way
-\ (src/screen.6502): each is one instruction, which an interrupt can't
-\ split, so neither undoes the other's bit.
+\ A flip at FLIP_LINE may come as late as the next view's top, FLIP_LEAD
+\ lines short of it, so nothing should hold interrupts off for that long.
+\ With FLIP_AT_VSYNC the window is the vertical blank's, FLAG_TO_TOP
+\ lines. Neither may miss a sync: never a field with interrupts off.
 \ ***************************************************************************
 
 \ irq_install: irq_handler on IRQ1V, every VIA interrupt off but the
-\ vertical sync's, and interrupts on. The OS's handler is kept in os_irq1v:
-\ an interrupt that isn't the sync's goes on to it.
+\ vertical sync's and T1's, and interrupts on. The OS's handler is kept in
+\ os_irq1v: an interrupt that isn't the engine's goes on to it.
 .irq_install
     SEI
     LDA #&7F : STA sysvia_ier : STA usrvia_ier  ; anything not serviced would hold IRQ
@@ -25,6 +28,19 @@
     LDA irq1v+1 : STA os_irq1v+1
     LDA #LO(irq_handler) : STA irq1v
     LDA #HI(irq_handler) : STA irq1v+1
+IF NOT(FLIP_AT_VSYNC)
+    \ T1 free-running, its first count from a sync's flag to FLIP_LINE in
+    \ the next field, then a field's each time (T1_SYNC, T1_PERIOD)
+    LDA usrvia_acr : AND #&3F : ORA #&40 : STA usrvia_acr
+    LDA #LO(T1_SYNC) : STA usrvia_t1cl          ; (the latch's low byte)
+    LDA #2 : STA sysvia_ifr                     ; a sync already flagged
+.sync
+    BIT sysvia_ifr : BEQ sync                   ; (A is 2: the sync's flag)
+    LDA #HI(T1_SYNC) : STA usrvia_t1ch          ; the count starts
+    LDA #LO(T1_PERIOD) : STA usrvia_t1ll
+    LDA #HI(T1_PERIOD) : STA usrvia_t1lh
+    LDA #&C0 : STA usrvia_ier                   ; T1
+ENDIF
     LDA #2 : STA sysvia_ifr                     ; a sync already flagged
     LDA #&82 : STA sysvia_ier                   ; CA1: the vertical sync
     CLI
@@ -34,26 +50,36 @@
 .irq_handler
 {
     ZA_INTERRUPT
-    LDA sysvia_ifr : AND #2 : BEQ not_sync
+    LDA sysvia_ifr : AND #2 : BNE sync
+IF NOT(FLIP_AT_VSYNC)
+    BIT usrvia_ifr : BVS view_gone              ; (T1 is bit 6)
+ENDIF
+    JMP (os_irq1v)
+IF NOT(FLIP_AT_VSYNC)
+.view_gone
+    LDA usrvia_t1cl                             ; acknowledged
+    LDA usrvia_t1ch : CMP #HI(SAFE_T1) + 1 : BCC done  ; (so late that the next view has begun)
+    LDA #1 : STA view_shown
+    LDA frame_ready : BEQ done
+    PHX
+    JSR flip
+    PLX
+.done
+    LDA &FC                                     ; the interrupted A, which the MOS kept
+    RTI
+ENDIF
+.sync
     STA sysvia_ifr                              ; acknowledged
     PHX : PHY
     INCW fields
+IF FLIP_AT_VSYNC
     LDA frame_ready : BEQ shown
-    LDA #ACCCON_D
-    LDX draw_buffer : BEQ show_main
-    TSB acccon
-    BRA flipped
-.show_main
-    TRB acccon
-.flipped
-    STZ frame_ready
-    INCW frames
+    JSR flip
 .shown
+ENDIF
     JSR input_irq
     PLY : PLX
-    LDA &FC                                     ; the interrupted A, which the MOS kept
+    LDA &FC
     RTI
-.not_sync
-    JMP (os_irq1v)
 }
 ASSERT P% <= &3000                              ; (X moves &3000-&7FFF)

@@ -251,3 +251,18 @@ The port does the same, so combinations behave as they did.
   with its inputs in main RAM, leaving HAZEL to the maths tables.
 - A background line the back buffer already holds isn't rewritten, so
   anything else that draws on the screens calls `raster_forget`.
+
+## 21. The flip comes as the beam leaves the view (2026-10-31, Matt)
+
+A finished frame is shown as soon as the CRTC has finished fetching the
+view, not at the vertical sync (Rich Talbot-Watkins's Chase H.Q. and Teddy
+Boy, `docs/research/rtw-sources.md` §3.1). The lines below the view are the
+same in both buffers, so nothing tears, and a frame that takes 2.3 fields
+is shown every 2.3 fields rather than every 3. User VIA T1 runs free with
+a field's period, in step with the sync, to time it (`src/screen.6502`).
+Matt: ACCCON's D is plain TTL on the video's RAM select, so it switches
+instantly, as jsbeeb models it; this is the design, and the VSync flip is
+only a build option (`-D VSYNC_FLIP=TRUE`).
+
+Anything drawn outside the view must then be the same in both buffers at
+every flip (`docs/engine.md`, section 1, has the two ways).
