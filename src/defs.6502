@@ -1,0 +1,52 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - shared constants (docs/engine.md)
+\
+\ Constants only: no sections, so every build (the disc, the spike and each
+\ track's checks) can include it.
+\ ***************************************************************************
+
+\ --- Hardware ------------------------------------------------------------
+
+crtc_reg    = &FE00
+crtc_data   = &FE01
+ula_ctrl    = &FE20         ; the video ULA's control register
+ula_pal     = &FE21         ; the video ULA's palette
+romsel      = &FE30         ; the sideways bank at &8000
+acccon      = &FE34         ; the Master's access control
+ACCCON_D    = 1             ; ... D: the CRTC shows shadow RAM
+ACCCON_E    = 2             ; ... E: the VDU's code sees shadow RAM
+ACCCON_X    = 4             ; ... X: the CPU's &3000-&7FFF is shadow RAM
+ACCCON_Y    = 8             ; ... Y: HAZEL's RAM at &C000-&DFFF
+sysvia_orb  = &FE40
+sysvia_ddra = &FE43
+sysvia_t1cl = &FE44
+sysvia_t1ch = &FE45
+sysvia_acr  = &FE4B
+sysvia_pcr  = &FE4C
+sysvia_ifr  = &FE4D         ; bit 1: the vertical sync (CA1) has come
+sysvia_ier  = &FE4E         ; write bit 7 clear to disable the bits set
+sysvia_ora_nh = &FE4F       ; port A without handshake: the keyboard
+usrvia_t1cl = &FE64
+usrvia_t1ch = &FE65
+usrvia_ifr  = &FE6D
+usrvia_ier  = &FE6E
+irq1v       = &0204         ; the OS's IRQ vector, which the engine takes
+FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
+
+\ --- The screen (docs/engine.md, section 1; decision 2) ------------------
+
+SCREEN_COLS = 64            ; bytes a line: R1, MODE 2's 128 pixels
+SCREEN_ROW  = SCREEN_COLS * 8   ; bytes a character row
+SCREEN      = &4000         ; both buffers, main and shadow RAM
+SCREEN_ROWS = (&8000 - SCREEN) DIV SCREEN_ROW
+
+VIEW_W      = 104           ; pixels: the ZX's 208 at half the width
+VIEW_H      = 104           ; lines: the ZX's
+VIEW_BYTES  = VIEW_W DIV 2  ; MODE 2: two pixels a byte
+ASSERT VIEW_W MOD 2 = 0
+ASSERT VIEW_H MOD 8 = 0
+ASSERT VIEW_BYTES <= SCREEN_COLS
+
+\ The bits of a MODE 2 byte that hold its left and right pixels.
+PIX_LEFT    = &AA
+PIX_RIGHT   = &55

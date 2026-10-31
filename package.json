@@ -1,0 +1,11 @@
+{
+  "name": "freescape-beeb",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Test harness for Freescape on the BBC Master, on jsbeeb (headless TestMachine, and jsbeeb-mcp over stdio)",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "jsbeeb-mcp": "4.1.0"
+  }
+}
