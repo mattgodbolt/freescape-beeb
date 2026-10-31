@@ -244,3 +244,27 @@ design is in `docs/engine.md`, section 1. Measured with `make frames`,
   - the time-out later than it need be;
   - the handler's lateness guard removed: it only matters past 200
     lines.
+
+## 2026-10-31: the object pipeline (track H)
+
+Stages 1-7 in 6502 (`src/area.6502`, `matrix`, `objects`, `transform`,
+`clip`, `order`) match the model exactly over 2,485 views: the 65 entrance
+views, a walk from each, and every yaw, pitch and roll at eight entrances
+(`make objects`). The area records are structure-of-arrays with every
+position a cell, so the cull, the faces' tests and the sort are byte
+compares.
+
+Matt asked whether the cached transform pays against a straight
+per-frame 3×4 transform. Measured: with the cache, the transform takes a
+median 13.9K cycles on a step and 40.1K on a turn; rebuilt every frame it
+takes 42.6K either way. So about 28.7K saved on every step frame and
+nothing lost on a turn, for 2,304 bytes and a compare an object. The
+cache stays.
+
+The stage is correct but slow: a median 321K cycles on a turn and 293K on
+a step, nearly all of it the model's exact clipping arithmetic (the guard
+band 59K, the 2D clip 48K, outcodes 35K, the projection 25K, an area test
+19K). The track went back to make it fast, with authority to change the
+model's clipping where the picture stays as good: reciprocal tables for
+crossings, outcodes from projected vertices, and the area's floor drawn as
+the horizon instead of as a face.
