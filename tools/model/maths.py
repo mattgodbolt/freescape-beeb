@@ -35,7 +35,7 @@ assert FY == 2 * FX
 
 # The nearest Z the projection takes, and one past the farthest. The
 # method's error is relative, so ZNEAR costs nothing in precision; it sets
-# how many shifts the 6502 needs code for (PROJ_SMIN). Camera space is 64
+# how many cases the 6502 has code for (PROJ_NMIN). Camera space is 64
 # to a world unit, so ZNEAR is one world unit.
 ZNEAR = 64
 ZLIMIT = 1 << 23            # Z is a positive 24-bit number
@@ -54,6 +54,14 @@ def qsq(n):
 
 SQ = [qsq(j) for j in range(512)]           # f(j)
 NG = [qsq(j - 255) for j in range(512)]     # f(j - 255)
+
+# The projection's signed high byte x1 (-128..127) times R = 256 + m, with
+# x1 + 128 in the register and m in the instruction: x1 + R is
+# (x1 + 128 + m) + 128 and x1 - R is (x1 + 128 + 255 - m) - 639. SQC has
+# the view's centre added, which the subtraction carries through, so the
+# product comes out as XC + x1 R (pmul). The 6502 keeps sixteen bits.
+SQC = [qsq(j + 128) + XC for j in range(512)]
+NGC = [qsq(j - 639) for j in range(512)]
 
 
 def umul8(a, b):
@@ -88,86 +96,93 @@ def dot3(row, v):
 
 # --- The projection --------------------------------------------------------
 #
-# A normalised reciprocal times quarter-square products:
+# A reciprocal of nine bits, the top one implicit, times two byte products
+# a coordinate (docs/research/projection.md):
 #
-# - s = bitlen(Z) - PROJ_ZBITS, so Z >> s has PROJ_ZBITS bits;
-# - R = RECIP[Zi - 512], Zi = Z >> (s + 3), the top ten bits of Z: about
-#   2^16 FX / (Z >> s), rounded, for a quarter of the way into Zi's
-#   interval (PROJ_DELTA);
-# - X' = |X| >> s and Y' = |Y| >> (s - 1), sixteen bits each (Y has a bit
-#   more, for FY = 2 FX);
-# - P = X' R / 2^16, from three byte products: all of x1 r1 and the high
-#   bytes of x1 r0 and x0 r1; x0 r0 is left out, and so is the carry
-#   between the two low bytes; then 1 is added. PROJ_DELTA and the 1 take
-#   off the truncations' bias (docs/research/maths.md);
-# - sx = XC + P for X >= 0, XC - P for X < 0; sy likewise from YC, with
-#   the sign the other way.
+# - n = bitlen(Z), and Zi = Z >> (n - PROJ_IBITS), Z's top ten bits;
+# - R = 256 + PROJ_M[Zi - 512]: 256 FX 2^k / Z', Z' = Zi + 1/2, rounded,
+#   with k = 0 from PROJ_T up (the high region) and k = -1 below it (the
+#   low), so that R is always in [256, 512), a byte M under an implicit
+#   one;
+# - t = n - PROJ_IBITS + k: X' = X >> t and Y' = Y >> (t - 1), signed and
+#   floored, so Z >> t is in [FX / 2, FX) and X' fits sixteen bits for any
+#   |X| <= PROJ_XBAND Z (Y has a bit more, for FY = 2 FX);
+# - P = floor(X' R / 256) + 1 = x1 R + x0 + hi(x0 M) + 1, X' = x1:x0,
+#   from two byte products, exactly: x1 R with x1 signed (SQC and NGC),
+#   and x0 M's high byte (SQ and NG). The 1 takes off the floors' bias;
+# - sx = XC + P; sy = YC + P from NOT Y' = -Y' - 1, which is YC - P from
+#   Y' less R / 256, a sixteenth or two (docs/research/projection.md).
 #
-# Where X' doesn't fit sixteen bits (|X/Z| beyond 8 or more), X is taken
-# two bits further down and P four times that, so the result is right to
-# a few sixteenths up to where it saturates. Results are clamped to the
-# signed 16-bit range.
+# Nothing is clamped: inside the band the results fit sixteen bits, and
+# the band is wider than the clip's guard band (decision 17), which every
+# projected vertex is inside. The result depends only on (X, Y, Z), so a
+# vertex sharing Z, or X and Z, with the last one projected gets exactly
+# project's result by the 6502's shorter entries (project_z, project_y).
 
-PROJ_ZBITS = 13
 PROJ_IBITS = 10                     # Zi: 512-1023
-PROJ_DELTA = Fraction(1, 4)         # where in Zi's interval R is exact
-PROJ_SMIN = ZNEAR.bit_length() - PROJ_ZBITS
-PROJ_SMAX = (ZLIMIT - 1).bit_length() - PROJ_ZBITS
-PROJ_SLOW = 2                       # the slow path's extra shift
+PROJ_XBAND = 25                     # the band: |X| <= PROJ_XBAND Z
+PROJ_YBAND = 12                     # ... and |Y| <= PROJ_YBAND Z
+PROJ_NMIN = ZNEAR.bit_length()      # bitlen(Z): one case each
+PROJ_NMAX = (ZLIMIT - 1).bit_length()
 S16_MIN, S16_MAX = -32768, 32767
 
 
 def _recip(zi):
-    # X' R / 2^16 = FX |X| / Z with Z = (Zi + delta) 2^(s + 3), X = X' 2^s
-    zs = (zi + PROJ_DELTA) * (1 << (PROJ_ZBITS - PROJ_IBITS))
-    return round(FX * 65536 / zs)
+    """(R, k) for Zi: R = 256 FX 2^k / (Zi + 1/2), rounded, in [256, 512)."""
+    for k in (0, -1):
+        r = round(Fraction(256 * FX * 2 ** k) / (zi + Fraction(1, 2)))
+        if r < 512:
+            assert r >= 256, zi
+            return r, k
+    raise AssertionError(zi)
 
 
-RECIP = [_recip(zi) for zi in range(1 << (PROJ_IBITS - 1), 1 << PROJ_IBITS)]
-assert max(RECIP) < 65536 and min(RECIP) >= 256
+_ZI0 = 1 << (PROJ_IBITS - 1)
+_RK = [_recip(zi) for zi in range(_ZI0, 2 * _ZI0)]
+PROJ_M = [r - 256 for r, k in _RK]
+# The high region (k = 0) is Zi from PROJ_T up, the low (k = -1) below.
+PROJ_T = _ZI0 + [k for r, k in _RK].index(0)
+assert all((k == 0) == (_ZI0 + i >= PROJ_T) for i, (r, k) in enumerate(_RK))
 
 
 def _shr(v, k):
     return v >> k if k >= 0 else v << -k
 
 
-def pmul(xp, r):
-    """X' R / 2^16 as the 6502 has it: x1 r1, and the high bytes of x1 r0
-    and x0 r1 (their low bytes' carry left out), plus 1."""
-    assert 0 <= xp < 65536 and 0 <= r < 65536
-    x1, x0, r1, r0 = xp >> 8, xp & 255, r >> 8, r & 255
-    p = umul8(x1, r1) + (umul8(x1, r0) >> 8) + (umul8(x0, r1) >> 8) + 1
-    return p & 0xFFFF
+def recip(Z):
+    """(M, t) for Z: R = 256 + M, and the shift for X' (Y's is t - 1)."""
+    assert ZNEAR <= Z < ZLIMIT, Z
+    n = Z.bit_length()
+    zi = _shr(Z, n - PROJ_IBITS)
+    k = 0 if zi >= PROJ_T else -1
+    return PROJ_M[zi - _ZI0], n - PROJ_IBITS + k
 
 
-def _coord(a, s, r):
-    """|P| for a magnitude a at shift s, saturated at 65535."""
-    xp = _shr(a, s)
-    if xp < 65536:
-        return pmul(xp, r)
-    xp = _shr(a, s + PROJ_SLOW)
-    if xp >= 65536:
-        return 65535
-    p = pmul(xp, r)
-    return min(p << PROJ_SLOW, 65535)
-
-
-def _clamp(v):
-    return max(S16_MIN, min(S16_MAX, v))
+def pmul(v, m):
+    """floor(v R / 256) + 1, R = 256 + m, for a signed 16-bit v = x1:x0, as
+    the 6502 has it: x1 R (x1 signed, from SQC and NGC) + x0 + hi(x0 m) + 1
+    (from SQ and NG)."""
+    assert S16_MIN <= v <= S16_MAX and 0 <= m < 256
+    x1, x0 = v >> 8, v & 255
+    j, k = x1 + 128 + m, x1 + 128 + 255 - m
+    p = (SQC[j] - XC) - NGC[k] + x0 + (umul8(x0, m) >> 8) + 1
+    assert p == (v * (256 + m)) // 256 + 1
+    return p
 
 
 def project(X, Y, Z):
     """(sx, sy) in sixteenths of a pixel, as the 6502 computes them."""
     assert ZNEAR <= Z < ZLIMIT, Z
-    assert -(1 << 23) <= X < (1 << 23) and -(1 << 23) <= Y < (1 << 23)
-    s = Z.bit_length() - PROJ_ZBITS
-    zi = _shr(Z, s + PROJ_ZBITS - PROJ_IBITS)
-    r = RECIP[zi - (1 << (PROJ_IBITS - 1))]
-    px = _coord(abs(X), s, r)
-    py = _coord(abs(Y), s - 1, r)
-    sx = XC + px if X >= 0 else XC - px
-    sy = YC - py if Y >= 0 else YC + py
-    return _clamp(sx), _clamp(sy)
+    assert -ZLIMIT <= X < ZLIMIT and -ZLIMIT <= Y < ZLIMIT, (X, Y)
+    assert abs(X) <= PROJ_XBAND * Z and abs(Y) <= PROJ_YBAND * Z, (X, Y, Z)
+    m, t = recip(Z)
+    xp, yp = _shr(X, t), _shr(Y, t - 1)
+    assert S16_MIN <= xp <= S16_MAX and S16_MIN <= yp <= S16_MAX, (X, Y, Z)
+    # y by the same product of NOT Y' = -Y' - 1, so its centre's add is
+    # x's (the 6502 folds XC into a table)
+    sx, sy = XC + pmul(xp, m), YC + pmul(~yp, m)
+    assert S16_MIN <= sx <= S16_MAX and S16_MIN <= sy <= S16_MAX, (X, Y, Z)
+    return sx, sy
 
 
 def project_exact(X, Y, Z):

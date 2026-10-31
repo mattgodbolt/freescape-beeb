@@ -69,7 +69,14 @@ cost; it's not built, as it's the transform's choice to make.
 
 ## The projection (stage 5)
 
-### The method chosen: a normalised reciprocal times quarter squares
+**Superseded on 2026-10-31** by a nine-bit reciprocal times two byte
+products, with an accuracy budget set by what flickers in camera walks,
+and entries for vertices that share Z, or X and Z
+(`docs/research/projection.md`, which has the figures). What follows is
+the first method as it was surveyed and built, kept for the record; its
+code is in the history, last at 57f2e4d.
+
+### The first method: a normalised reciprocal times quarter squares
 
 For each vertex:
 
@@ -149,13 +156,20 @@ counted, for 0.3 of a sixteenth, and makes Z's reversals rarer, not none.
 
 ## Memory
 
+As built on 2026-10-31 with the second projection (`make maths` prints
+the sizes as `maths:`):
+
 | What | Bytes | Where |
 |---|---:|---|
 | `sq_lo`, `sq_hi`, `ng_lo`, `ng_hi` (quarter squares) | 4 × 512 | HAZEL, page-aligned |
-| `proj_rlo`, `proj_rhi` (the reciprocals) | 2 × 512 | HAZEL, page-aligned |
+| `sqc_lo`, `sqc_hi`, `ngc_lo`, `ngc_hi` (the projection's signed products) | 4 × 512 | HAZEL, page-aligned |
+| `proj_m` (the reciprocals, less 256) | 512 | HAZEL, page-aligned |
 | `proj_bl2` (twice each byte's bit length) | 256 | HAZEL |
 | `mul_set`, `mul`, `dot_set`, `dot3` | 430 | RAM outside `&3000-&7FFF`: they patch themselves |
-| `project` and its cases | 1,835 | likewise |
+| `project`, `project_z`, `project_y`, their cases and blocks | 2,084 | likewise |
+
+The first projection's were `proj_rlo` and `proj_rhi` (2 × 512) in place
+of `proj_m` and the SQC and NGC tables, and 1,835 bytes of code.
 
 The build prints the code's sizes (`maths:` in `make maths`'s output).
 Zero page is baron's: the arguments and results are `ZA_AUTO` globals
