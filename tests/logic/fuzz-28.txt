@@ -1,0 +1,84 @@
+# Found by tools/logic/check.py --fuzz, seed 28.
+# R at the probe's top level still sets TargetX and TargetZ ($A286),
+# before the level's test.
+goto 8 5
+O W
+O
+L
+K O
+M
+Z
+R F L
+O
+N O W
+O Q
+Q
+Q
+A N
+K
+M Q O
+Q
+O F
+W P
+O Q
+W
+O
+K O
+W O
+N
+O
+L A
+R
+A W
+W R
+Q
+K
+P W
+A
+R K U
+R
+Z
+F L
+L
+W
+A
+R
+K
+X
+M
+O
+O
+O
+Q U
+S O
+K Q
+W Q
+P
+X O
+F N P
+K
+A
+Q O W
+K
+SPACE
+O
+K N R
+F O
+O U
+F P
+Q
+L
+K
+X L
+S
+R A
+P O SPACE
+Q
+tick
+Q
+O R K
+K
+K
+O
+O U
+O K

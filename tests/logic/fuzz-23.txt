@@ -1,0 +1,84 @@
+# Found by tools/logic/check.py --fuzz, seed 23.
+# The FCL's REDRAW (a global condition's) runs the renderer and the
+# sensors' test inside the pass: their outputs are the original's.
+goto 5 6
+K Q
+O Q
+O
+Q W
+R
+P
+O R
+X
+P
+R
+N O
+K F
+O
+K P
+O
+K F
+O
+M
+K
+P S O
+L
+F
+F
+S Q
+X
+O
+O S
+O
+O P F
+O
+A F Z
+O X
+K Q
+L O
+L
+R Q
+O P
+X F
+O
+R
+O L R
+M W
+R O
+Z
+A
+N
+N
+K
+Q
+W P K
+Q
+W
+B K
+U
+K
+W Q O
+O U
+W L Q
+Z L
+Z
+O
+K Z
+F
+O
+U
+SPACE R
+U Q
+O P R
+X B O
+F
+K O
+O
+O
+F P
+X
+Q
+P
+Z L
+Z
+R X W

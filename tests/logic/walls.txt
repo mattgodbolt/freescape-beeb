@@ -1,0 +1,75 @@
+# Walking into area 1's walls on the probe: cube 4 fills x cells 126-127,
+# cube 3 z cells 126-127. A move stops a unit short of the face it would
+# cross (the area's objects are whole cells), then keeps Margin from it;
+# nothing slides along the wall.
+
+# Head on (yaw 18 looks along +x), at the full step.
+at 7712 160 3872
+angles 0 18 0
+O x3
+expect Blocked 1
+expect Collided 4
+K
+O
+
+# At angles: 60, 75 and 85 degrees off the wall's face, and back off it.
+at 7712 160 3872
+angles 0 12 0
+O x4
+expect Collided 4
+at 7712 160 3872
+angles 0 15 0
+O x4
+at 7712 160 3872
+angles 0 17 0
+O x4
+K x2
+# From the other side of the normal, and looking up and down (the probe's
+# step ignores the pitch).
+at 7712 160 3872
+angles 9 21 0
+O x4
+expect Collided 4
+at 7712 160 3872
+angles 63 24 0
+O x4
+
+# Small steps up to the wall: through the Margin's band.
+at 8000 160 3872
+angles 0 18 0
+X x3
+expect Step 25
+O x4
+X x2
+expect Step 5
+O x4
+X x2
+expect Step 1
+O x12
+K x12
+O x12
+S x7
+
+# Into the corner diagonally (yaw 9): x and z cross their last boundaries
+# at the same point.
+at 7968 160 7968
+angles 0 9 0
+O x3
+expect Blocked 1
+X x2
+O x6
+# Into the corner just off the diagonal, both ways.
+at 7968 160 7900
+angles 0 9 0
+O x4
+at 7900 160 7968
+angles 0 9 0
+O x4
+S x2
+
+# Backing into the x=1 wall (cube 2, x cells 0-1), yaw 18 so K is -x.
+at 300 160 3872
+angles 0 18 0
+K x3
+expect Collided 2
+O

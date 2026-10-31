@@ -1,0 +1,83 @@
+# Found by tools/logic/check.py --fuzz, seed 30.
+# The FCL's REDRAW inside a pass, from shooting mode.
+goto 5 6
+X
+L B
+SPACE K
+Z
+Z X
+A Q
+N R
+K P X
+O
+K
+M
+Q
+O
+L W
+W
+S W
+P
+O
+O Q
+F K X
+K F
+Q W
+W
+O R P
+U
+W M N
+W U
+O A
+R
+O
+O X
+Q
+R
+K
+L K
+P O
+Q O
+O
+M
+N O U
+W
+K P
+L O
+Z K
+O
+O
+K F U
+W
+R W
+K
+W U P
+L K
+K
+R
+W O R
+L O
+K
+X M S
+U W
+A X S
+K
+K
+Q O
+S
+U O
+tick
+K Q O
+X
+K
+tick
+O
+M L
+O
+L
+W
+O
+Q W
+F
+A
+O

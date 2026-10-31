@@ -1,0 +1,57 @@
+# Stepping up and down on the probe. Crossing into a cell an object fills,
+# the probe climbs if there's a clear column BodyHeight cells high starting
+# at most ClimbLimitScaled cells up (2 at the start), and the move stops at
+# that crossing. Crossing out over a drop, it falls to what's below.
+
+# Area 1's cube 9 is one cell each way at (60, 1, 122): up onto it, along
+# it, and off its far side (a fall of one cell), into the wall (cube 3).
+at 3872 160 7584
+angles 0 0 0
+X x2
+expect Step 50
+O x4
+O
+expect Sound 4
+expect PlayerY 224
+O
+O
+expect Sound 3
+expect PlayerY 160
+O x4
+expect Blocked 1
+
+# Onto it from the side, at an angle, and back off it backwards.
+at 3700 160 7840
+angles 0 12 0
+O x6
+K x6
+
+# Cube 23 is three cells high: too high to climb.
+at 4960 160 6432
+angles 0 18 0
+O x4
+expect Blocked 1
+expect Collided 23
+# Two levels down, the probe is no lower to climb: the feet decide.
+F
+O x2
+expect Blocked 1
+R
+
+# Area 2's cube 15 is two cells high at (100, 1, 81): the most the probe
+# climbs; then off its far side, a fall of two cells, which it survives.
+goto 2 4
+at 6432 160 5024
+angles 0 0 0
+expect Step 50
+O x3
+O
+expect Sound 4
+expect PlayerY 288
+O x2
+O
+expect Sound 3
+expect PlayerY 160
+expect GameOver 0
+O x6
+K x8

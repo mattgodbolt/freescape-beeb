@@ -23,6 +23,11 @@ KL KR KU KD KF for a Kempston joystick.
 --boot takes a snapshot of the tape just loaded through the protection
 and the control menu to the main loop first (make zx).
 
+--passes SCENARIO runs a scenario (tests/logic/*.txt: keys held by pass)
+on the original from the snapshot, pass by pass, and prints the camera
+and what the pass did after each (tools/logic/oracle.py; tools/logic/
+check.py compares the same passes with the transcription).
+
 --view draws one view with the original's own redraw (render_view):
 area AREA from entrance ENTRANCE (0 for none), the camera optionally
 overridden, and writes <prefix>a<area>_e<entrance>.png and .bin (the
@@ -371,6 +376,35 @@ def run_script(spec, script, prefix):
                 spec.key(key, False)
 
 
+def run_passes(snap, path):
+    """--passes: a scenario on the original alone."""
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from logic import scenario
+    from logic.oracle import Original
+    from logic.state import State
+    orig = Original(snap)
+    n = 0
+    for st in scenario.load(path):
+        if st.kind == "expect":
+            continue
+        orig.begin(tick=getattr(st, "tick", False))
+        if st.kind == "poke":
+            orig.poke(st.addr, st.values)
+            continue
+        if st.kind == "fcl":
+            s = State(orig.fcl(st.code, shot=st.shot))
+        else:
+            s = State(orig.run_pass(st.keys, st.tick))
+            n += 1
+        print(f"{st.line} {' '.join(getattr(st, 'keys', ())) or st.kind}: pos {s.PlayerX},{s.PlayerY},{s.PlayerZ} "
+              f"angles {s.Pitch},{s.Yaw},{s.Roll} area {s.AreaId} level {s.ExtLevel} jet {s.InJet} "
+              f"flags {s.GameFlags:02X}{s.GameFlags2:02X} collided {s.Collided} sound {s.Sound} over {s.GameOver}")
+        if s.GameOver:
+            break
+    print(f"{n} passes")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("script", nargs="?")
@@ -381,8 +415,11 @@ def main():
                     help="the snapshot is the tape just loaded: pass the protection and the menu first")
     ap.add_argument("--view", metavar="AREA:ENTRANCE", help="draw a view with the original's redraw")
     ap.add_argument("--camera", metavar="X,Y,Z,PITCH,YAW,ROLL", help="with --view: the camera to draw from")
+    ap.add_argument("--passes", metavar="SCENARIO", help="run a scenario's passes on the original")
     args = ap.parse_args()
     exec_map = set() if args.map else None
+    if args.passes:
+        return run_passes(args.snap, args.passes)
     if args.view:
         prefix = args.script or args.prefix  # the one positional is the prefix here
         area, _, entrance = args.view.partition(":")

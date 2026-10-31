@@ -26,9 +26,14 @@ pattern where the 3D view will go. Driller's own
 ZX code runs headless as the oracle and draws every entrance view, so the
 engine has its reference. The Python model of the renderer, which the 6502
 must match byte for byte, renders all of Driller's entrance views and
-agrees with the original's. The maths, the span buffer and row writer, the
-object pipeline, the colours and the player's movement are being built in
-parallel. `docs/journal.md` has the story as it goes.
+agrees with the original's, in the ST's colours. The maths is built and
+checked on the 6502. Driller's player logic (the keys, moving and
+colliding, climbing and falling, the jet, and the FCL that joins the
+areas) is transcribed in Python and checked pass by pass against the
+original. The span buffer and row writer draw Driller's views on the
+6502 exactly as the model does, and are being made faster; the object
+pipeline, a faster projection and the 6502 player logic are being built
+in parallel. `docs/journal.md` has the story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
 

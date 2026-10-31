@@ -1,0 +1,186 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the writer (docs/engine.md, stage 10)
+\
+\ The view's bytes, written once each as the span buffer (raster.6502)
+\ settles them: nothing on the screen is read and nothing is cleared.
+\
+\ - Whole bytes go through the row runs: for each character row of the
+\   view, a routine of `STA abs,Y`, one a byte column, with Y the line
+\   within the row (Solid Elite's way). A piece of a line is written by
+\   entering its row's run at the piece's first whole byte, with an RTS
+\   planted after its last. Each row keeps one plant, moved only when a
+\   piece ends somewhere else, so lines that end alike don't move it.
+\   After the view's last column each run has one more slot, which stores
+\   into rr_scratch, so that a plant there can be taken out like any other.
+\ - A byte two runs share is `left AND PIX_LEFT OR right AND PIX_RIGHT` of
+\   their pattern bytes, stored through r_bp0 or r_bp1, the screen's two
+\   pages of the line's character row.
+\
+\ Both screens share one address (main and shadow RAM), so one copy of the
+\ row runs serves both; the caller sets ACCCON's X for the one drawn.
+\ ***************************************************************************
+
+OP_STA_ABSY = &99                   ; a row run's slot
+OP_RTS      = &60
+RR_ROWS     = VIEW_H DIV 8
+RR_END      = 3 * VIEW_BYTES        ; the slot after the view's last column
+ASSERT RR_END + 4 <= 256            ; a row's run fits its page
+
+\ The view's columns cross from a character row's first page to its second
+\ at this pixel (the screen's column 32).
+BND_SPLIT   = 2 * (32 - VIEW_COL0)
+ASSERT VIEW_COL0 < 32 AND VIEW_COL0 + VIEW_BYTES <= 64
+\ (A character row's view starts VIEW_COL0 columns into a page-aligned row,
+\ which is what r_bp0 and bnd_ofs assume.)
+ASSERT (VIEW_ADDR AND &FF) = VIEW_COL0 * 8 AND SCREEN_ROW MOD 256 = 0
+
+\ The character row being written (row_setup): its index, its plant, and
+\ where it is on the screen and in the row runs.
+ZA_AUTO1 r_row, r_pcur
+ZA_AUTO2 r_bp0, r_bp1, r_rr
+\ A piece: its pixels [r_lo, r_hi), its pattern byte; a shared byte's value.
+ZA_AUTO1 r_lo, r_hi, r_v, r_bv
+
+\ ---------------------------------------------------------------------------
+\ The row runs, a page each.
+
+SECTION RasterRuns
+    ALIGN 256
+.rr_rows
+FOR r = 0..<RR_ROWS
+    ASSERT LO(P%) = 0
+    FOR c = 0..<VIEW_BYTES
+        STA VIEW_ADDR + r * SCREEN_ROW + 8 * c, Y
+    NEXT
+    \ The extra slot, planted to begin with (writer_init's plant).
+    EQUB OP_RTS : EQUW rr_scratch
+    RTS
+    IF r < RR_ROWS - 1
+        ALIGN 256
+    ENDIF
+NEXT
+ENDSECTION
+
+SECTION RasterWork
+.rr_scratch SKIP 8                  ; what the extra slot stores into
+ENDSECTION
+
+SECTION RasterCode
+
+\ Per pixel boundary p (0..VIEW_W): a piece starting at p enters its row's
+\ run at rr_en (its first whole byte's slot), and one ending at p plants the
+\ RTS at rr_pl (the slot after its last whole byte).
+.rr_en
+FOR p = 0..VIEW_W
+    EQUB 3 * ((p + 1) DIV 2)
+NEXT
+.rr_pl
+FOR p = 0..VIEW_W
+    EQUB 3 * (p DIV 2)
+NEXT
+\ For an odd p, the shared byte p DIV 2's offset from r_bp0 (p < BND_SPLIT)
+\ or from r_bp1.
+.bnd_ofs
+FOR p = 0..VIEW_W
+    EQUB ((VIEW_COL0 + p DIV 2) AND 31) * 8
+NEXT
+
+\ Per character row: its high bytes on the screen and in the row runs.
+.row_scr
+FOR r = 0..<RR_ROWS
+    EQUB HI(VIEW_ADDR + r * SCREEN_ROW)
+NEXT
+
+\ row_setup: the writer's pointers for line X's character row; the last
+\ row's plant is put back where it's kept.
+.row_setup
+{
+    TXA : LSR A : LSR A : LSR A
+    CMP r_row : BEQ row_same
+    TAY
+    LDA r_pcur
+    PHY : LDY r_row : STA rr_planted,Y : PLY
+}
+\ row_load: row Y's plant and pointers, as row r_row.
+.row_load
+    STY r_row
+    LDA rr_planted,Y : STA r_pcur
+    LDA row_scr,Y : STA r_bp0+1 : INC A : STA r_bp1+1
+    TYA : CLC : ADC #HI(rr_rows) : STA r_rr+1 : STA put_run.jsr+2
+.row_same
+    RTS
+
+\ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
+\ pattern byte A. Keeps X. It jumps into the row's run, whose planted RTS
+\ returns to put_run's caller. (A piece has whole bytes unless its first
+\ whole byte's slot is its plant's: (lo + 1) DIV 2 <= hi DIV 2 for lo < hi.)
+.put_run
+{
+    STA r_v
+    LDY r_hi : LDA rr_pl,Y
+    LDY r_lo : CMP rr_en,Y : BEQ none
+    CMP r_pcur : BNE replant
+.go
+    LDA rr_en,Y : STA jsr+1
+    LDA r_y : AND #7 : TAY
+    LDA r_v
+.jsr
+    JMP rr_rows                         ; patched: the piece's row and entry
+    ZA_CANJUMP rr_rows
+    ZA_RETURN
+.none
+    RTS
+.replant
+    \ The row's plant moves to where this piece ends.
+    PHA
+    LDY r_pcur : LDA #OP_STA_ABSY : STA (r_rr),Y
+    PLA : STA r_pcur : TAY
+    LDA #OP_RTS : STA (r_rr),Y
+    LDY r_lo
+    BRA go
+}
+
+\ put_bnd: A into the shared byte at odd pixel boundary Y of line r_y.
+\ Keeps X.
+.put_bnd
+{
+    STA r_bv
+    LDA r_y : AND #7 : ORA bnd_ofs,Y
+    CPY #BND_SPLIT
+    TAY
+    LDA r_bv
+    BCS second
+    STA (r_bp0),Y
+    RTS
+.second
+    STA (r_bp1),Y
+    RTS
+}
+
+\ writer_init: every row's plant in its extra slot (raster_init, once).
+.writer_init
+{
+    LDX #RR_ROWS - 1
+    LDA #RR_END
+.each
+    STA rr_planted,X
+    DEX : BPL each
+    RTS
+}
+
+\ writer_begin: a frame's first row, before any row_setup (raster_frame).
+.writer_begin
+    STZ r_rr : STZ r_bp0 : STZ r_bp1
+    LDY #0
+    JMP row_load
+
+\ writer_end: the last row's plant put back.
+.writer_end
+    LDY r_row : LDA r_pcur : STA rr_planted,Y
+    RTS
+ENDSECTION
+
+\ Where each row's plant is: lasts from frame to frame, as the runs do.
+SECTION RasterState
+.rr_planted     SKIP RR_ROWS
+ENDSECTION
