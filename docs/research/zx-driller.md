@@ -11,6 +11,11 @@ Tags as in the brief: **[measured]** means run in the simulator or read
 from the bytes; **[read]** means read from the code, not yet exercised
 by a check.
 
+The checks quoted below are `tools/zx_arith.py --cases 5000`, run
+2026-10-31: the original's own routines called with random inputs and
+compared with the transcription in that file, every result equal
+(`make zxcheck` runs the same with fewer cases).
+
 ## For the other tracks, in short
 
 - **World units.** An object's cell coordinate `c` is at `64·c` world
@@ -29,8 +34,7 @@ by a check.
     (`$8779`, header byte 5). The eye is `64·L·scale − 32` units above
     the floor of the entrance's cell, 1.5 cells at the start;
   - in the jet (`$877A ≠ 0`), `y = 64·ey + 32`.
-- **The matrix** (`$6EE4`) [measured: `tools/zx_arith.py`, every result
-  equal over 2,864 angle triples]:
+- **The matrix** (`$6EE4`) [measured: 5,864 angle triples]:
   `M = S · Rroll · Rpitch · Ryaw`, starting from the identity (1.0 = 64),
   each product rounded to a signed byte by `(v + 32) >> 6`, a rotation
   skipped when its angle is 0. Rows are the camera's x, y, z:
@@ -44,13 +48,14 @@ by a check.
     camera x is screen right.
 - **The transform** (`$6E25` compiles a shift-and-add multiply for each
   of the nine coefficients into the render buffer at `$5CBC`; `$7915`
-  runs them) [measured: 16,000 vertices equal]:
+  runs them) [measured: 40,000 vertices]:
   `V_i = Σ_j sign · ⌊|M_ij| · |d_j| / 64⌋`, the sign applied after the
   truncation, summed in 16 bits, with `d = vertex − camera` in world
   units. Every vertex goes through the matrix, cuboids' eight corners
   included (`$6FC2` builds them from the box; no corner-and-edges sum as
   in CM2).
-- **The projection** (`$7C9D`) [measured: 16,000 vertices equal]:
+- **The projection** (`$7C9D`) [measured: 40,000 vertices, some outside
+  the side planes, some at `Z = 0`]:
   - `x_s = XC + trunc(XC · X / Z)`, `y_s = YC + trunc(YC · Y / Z)`,
     `trunc` toward zero (an exact 8 × 16-bit product, `$910E`, then a
     24 / 16-bit divide on the magnitudes, `$91F1`).
@@ -148,7 +153,9 @@ by a check.
   show there [read].
 - **The sort** (`$767E`) is Castle Master II's, and ScummVM's
   `compareBoundingBoxAxis` and `sortObjectsForRendering` case for case
-  (`area.cpp:321-375`) [read]: up to `n − 1` bubble passes over adjacent
+  (`area.cpp:321-375`). Transcribed in `tools/zx_arith.py` (`sort`)
+  [measured: 5,000 random lists of 2-20 boxes, many overlapping or tied,
+  each sorted into the original's order]: up to `n − 1` bubble passes over adjacent
   pairs (P, Q), stopping after a pass with no swap. Per axis (x, then y,
   then z), on the camera-relative boxes:
   - the boxes overlap (`P.min < Q.max` and `Q.min < P.max`): no verdict;
@@ -174,9 +181,9 @@ by a check.
 ## The fill
 
 Transcribed in `tools/zx_arith.py` (`scan`, `fill`) [measured: 5,000
-random convex polygons of 1-6 points, on and inside the view's edges,
-each equal byte for byte to `$83FC` then `$80C0` drawing into the same
-random buffer]:
+random convex polygons of 1-6 points, in both windings, on and inside
+the view's edges, each equal byte for byte to `$83FC` then `$80C0`
+drawing into the same random buffer]:
 
 - **Screen to pixels.** A screen point `(x, y)`, `x` 0-208 and `y` 0-104
   with `y` up, covers pixel column `x − 1` and buffer row `104 − y`.

@@ -12,6 +12,7 @@ behaviour. The check calls the original's own routines in the snapshot
     the transform    $6E25 then $7915   against transform()
     the projection   $7C9D (via $910E, $91F1) against project()
     the fill         $83FC then $80C0   against fill() (scan())
+    the sort         $767E              against sort()
 
 The tables (the sine table, the scaling diagonal, the projection centre,
 the patterns) are read from the snapshot, never written here (decision 6).
@@ -48,6 +49,10 @@ COLOUR = 0x8917      # the face's colour, 1-15
 PATTERNS = 0x891D    # the address of the 15 patterns, 4 bytes each
 BUFFER = 0x5CBC
 FACE_SCRATCH = 0x6766  # the draw list's space, free outside a redraw
+SORT = 0x767E
+DRAW_LIST = 0x8A9D   # the address of the draw list: 4 bytes an object
+N_DRAWN = 0x8918
+BOX_SCRATCH = 0x5CBC   # the render buffer, free outside a redraw
 
 
 def sb(v):
@@ -212,6 +217,48 @@ def fill(points, pattern, buf):
             buf[i] = (buf[i] & ~mask & 0xFF) | (byte & mask)
 
 
+def _axis(p0, p1, q0, q1):
+    """One axis of $767E's comparison: 1 if P is nearer the camera, 2 if
+    Q is, 0 for no verdict. Boxes relative to the camera; each test is a
+    16-bit subtraction's sign."""
+    neg = lambda v: s16(v) < 0  # noqa: E731
+    if neg(p0 - q1) and neg(q0 - p1):
+        return 0                          # they overlap
+    if neg(p0) != neg(p1):
+        return 1                          # P straddles the camera
+    if neg(q0) != neg(q1):
+        return 2
+    if neg(p0) != neg(q0):
+        return 0                          # opposite sides
+    d = s16(q0 - p0)
+    if d == 0:
+        bits = (2 if neg(q1) else 0) | (1 if neg(p1) else 0) | (4 if neg(q1 - p1) else 0)
+    else:
+        bits = (2 if neg(q0) else 0) | (1 if neg(p0) else 0) | (4 if d < 0 else 0)
+    return 1 if bits in (0, 7) else 2
+
+
+def sort(boxes):
+    """$767E: the draw list's order, far to near, from the list's order.
+    boxes: (x min, x max, y min, y max, z min, z max) relative to the
+    camera. Returns the indices in drawing order."""
+    order = list(range(len(boxes)))
+    for _ in range(len(order) - 1):
+        swapped = False
+        for j in range(len(order) - 1):
+            p, q = boxes[order[j]], boxes[order[j + 1]]
+            verdict = 0
+            for a in range(3):
+                verdict = verdict << 2 | _axis(p[2 * a], p[2 * a + 1], q[2 * a], q[2 * a + 1])
+            if verdict != 0 and verdict & 0x15 == 0:
+                continue                  # Q is nearer, P on no axis: keep
+            order[j], order[j + 1] = order[j + 1], order[j]
+            swapped = True
+        if not swapped:
+            break
+    return order
+
+
 class Original:
     """The original's routines, called in the snapshot with a sentinel
     return address."""
@@ -275,6 +322,21 @@ class Original:
         self.call(FILL_SPANS)
         return bytearray(m[BUFFER:BUFFER + len(buf)])
 
+    def sort(self, boxes):
+        """The original's sort on a draw list of these boxes; returns the
+        indices in its order. Each entry's first word holds the index,
+        where the projected data's address would be."""
+        lst = self.peek16(DRAW_LIST) & 0xFFFF
+        for i, b in enumerate(boxes):
+            at = BOX_SCRATCH + 12 * i
+            for k, v in enumerate(b):
+                self.poke16(at + 2 * k, v)
+            self.poke16(lst + 4 * i, i)
+            self.poke16(lst + 4 * i + 2, at)
+        self.mem[N_DRAWN] = len(boxes)
+        self.call(SORT)
+        return [self.peek16(lst + 4 * i) for i in range(len(boxes))]
+
 
 def check(snap, cases, seed=1):
     rng = random.Random(seed)
@@ -332,8 +394,23 @@ def check(snap, cases, seed=1):
         n_fill += 1
         if got != want:
             differ("fill", (points, colour), f"{sum(a != b for a, b in zip(got, want))} bytes off", "")
+    n_sort = 0
+    for _ in range(cases):
+        n = rng.randint(2, 20)
+        span = rng.choice([8, 64, 4000])  # small spans make ties and overlaps
+        boxes = []
+        for _ in range(n):
+            b = []
+            for _ in range(3):
+                lo = rng.randint(-span, span)
+                b += [lo, lo + rng.randint(0, span)]
+            boxes.append(b)
+        got, want = orig.sort(boxes), sort(boxes)
+        n_sort += 1
+        if got != want:
+            differ("sort", (boxes,), got, want)
     print(f"zx_arith: {len(angles)} matrices, {n_vert} vertices transformed, "
-          f"{n_proj} projected, {n_fill} polygons filled: {failures} differ")
+          f"{n_proj} projected, {n_fill} polygons filled, {n_sort} lists sorted: {failures} differ")
     return failures == 0
 
 

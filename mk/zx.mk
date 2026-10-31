@@ -7,9 +7,10 @@
 #                  with each camera and the redraw's T-states)
 #   make zxdisasm  the annotated listing (build/zx/driller.skool), from
 #                  disasm/*.ctl
-#   make zxcheck   the original's arithmetic against tools/zx_arith.py's
-#                  transcription; the start view against the frame the
-#                  game drew itself; every view drawn again identically
+#   make zxcheck   the original's arithmetic, fill and sort against
+#                  tools/zx_arith.py's transcription; the start view
+#                  against the frame the game drew itself; every view
+#                  drawn again identically
 #
 # Everything here reads Driller from originals/ and writes to build/zx/:
 # nothing of the original is committed (decision 6).
