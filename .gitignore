@@ -1,0 +1,8 @@
+# Fetched originals and anything derived from them: never checked in (BRIEF.md D6)
+/originals/
+/build/
+/.venv/
+__pycache__/
+*.pyc
+node_modules/
+/.claude/scheduled_tasks.lock
