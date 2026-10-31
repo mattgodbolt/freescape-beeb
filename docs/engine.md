@@ -28,7 +28,51 @@ fields (25fps) and the busiest in three (16.7fps), measured in jsbeeb.
   change size.
 - **A MODE 2 byte is two pixels.** The left pixel's colour bits 3-0 are
   in bits 7, 5, 3 and 1; the right pixel's in bits 6, 4, 2 and 0 (masks
-  `&AA` and `&55`).
+  `&AA` and `&55`; `mode2_byte(l, r)` in `src/defs.6502`).
+
+### The frame loop and the screen, as built
+
+`build/freescape.ssd` (`src/main.6502`): `!BOOT` runs `FS` at `&0E00`,
+which owns the machine and makes no OS call.
+
+- **Set-up** (`start`): both buffers cleared, then MODE 2 in the hardware
+  (`screen_init`): the palette with logical colour n physical n AND 7
+  (MODE 2's eight; 8-15 the same, steady), the ULA's `ULA_MODE2` and the
+  CRTC's `CRTC_R0`-`CRTC_R13` (`src/defs.6502`). The screen sits where
+  MOS 3.20 puts MODE 2 at `*TV 0,1`, whatever the CMOS says. Then
+  `irq_install`: IRQ1V taken, every VIA interrupt off but the vertical
+  sync's (anything else goes on to the OS's handler).
+- **The protocol** (`src/screen.6502`), which the renderer calls:
+  - `frame_begin` waits while `frame_ready` is set (the frame last
+    handed over isn't shown yet), then selects the buffer not shown with
+    ACCCON's X; `draw_buffer` names it.
+  - `frame_end` sets `frame_ready`. At the next vertical sync the
+    interrupt (`src/irq.6502`) sets D to `draw_buffer` and clears it.
+  - Write the screen only between the two, and call `frame_begin` as
+    late as possible: stages 0-9 write nothing on the screen, so they run
+    while the last frame waits for its flip.
+  - X and D are changed only by `TSB` and `TRB`, which an interrupt
+    can't split, so neither side undoes the other's bit.
+  - The flip lands `FLAG_TO_TOP` lines before the field's first line
+    shown. Nothing may hold interrupts off that long, or the flip lands
+    in the picture (a tear).
+- **Counters** (in `Work`, `src/zp.6502`): `fields` (vertical syncs),
+  `frames` (flips) and `frames_drawn` (`frame_end`s), 16 bits each, for
+  measuring. Read them between frames.
+- **The keys** (`src/input.6502`): the interrupt reads Driller's keys
+  from the System VIA into `keys` (held) and `keys_made` (gone down since
+  `key_take`), a bit each: `K_FORWARD` and the rest.
+- **Zero page**: `frame_ready` and `draw_buffer` are fixed below
+  `ZP_FIXED`; baron's pool is the rest up to `&FB`.
+- **The test scene** (`src/main.6502`, until the renderer replaces it):
+  bars of the eight colours moving a pixel a frame in the view, inside a
+  white border, and the screen's edge in cyan.
+- **Checked** by `make frames` (`tools/frames.mjs`, on jsbeeb's full
+  video). It checks the registers and the picture against the MOS's own
+  MODE 2. Every flip must land in the vertical blank and show the one
+  frame handed over, byte for byte. Every screen write must be inside a
+  frame and to the buffer not shown. Every sync and flip must be
+  counted, and every key must set its bit. It reports the pace.
 
 ## 2. Colour
 

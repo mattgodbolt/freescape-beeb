@@ -1,0 +1,103 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the screen and the frame's protocol
+\ (docs/engine.md, section 1)
+\
+\ Two buffers at SCREEN, one in main RAM and one in shadow RAM, laid out
+\ alike: ACCCON's X picks the one the CPU's &3000-&7FFF reaches, its D the
+\ one the CRTC shows. The main loop draws into the one not shown and hands
+\ it over; the next vertical sync's interrupt shows it (src/irq.6502).
+\
+\ The protocol, for the renderer:
+\
+\   JSR frame_begin   waits until the frame last handed over is shown,
+\                     then selects the other buffer, the one not shown,
+\                     for the CPU (X); draw_buffer names it
+\   ... the frame's bytes written: all of them, since the buffer holds
+\       the frame before last ...
+\   JSR frame_end     hands it over: the next vertical sync shows it
+\
+\ - Write the screen only between frame_begin and frame_end
+\   (tools/frames.mjs fails a write to the buffer shown).
+\ - Call frame_begin as late as possible. What a frame computes before its
+\   first screen write (the camera, the transforms, the spans) can go
+\   before it, and so overlaps the wait for the last frame's flip.
+\ - X stays as frame_begin left it until the next frame_begin, so the
+\   per-buffer data at &3000-&3FFF is the buffer just drawn's.
+\ - Code and data used while X is set must lie outside &3000-&7FFF.
+\ ***************************************************************************
+
+\ frame_begin: wait while a frame handed over isn't shown yet, then the
+\ buffer not shown selected for writing.
+.frame_begin
+{
+.wait
+    LDA frame_ready : BNE wait                  ; (the interrupt clears it as it flips)
+.shown                                          ; (tools/frames.mjs times the wait to here)
+    LDA draw_buffer : EOR #1 : STA draw_buffer
+    BEQ main
+    LDA #ACCCON_X : TSB acccon
+    RTS
+.main
+    LDA #ACCCON_X : TRB acccon
+    RTS
+}
+
+\ frame_end: the frame drawn into draw_buffer handed to the interrupt, to
+\ show from the next vertical sync.
+.frame_end
+    INCW frames_drawn
+    LDA #1 : STA frame_ready
+    RTS
+
+\ screen_init: both buffers cleared, main RAM's shown, then MODE 2 in the
+\ hardware (src/defs.6502): the palette with logical colour n physical
+\ colour n AND 7 (MODE 2's eight; 8-15 steady, not flashing), the ULA's
+\ control register and the CRTC's registers. With interrupts off. The
+\ draw_buffer and frame_ready that go with it are frame_init's.
+.screen_init
+{
+    ZA_AUTO2 p
+    LDA #ACCCON_D OR ACCCON_X OR ACCCON_E : TRB acccon
+    JSR clear                                   ; main RAM's
+    LDA #ACCCON_X : TSB acccon
+    JSR clear                                   ; shadow RAM's
+    LDA #ACCCON_X : TRB acccon
+    LDX #15
+.palette
+    LDA palette_bytes,X : STA ula_pal
+    DEX : BPL palette
+    LDA #ULA_MODE2 : STA ula_ctrl
+    LDX #0
+.crtc
+    LDA crtc_bytes,X : STA crtc_reg
+    LDA crtc_bytes+1,X : STA crtc_data
+    INX : INX : CPX #CRTC_BYTES : BNE crtc
+    RTS
+\ clear: the buffer X selects, 0
+.clear
+    STZ p : LDA #HI(SCREEN) : STA p+1
+    LDA #0 : TAY
+.page
+    STA (p),Y
+    INY : BNE page
+    INC p+1 : BPL page                          ; up to &7FFF
+    ASSERT LO(SCREEN) = 0
+    RTS
+.palette_bytes
+    EQUB ula_entry(0..15, (0..15) AND 7)
+.crtc_bytes
+    EQUB 0, CRTC_R0, 1, CRTC_R1, 2, CRTC_R2, 3, CRTC_R3
+    EQUB 4, CRTC_R4, 5, CRTC_R5, 6, CRTC_R6, 7, CRTC_R7
+    EQUB 8, CRTC_R8, 9, CRTC_R9, 10, CRTC_R10
+    EQUB 12, CRTC_R12, 13, CRTC_R13
+CRTC_BYTES = P% - crtc_bytes
+}
+
+\ frame_init: main RAM's buffer shown and none handed over, so the first
+\ frame_begin selects shadow RAM's. Before the interrupt is on.
+.frame_init
+    STZ draw_buffer : STZ frame_ready
+    STZ fields : STZ fields+1
+    STZ frames : STZ frames+1
+    STZ frames_drawn : STZ frames_drawn+1
+    RTS

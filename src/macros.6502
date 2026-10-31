@@ -1,0 +1,17 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - macros
+\ ***************************************************************************
+
+\ INCW v: the word v plus one.
+MACRO INCW v
+    INC v
+    BNE done
+    INC v+1
+.done
+ENDMACRO
+
+\ CRTC r, v: the CRTC's register r set to v.
+MACRO CRTC r, v
+    LDA #r : STA crtc_reg
+    LDA #v : STA crtc_data
+ENDMACRO

@@ -1,0 +1,132 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the keyboard, read from the System VIA
+\
+\ The vertical sync's interrupt (src/irq.6502) reads the keys Driller uses
+\ into a bitmap: key K_x is bit (K_x AND 7) of byte K_x DIV 8, of keys
+\ (held at the last sync) and of keys_made (gone down since key_take last
+\ took that byte). The logic reads keys as it is: the interrupt writes
+\ each byte whole.
+\
+\ The keys are Driller's own (ScummVM's Driller keymap,
+\ games/driller/driller.cpp and movement.cpp, the 8-bit versions' keys),
+\ all of which the BBC has, and the BBC's cursor keys and COPY as the
+\ ZX's cursor-key joystick and its fire, kept apart (K_CUR_*) for the
+\ logic to read as Driller reads a joystick: moving, or the sight in its
+\ cursor mode.
+\
+\ The interrupt leaves port A as the sound chip wants it (the keyboard on
+\ auto-scan, the port an output).
+\ ***************************************************************************
+
+    \ the turns and looks
+K_FORWARD    = 0            ; O
+K_BACK       = 1            ; K
+K_TURN_LEFT  = 2            ; Q
+K_TURN_RIGHT = 3            ; W
+K_LOOK_UP    = 4            ; P
+K_LOOK_DOWN  = 5            ; L
+K_ROLL_LEFT  = 6            ; N
+K_ROLL_RIGHT = 7            ; M
+    \ the rest of the moves, and the steps' and turns' sizes
+K_RISE       = 8            ; R: rise, or fly up in the jet
+K_FALL       = 9            ; F: lower, or fly down
+K_UTURN      = 10           ; U
+K_FIRE       = 11           ; 0, 5 or COPY
+K_ANGLE_UP   = 12           ; A: a bigger turn
+K_ANGLE_DOWN = 13           ; Z
+K_STEP_UP    = 14           ; S: a bigger step
+K_STEP_DOWN  = 15           ; X
+    \ the game's commands
+K_DRILL      = 16           ; D: deploy a rig
+K_COLLECT    = 17           ; C: collect it
+K_MODE       = 18           ; SPACE: movement or the sight
+K_INFO       = 19           ; I: the information screen
+K_SOUND      = 20           ; T
+K_ESCAPE     = 21           ; ESCAPE: the ZX's 1, out of the game
+    \ the cursor keys, the ZX's cursor joystick
+K_CUR_UP     = 24
+K_CUR_DOWN   = 25
+K_CUR_LEFT   = 26
+K_CUR_RIGHT  = 27
+KEYS_BYTES   = 4
+
+\ Each BBC key read (its internal key number, row * 16 + column) and the
+\ key it is. A K_ may have more than one.
+KEY_MAP = {
+    {&36, K_FORWARD}, {&46, K_BACK}, {&10, K_TURN_LEFT}, {&21, K_TURN_RIGHT},
+    {&37, K_LOOK_UP}, {&56, K_LOOK_DOWN}, {&55, K_ROLL_LEFT}, {&65, K_ROLL_RIGHT},
+    {&33, K_RISE}, {&43, K_FALL}, {&35, K_UTURN},
+    {&27, K_FIRE}, {&13, K_FIRE}, {&69, K_FIRE},
+    {&41, K_ANGLE_UP}, {&61, K_ANGLE_DOWN}, {&51, K_STEP_UP}, {&42, K_STEP_DOWN},
+    {&32, K_DRILL}, {&52, K_COLLECT}, {&62, K_MODE}, {&25, K_INFO},
+    {&23, K_SOUND}, {&70, K_ESCAPE},
+    {&39, K_CUR_UP}, {&29, K_CUR_DOWN}, {&19, K_CUR_LEFT}, {&79, K_CUR_RIGHT}
+}
+KEY_COUNT = LEN(KEY_MAP)
+ASSERT KEY_COUNT <= 128                                 ; (input_irq's index counts down to BPL)
+ASSERT MAX(KEY_MAP[.., 1]) < KEYS_BYTES * 8
+ASSERT MIN(KEY_MAP[.., 0] AND &F0) >= &10               ; none on row 0, which auto-scan leaves out
+
+.key_number EQUB KEY_MAP[.., 0]
+.key_byte   EQUB KEY_MAP[.., 1] DIV 8
+.key_mask   EQUB 1 << (KEY_MAP[.., 1] AND 7)
+
+\ input_irq (the vertical sync's): the keys read, if one may have changed,
+\ into keys, and those gone down since the last read into keys_made.
+\ Below &3000, as the interrupt is: what it reads and writes is too.
+CA2 = 1                     ; sysvia_ifr's bit: the keyboard's auto-scan found a key
+.input_irq
+{
+    \ The keys are read only when one may have changed: one was held at
+    \ the last read, or since then auto-scan has found one down (its CA2,
+    \ as the OS's keyboard interrupt has it). The flag is cleared first, so
+    \ a key made during the read sets it again.
+    LDA sysvia_ifr : AND #CA2 : ORA keys_any : BEQ done
+    LDA #CA2 : STA sysvia_ifr
+    LDA #&7F : STA sysvia_ddra                  ; bits 0-6 the key, bit 7 its state
+    LDA #3 : STA sysvia_orb                     ; auto-scan off: the matrix is ours
+    FOR i = 0..KEYS_BYTES - 1
+        STZ keys_scan + i
+    NEXT
+    LDY #KEY_COUNT - 1
+.key
+    LDA key_number,Y : STA sysvia_ora_nh
+    LDA sysvia_ora_nh : BPL up                  ; (bit 7 set: held)
+    LDX key_byte,Y
+    LDA key_mask,Y : ORA keys_scan,X : STA keys_scan,X
+.up
+    DEY : BPL key
+    LDA #&0B : STA sysvia_orb                   ; auto-scan back
+    LDA #&FF : STA sysvia_ddra
+    \ made: held now and not at the last read, kept until taken
+    STZ keys_any
+    LDX #KEYS_BYTES - 1
+.byte
+    LDA keys,X : EOR #&FF : AND keys_scan,X
+    ORA keys_made,X : STA keys_made,X
+    LDA keys_scan,X : STA keys,X
+    ORA keys_any : STA keys_any
+    DEX : BPL byte
+.done
+    RTS
+}
+ASSERT P% <= &3000
+
+\ key_take: A the keys of byte X made since the last take of that byte,
+\ and those cleared, with the interrupt held off between the two.
+.key_take
+    PHP : SEI
+    LDA keys_made,X : STZ keys_made,X
+    PLP
+    RTS
+
+\ input_init: no key held or made, before the interrupt is on.
+.input_init
+{
+    LDX #KEYS_BYTES - 1
+.clear
+    STZ keys,X : STZ keys_made,X
+    DEX : BPL clear
+    STZ keys_any
+    RTS
+}

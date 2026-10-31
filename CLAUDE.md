@@ -75,6 +75,8 @@ make fetch      # the originals into originals/ (not committed)
 make data       # Driller's database as JSON, checked (tools/freescape.py)
 make model      # the Python model over every entrance view (tools/model/)
 make            # the disc and the spike
+make run        # boot the disc in jsbeeb, screenshot to shots/run.png
+make frames     # the frame loop on jsbeeb's full video (tools/frames.mjs)
 make check      # every check; read its exit status, never pipe it to tail
 ```
 
@@ -91,3 +93,20 @@ includes.)
   swallows the rest of it.
 - Run to a label after boot, never a fixed wait.
 - `.DELETE_ON_ERROR` stays in the Makefile.
+- The screen is written only between `frame_begin` and `frame_end`, to
+  the buffer not shown. `make frames` fails any other write. Run it after
+  touching the interrupt, the screen, or anything that holds interrupts
+  off: a long `SEI` moves the flip into the picture.
+- MOS 3.20's MODE 2 has its vertical sync a row later than OS 1.20's
+  table: it adds the `*TV` setting plus one. The disc's screen sits
+  where MOS 3.20 puts it at `*TV 0,1` (`MODE2_R7`).
+- The MOS turns over the ULA control register's bit 0 as the flashing
+  colours flash. Compare that register with bit 0 masked.
+- jsbeeb's `TestMachine` (and `tools/run6502.mjs`) has no CRTC: its
+  vertical sync is a count of cycles. When the raster matters, use
+  `MachineSession`, whose full video runs headless at several times real
+  time.
+- In jsbeeb's `ramRomOs`, shadow RAM is main RAM's address plus `&8000`.
+- A harness hook at a routine's first instruction also fires when a loop
+  branches back to it (`frame_begin`'s wait). Count calls by their `JSR`.
+- A soft BREAK on jsbeeb's MOS 3.20 puts IRQ1V back and returns to BASIC.
