@@ -6,12 +6,15 @@
 \
 \ - Whole bytes go through the row runs: for each character row of the
 \   view, a routine of `STA abs,Y`, one a byte column, with Y the line
-\   within the row (Solid Elite's way). A piece of a line is written by
-\   entering its row's run at the piece's first whole byte, with an RTS
-\   planted after its last. Each row keeps one plant, moved only when a
-\   piece ends somewhere else, so lines that end alike don't move it.
-\   After the view's last column each run has one more slot, which stores
-\   into rr_scratch, so that a plant there can be taken out like any other.
+\   (Solid Elite's way; each row's addresses are 8 lines back for each
+\   row above it, so Y needn't be the line within the row). A piece of a
+\   line is written by entering its row's run at the piece's first whole
+\   byte, with an RTS planted after its last. Each row keeps one plant,
+\   moved only when a piece ends somewhere else, so lines that end alike
+\   don't move it. After the view's last column each run has one more
+\   slot, which stores into rr_scratch, so that a plant there can be taken
+\   out like any other, and then its own RTS: a piece to the view's right
+\   edge ends there without a plant when the row's is left of it.
 \ - A byte two runs share is `left AND PIX_LEFT OR right AND PIX_RIGHT` of
 \   their pattern bytes, stored through r_bp0 or r_bp1, the screen's two
 \   pages of the line's character row.
@@ -50,10 +53,10 @@ SECTION RasterRuns
 FOR r = 0..<RR_ROWS
     ASSERT LO(P%) = 0
     FOR c = 0..<VIEW_BYTES
-        STA VIEW_ADDR + r * SCREEN_ROW + 8 * c, Y
+        STA VIEW_ADDR + r * SCREEN_ROW + 8 * c - 8 * r, Y
     NEXT
     \ The extra slot, planted to begin with (writer_init's plant).
-    EQUB OP_RTS : EQUW rr_scratch
+    EQUB OP_RTS : EQUW rr_scratch - 8 * r
     RTS
     IF r < RR_ROWS - 1
         ALIGN 256
@@ -112,32 +115,39 @@ NEXT
 
 \ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
 \ pattern byte A. Keeps X. It jumps into the row's run, whose planted RTS
-\ returns to put_run's caller. (A piece has whole bytes unless its first
-\ whole byte's slot is its plant's: (lo + 1) DIV 2 <= hi DIV 2 for lo < hi.)
+\ returns to put_run's caller. (A piece with no whole bytes enters at its
+\ plant, (lo + 1) DIV 2 = hi DIV 2, so it writes none.)
 .put_run
 {
     STA r_v
     LDY r_hi : LDA rr_pl,Y
-    LDY r_lo : CMP rr_en,Y : BEQ none
     CMP r_pcur : BNE replant
 .go
-    LDA rr_en,Y : STA jsr+1
-    LDA r_y : AND #7 : TAY
+    LDY r_lo : LDA rr_en,Y
+.enter
+    STA jsr+1
+    LDY r_y
     LDA r_v
 .jsr
     JMP rr_rows                         ; patched: the piece's row and entry
     ZA_CANJUMP rr_rows
     ZA_RETURN
-.none
-    RTS
 .replant
+    CMP #RR_END : BEQ to_end
+.move
     \ The row's plant moves to where this piece ends.
-    PHA
-    LDY r_pcur : LDA #OP_STA_ABSY : STA (r_rr),Y
-    PLA : STA r_pcur : TAY
-    LDA #OP_RTS : STA (r_rr),Y
-    LDY r_lo
+    LDY r_pcur : STA r_pcur
+    LDA #OP_STA_ABSY : STA (r_rr),Y
+    LDY r_pcur : LDA #OP_RTS : STA (r_rr),Y
     BRA go
+.to_end
+    \ To the view's right edge: the run's own RTS ends it, unless the plant
+    \ is in its way.
+    LDY r_lo : LDA rr_en,Y
+    CMP r_pcur : BEQ blocked : BCS enter
+.blocked
+    LDA #RR_END
+    BRA move
 }
 
 \ put_bnd: A into the shared byte at odd pixel boundary Y of line r_y.
