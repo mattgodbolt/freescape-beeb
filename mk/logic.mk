@@ -12,6 +12,9 @@
 #
 # build/logic/report.txt is the last full check's output.
 
+# mk/zx.mk names the snapshot too, but is read after this file, and a
+# rule's prerequisites expand as it's read.
+ZXSNAP ?= build/zx/driller.z80
 LOGICFUZZ ?= 1000
 LOGICSEED ?= 100000
 LOGIC_REPORT = build/logic/report.txt
