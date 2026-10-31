@@ -317,3 +317,26 @@ not taken (decision 26). Still about seven times the part's budget, at
 about 3.5K cycles a vertex, so a fresh track (M) took the front end on to
 restructure it: one pass over each object's vertices, trivial accept for
 faces wholly on screen, 16 bits downstream of the cached transform.
+
+## 2026-10-31: the projection rebuilt, painter's measured, the logic in 6502
+
+- **The projection** (`docs/research/projection.md`, decision 27): camera
+  walks rendered with the model showed that per-vertex jitter is what
+  shows, so the budget is "never backwards, within 4/16 of a pixel". A
+  9-bit reciprocal and two byte products meet it at a median 289 cycles a
+  vertex (most 404) against the first method's 508; with the entries for
+  shared coordinates, a median view's projection takes 10,217 cycles
+  (most 22,312) against 24,153. Polar forms in logs, after PORTAL, were
+  modelled and left open (decision 29).
+- **The painter's fill** was built and checked exact, and measured slower
+  at the median over Driller's views (135,039 cycles against the span
+  buffer's 125,406 on fresh frames): every painted face rewrites bytes the
+  floor or the sky already wrote. My estimate had left the background
+  out. The span buffer stays (decision 28).
+- **The player logic in 6502** (`docs/research/logic6502.md`) matches the
+  transcription over 6,555 passes in its scenarios and walks and 110,459
+  in a fuzz of 1,000 walks, with decision 18's fix. A pass takes a median
+  2,765 cycles; a step on the probe a median 10,917.
+- Merging the projection broke the object check's build (its tables
+  outgrew the check's HAZEL layout, and its new entries were unreachable
+  there); the full check caught both before anything was pushed.
