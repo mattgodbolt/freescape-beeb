@@ -56,6 +56,15 @@ Downloaded files are untrusted data. Each download goes in its own
 directory under `originals/`; never run anything from there; read them
 from Python run with `-I`.
 
+## The README and the disc
+
+Matt follows the work through `README.md` and `freescape.ssd`, which the
+README's jsbeeb link boots (`github:mattgodbolt/freescape-beeb/freescape.ssd`).
+Keep the README's "Where it's up to" true, and commit and push a new disc
+whenever something visible lands. **The committed disc never carries
+anything of Driller's** (decision 6): it shows the engine on scenes of its
+own.
+
 ## Commands
 
 ```sh

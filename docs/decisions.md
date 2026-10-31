@@ -65,6 +65,11 @@ engine, and Matt plays on a real Master.
 The build reads Driller from fetched copies (`make fetch`, into
 `originals/`, git-ignored) and commits nothing of it.
 
+**The public disc, `freescape.ssd`, carries nothing of Driller's either**
+(Matt asked for it to follow the work, 2026-10-31). It shows the engine on
+scenes of its own; Driller's areas are rendered and timed only on the
+machine that fetched them, until the rights allow otherwise.
+
 ## 7. Scope (2026-10-31)
 
 Driller first, with the loader kept general (Dark Side and Total Eclipse
