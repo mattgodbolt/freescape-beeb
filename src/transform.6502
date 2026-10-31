@@ -1,0 +1,499 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the transform (docs/engine.md, stage 3;
+\ tools/model/transform.py)
+\
+\ A camera-space vertex is V = M (v - c), 24-bit signed, 64 to the world
+\ unit, nothing rounded, so it's computed as M v - M c from a cache of M v
+\ kept while the orientation holds:
+\
+\ - a frame computes M c once (transform_setup);
+\ - an object's cache holds, for its orientation, M v of its box's low
+\   corner and M times each of the box's edges (a cuboid, a rectangle), or
+\   M v of each vertex (a generic object, a sensor); a box's vertex is the
+\   corner's M v - M c plus edges, by additions, as the original builds a
+\   cuboid's;
+\ - the cache is filled when the object is first transformed under an
+\   orientation, from slots handed out in order; all are taken back when
+\   the orientation changes or they run out (cache_reset).
+\
+\ Every world vertex is 64 times a vertex's cells, so each product the
+\ cache needs is 64 u m, u a cell (0..127) and m an entry of M (-64..64):
+\ by quarter squares, f64(u + m) - f64(u - m) with f64(n) = 64 (n * n DIV
+\ 4), read from fq0-fq2 at n + 64, so both indices are bytes.
+\
+\ Entry points:
+\   cache_reset       every object's cache emptied (matrix_update and
+\                     area_enter call it; so must anything that moves an
+\                     object)
+\   transform_setup   M c for the frame (after matrix_update)
+\   transform_object  X = a slot, A = the mask of its vertices wanted:
+\                     those vertices in vx*, vy*, vz* (vertex j at index
+\                     j), with vflag's bit 7 set for one nearer than ZNEAR
+\                     and its other bits clear. Others of its vertices may
+\                     be computed too, as the ones wanted are built from
+\                     them. Fills the object's cache first if it isn't
+\                     good. Clobbers A, X, Y.
+\
+\ The camera's coordinates must be below &8000 (M c's products take them as
+\ signed).
+\ ***************************************************************************
+
+VMAX        = 8                     ; vertices an object has, at most (the masks are bytes)
+VALL        = 24                    ; the vertex arrays: the object's, then the clips' (src/clip.6502)
+
+SECTION ObjWork
+.mc         SKIP 9                  ; M c: x, y, z, each 24-bit signed, low byte first
+.cache_gen  SKIP 1                  ; the orientation's stamp: a cache is good when its
+.ob_stamp   SKIP N_OBJ              ; object's ob_stamp is this
+.slot_next  SKIP 1                  ; the next free slot
+.ob_slot    SKIP N_OBJ              ; an object's first cache slot
+\ the object being drawn's camera-space vertices, its own from 0 and the
+\ near clip's from VMAX (src/clip.6502)
+.vx0        SKIP VALL
+.vx1        SKIP VALL
+.vx2        SKIP VALL
+.vy0        SKIP VALL
+.vy1        SKIP VALL
+.vy2        SKIP VALL
+.vz0        SKIP VALL
+.vz1        SKIP VALL
+.vz2        SKIP VALL
+.vflag      SKIP VALL               ; bit 7: nearer than ZNEAR; the clip's bits below
+ENDSECTION
+
+\ The cache: a slot is one vector, M v for a corner or M times an edge.
+SECTION ObjCache
+.ca_x0      SKIP 256
+.ca_x1      SKIP 256
+.ca_x2      SKIP 256
+.ca_y0      SKIP 256
+.ca_y1      SKIP 256
+.ca_y2      SKIP 256
+.ca_z0      SKIP 256
+.ca_z1      SKIP 256
+.ca_z2      SKIP 256
+ENDSECTION
+
+ASSERT ob_ly = ob_lx + N_OBJ AND ob_lz = ob_ly + N_OBJ
+ASSERT ob_hy = ob_hx + N_OBJ AND ob_hz = ob_hy + N_OBJ
+ASSERT cam_y = cam_x + 2 AND cam_z = cam_x + 4
+
+SECTION ObjCode
+
+\ cache_reset: no object's cache is good.
+.cache_reset
+{
+    ZA_ENTRY
+    STZ slot_next
+    INC cache_gen : BNE done
+    \ The stamp wrapped: no old stamp may match the new one.
+    LDA #1 : STA cache_gen
+    LDX #N_OBJ - 1
+.clear
+    STZ ob_stamp,X
+    DEX : BPL clear
+.done
+    RTS
+}
+
+\ transform_setup: M c, the camera's position through the matrix, a row at
+\ a time by the maths' dot3 (src/maths.6502).
+.transform_setup
+{
+    ZA_ENTRY
+    FOR r = 0..2
+        LDA mat + 3 * r + 0 : STA mrow+0
+        LDA mat + 3 * r + 1 : STA mrow+1
+        LDA mat + 3 * r + 2 : STA mrow+2
+        JSR dot_set
+        LDA cam_x+0 : STA mv0+0
+        LDA cam_x+1 : STA mv0+1
+        LDA cam_y+0 : STA mv1+0
+        LDA cam_y+1 : STA mv1+1
+        LDA cam_z+0 : STA mv2+0
+        LDA cam_z+1 : STA mv2+1
+        JSR dot3
+        LDA macc+0 : STA mc + 3 * r + 0
+        LDA macc+1 : STA mc + 3 * r + 1
+        LDA macc+2 : STA mc + 3 * r + 2
+    NEXT
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
+\ The cache's products: 64 u m = f64(u + 64 + m) - f64(u + 64 - m). FP_INDEX
+\ leaves the two indices in X and Y from u64 = u + 64.
+
+MACRO FP_INDEX m
+    LDA u64 : CLC : ADC m : TAX
+    LDA u64 : SEC : SBC m : TAY
+ENDMACRO
+
+\ FP_SET acc: acc (3 bytes) = f64(X) - f64(Y)
+MACRO FP_SET acc
+    LDA fq0,X : SEC : SBC fq0,Y : STA acc
+    LDA fq1,X : SBC fq1,Y : STA acc+1
+    LDA fq2,X : SBC fq2,Y : STA acc+2
+ENDMACRO
+
+\ FP_ADD acc: acc += f64(X) - f64(Y)
+MACRO FP_ADD acc
+    LDA acc : CLC : ADC fq0,X : STA acc
+    LDA acc+1 : ADC fq1,X : STA acc+1
+    LDA acc+2 : ADC fq2,X : STA acc+2
+    LDA acc : SEC : SBC fq0,Y : STA acc
+    LDA acc+1 : SBC fq1,Y : STA acc+1
+    LDA acc+2 : SBC fq2,Y : STA acc+2
+ENDMACRO
+
+\ fill_point: cache slot Y = M (64 p), p = (px, py, pz) in cells.
+.fill_point
+{
+    ZA_AUTO 3, p                    ; the point's cells
+    px = p : py = p + 1 : pz = p + 2
+    ZA_AUTO1 u64, slot
+    ZA_AUTO 9, acc
+    STY slot
+    LDA mat_big : BEQ fast
+    JMP fill_slow_point
+.fast
+    \ a column at a time, past a zero cell or a zero entry of M (a level
+    \ camera's has four)
+    FOR k = 0..8
+        STZ acc + k
+    NEXT
+    FOR k = 0..2
+        LDA px + k : BNE column
+        JMP next
+    .column
+        CLC : ADC #64 : STA u64
+        FOR r = 0..2
+            LDA mat + 3 * r + k : BEQ skip
+            FP_INDEX mat + 3 * r + k
+            FP_ADD acc + 3 * r
+        .skip
+        NEXT
+    .next
+    NEXT
+    LDY slot
+.store
+    LDA acc+0 : STA ca_x0,Y
+    LDA acc+1 : STA ca_x1,Y
+    LDA acc+2 : STA ca_x2,Y
+    LDA acc+3 : STA ca_y0,Y
+    LDA acc+4 : STA ca_y1,Y
+    LDA acc+5 : STA ca_y2,Y
+    LDA acc+6 : STA ca_z0,Y
+    LDA acc+7 : STA ca_z1,Y
+    LDA acc+8 : STA ca_z2,Y
+    RTS
+}
+
+\ fill_edge: cache slot Y = M times an edge of A cells along axis X.
+.fill_edge
+{
+    ZA_AUTO1 u64, slot
+    ZA_AUTO 3, col
+    STY slot
+    LDY mat_big : BEQ fast
+    LDY slot
+    JMP fill_slow_edge
+.fast
+    CLC : ADC #64 : STA u64
+    LDA mat + 0,X : STA col
+    LDA mat + 3,X : STA col+1
+    LDA mat + 6,X : STA col+2
+    FOR r = 0..2
+        LDA col + r : BNE product
+        STZ fill_point.acc + 3 * r
+        STZ fill_point.acc + 3 * r + 1
+        STZ fill_point.acc + 3 * r + 2
+        BRA done
+    .product
+        FP_INDEX col + r
+        FP_SET fill_point.acc + 3 * r
+    .done
+    NEXT
+    LDY slot
+    JMP fill_point.store
+}
+
+\ An entry of M can be 65 (rounding), and then f64's indices can run off
+\ the table for a cell of 0 or 127; matrix_build sets mat_big for such an
+\ orientation (docs/research/objects.md counts them), whose fills take
+\ these instead: the products by the maths' mul (src/maths.6502), 64 u as
+\ its coordinate.
+
+ZA_AUTO 2, fs_v                     ; 64 u, the slow fills' coordinate
+
+\ FS_TERM acc, m, first: acc (3 bytes) += the maths' product of fs_v (64 u)
+\ and M's entry m, or = it if first
+MACRO FS_TERM acc, m, first
+    LDA m : JSR mul_set
+    LDA fs_v : STA mv0
+    LDA fs_v+1 : STA mv0+1
+    JSR mul
+    IF first
+        LDA macc : STA acc
+        LDA macc+1 : STA acc+1
+        LDA macc+2 : STA acc+2
+    ELSE
+        LDA acc : CLC : ADC macc : STA acc
+        LDA acc+1 : ADC macc+1 : STA acc+1
+        LDA acc+2 : ADC macc+2 : STA acc+2
+    ENDIF
+ENDMACRO
+
+\ FS_V u: fs_v = 64 u, u a cell
+MACRO FS_V u
+    LDA u : LSR A : LSR A : STA fs_v+1
+    LDA u : LSR A : ROR A : ROR A : AND #&C0 : STA fs_v
+ENDMACRO
+
+\ fill_slow_point: fill_point's, slot in Y
+.fill_slow_point
+{
+    ZA_AUTO1 slot
+    STY slot
+    FS_V fill_point.px
+    FOR r = 0..2
+        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 0, TRUE
+    NEXT
+    FS_V fill_point.py
+    FOR r = 0..2
+        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 1, FALSE
+    NEXT
+    FS_V fill_point.pz
+    FOR r = 0..2
+        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 2, FALSE
+    NEXT
+    LDY slot
+    JMP fill_point.store
+}
+
+\ fill_slow_edge: fill_edge's, A cells along axis X, slot in Y
+.fill_slow_edge
+{
+    ZA_AUTO1 slot, cell
+    STY slot
+    STA cell
+    FS_V cell
+    LDA mat + 0,X : STA fill_edge.col
+    LDA mat + 3,X : STA fill_edge.col+1
+    LDA mat + 6,X : STA fill_edge.col+2
+    FOR r = 0..2
+        FS_TERM fill_point.acc + 3 * r, fill_edge.col + r, TRUE
+    NEXT
+    LDY slot
+    JMP fill_point.store
+}
+
+\ transform_fill: object X's cache, from fresh slots.
+.transform_fill
+{
+    ZA_AUTO1 obj, slot, n, k, j
+    STX obj
+    LDA ob_flags,X : AND #K_MASK : TAY
+    LDA fill_slots,Y : BNE counted
+    LDA ob_nv,X
+.counted
+    STA n
+    CLC : ADC slot_next : BCC room
+    JSR cache_reset
+    LDX obj
+.room
+    LDA slot_next : STA slot : STA ob_slot,X
+    CLC : ADC n : STA slot_next
+    LDA cache_gen : STA ob_stamp,X
+    LDA ob_flags,X : AND #K_MASK : CMP #K_GENERIC : BEQ generic
+    \ a box's corner, or a sensor's point
+    LDA ob_lx,X : STA fill_point.px
+    LDA ob_ly,X : STA fill_point.py
+    LDA ob_lz,X : STA fill_point.pz
+    LDY slot : JSR fill_point
+    LDX obj
+    LDA ob_flags,X : AND #K_MASK : CMP #K_SENSOR : BEQ done
+    \ the box's edges: each axis but a rectangle's zero one, in order
+    STZ k
+.edge
+    LDX obj
+    LDA ob_flags,X : AND #K_MASK : BEQ edge_wanted  ; (a cuboid has all three)
+    LDA ob_aux,X : CMP k : BEQ edge_next
+.edge_wanted
+    LDA k : BEQ x_edge
+    TXA
+    CLC : ADC #N_OBJ
+    LDY k : CPY #2 : BNE indexed
+    CLC : ADC #N_OBJ
+.indexed
+    TAX                             ; ob_lx + k N_OBJ indexed by X is ob_l{k}
+.x_edge
+    LDA ob_hx,X : SEC : SBC ob_lx,X
+    LDX k
+    INC slot : LDY slot
+    JSR fill_edge
+.edge_next
+    INC k : LDA k : CMP #3 : BNE edge
+.done
+    RTS
+.generic
+    LDA ob_aux,X : STA j
+.vertex
+    LDX j
+    LDA gv_x,X : STA fill_point.px
+    LDA gv_y,X : STA fill_point.py
+    LDA gv_z,X : STA fill_point.pz
+    LDY slot : JSR fill_point
+    INC slot : INC j
+    DEC n : BNE vertex
+    RTS
+.fill_slots
+    EQUB 4, 3, 0, 1                 ; cuboid, rectangle, generic (its vertices), sensor
+    ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2 AND K_SENSOR = 3
+}
+
+\ ---------------------------------------------------------------------------
+\ transform_object: slot X's wanted vertices (mask A) in camera space.
+
+\ V_SUB j: vertex j = cache slot X's vector - M c
+MACRO V_SUB j
+    LDA ca_x0,X : SEC : SBC mc+0 : STA vx0+j
+    LDA ca_x1,X : SBC mc+1 : STA vx1+j
+    LDA ca_x2,X : SBC mc+2 : STA vx2+j
+    LDA ca_y0,X : SEC : SBC mc+3 : STA vy0+j
+    LDA ca_y1,X : SBC mc+4 : STA vy1+j
+    LDA ca_y2,X : SBC mc+5 : STA vy2+j
+    LDA ca_z0,X : SEC : SBC mc+6 : STA vz0+j
+    LDA ca_z1,X : SBC mc+7 : STA vz1+j
+    LDA ca_z2,X : SBC mc+8 : STA vz2+j
+ENDMACRO
+
+\ V_ADD d, s, e: vertex d = vertex s + cache slot X + e's vector
+MACRO V_ADD d, s, e
+    LDA vx0+s : CLC : ADC ca_x0+e,X : STA vx0+d
+    LDA vx1+s : ADC ca_x1+e,X : STA vx1+d
+    LDA vx2+s : ADC ca_x2+e,X : STA vx2+d
+    LDA vy0+s : CLC : ADC ca_y0+e,X : STA vy0+d
+    LDA vy1+s : ADC ca_y1+e,X : STA vy1+d
+    LDA vy2+s : ADC ca_y2+e,X : STA vy2+d
+    LDA vz0+s : CLC : ADC ca_z0+e,X : STA vz0+d
+    LDA vz1+s : ADC ca_z1+e,X : STA vz1+d
+    LDA vz2+s : ADC ca_z2+e,X : STA vz2+d
+ENDMACRO
+
+\ NEAR_FLAG j: vflag j = &80 if vertex j's z < ZNEAR (signed), else 0
+MACRO NEAR_FLAG j
+    LDA vz0+j : CMP #LO(ZNEAR)
+    LDA vz1+j : SBC #HI(ZNEAR)
+    LDA vz2+j : SBC #ZNEAR DIV 65536
+    BVC no_overflow
+    EOR #&80
+.no_overflow
+    AND #&80 : STA vflag+j
+ENDMACRO
+
+\ A cuboid's vertex j is built from PARENT[j] and edge EDGE[j] (cache slot
+\ X + EDGE[j]): its highest bit's axis added to the vertex without it.
+CUBE_PARENT = {0, 0, 0, 1, 0, 1, 2, 3}
+CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
+
+.transform_object
+{
+    ZA_ENTRY
+    ZA_AUTO1 want, slot
+    STA want
+    LDA ob_stamp,X : CMP cache_gen : BEQ filled
+    PHX
+    JSR transform_fill
+    PLX
+.filled
+    LDA ob_slot,X : STA slot
+    LDA ob_flags,X : AND #K_MASK
+    BNE not_cuboid
+    JMP cuboid
+.not_cuboid
+    CMP #K_RECT : BNE not_rect
+    JMP rect
+.not_rect
+    CMP #K_SENSOR : BNE generic
+    JMP sensor
+.generic
+    \ a generic object: each wanted vertex from its own slot
+    LDY #0
+.gen_vertex
+    LSR want : BCC gen_next
+    TYA : CLC : ADC slot : TAX
+    LDA ca_x0,X : SEC : SBC mc+0 : STA vx0,Y
+    LDA ca_x1,X : SBC mc+1 : STA vx1,Y
+    LDA ca_x2,X : SBC mc+2 : STA vx2,Y
+    LDA ca_y0,X : SEC : SBC mc+3 : STA vy0,Y
+    LDA ca_y1,X : SBC mc+4 : STA vy1,Y
+    LDA ca_y2,X : SBC mc+5 : STA vy2,Y
+    LDA ca_z0,X : SEC : SBC mc+6 : STA vz0,Y
+    LDA ca_z1,X : SBC mc+7 : STA vz1,Y
+    LDA ca_z2,X : SBC mc+8 : STA vz2,Y
+    LDA vz0,Y : CMP #LO(ZNEAR)
+    LDA vz1,Y : SBC #HI(ZNEAR)
+    LDA vz2,Y : SBC #ZNEAR DIV 65536
+    BVC gen_no_overflow
+    EOR #&80
+.gen_no_overflow
+    AND #&80 : STA vflag,Y
+.gen_next
+    INY
+    LDA want : BNE gen_vertex
+    RTS
+.sensor
+    LDX slot
+    V_SUB 0
+    NEAR_FLAG 0
+    RTS
+.rect
+    LDX slot
+    V_SUB 0
+    V_ADD 1, 0, 1
+    V_ADD 2, 1, 2
+    V_ADD 3, 0, 2
+    FOR j = 0..3
+        NEAR_FLAG j
+    NEXT
+    RTS
+.cuboid
+    \ The vertices wanted and those they're built from: 7 from 3, 3 and 5
+    \ from 1, 6 from 2, the rest from 0, which is always made.
+    LDA want
+    BIT #&80 : BEQ no7
+    ORA #&08
+.no7
+    BIT #&28 : BEQ no35
+    ORA #&02
+.no35
+    BIT #&40 : BEQ no6
+    ORA #&04
+.no6
+    LSR A : STA want
+    LDX slot
+    V_SUB 0
+    NEAR_FLAG 0
+    FOR j = 1..7
+        LSR want : BCC skip
+        V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
+        NEAR_FLAG j
+    .skip
+    NEXT
+    RTS
+}
+
+ENDSECTION
+
+SECTION ObjConst
+\ f64(n - 64) = 64 ((n - 64)^2 DIV 4), n = 0..255, three bytes.
+FQ = 64 * (((0..255) - 64) * ((0..255) - 64) DIV 4)
+.fq0
+    EQUB FQ AND &FF
+.fq1
+    EQUB (FQ >> 8) AND &FF
+.fq2
+    EQUB (FQ >> 16) AND &FF
+ENDSECTION
+
