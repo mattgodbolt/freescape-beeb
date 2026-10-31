@@ -25,11 +25,13 @@ parallel. `docs/journal.md` has the story as it goes.
 
 ![The disc today: MODE 2's eight colours in the view's place, double-buffered](docs/images/disc_testcard.png)
 
-![The model's render of two Driller views, in placeholder colours at MODE 2's half width (left), beside Driller's own ZX drawing of them (right)](docs/images/model_vs_zx.png)
+![Two Driller views: the original's ZX drawing, the model's MODE 2 render in the ST's colours, and the same through PAL](docs/images/model_views.png)
 
-*Left: the Python model's render of two of Driller's entrance views, in
-placeholder colours at MODE 2's half width. Right: Driller's own ZX code
-drawing the same views, run headless. Driller is Incentive Software's.*
+*Two of Driller's entrance views. Left: Driller's own ZX code drawing
+them, run headless. Middle: the Python model's render, which the 6502 is
+being built to match, in the ST's colours as MODE 2 dithers on an RGB
+monitor. Right: the same through jsbeeb's PAL television. Driller is
+Incentive Software's.*
 
 ## How it works
 
