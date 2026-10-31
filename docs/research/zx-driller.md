@@ -21,7 +21,9 @@ compared with the transcription in that file, every result equal
 - **World units.** An object's cell coordinate `c` is at `64·c` world
   units: the object pass makes `cell × 64` with two `SRL H : RR L` from
   `H = cell, L = 0` (`$6BC3`). The camera's position is in the same
-  units, 16-bit: x `$8762`, y `$8764`, z `$8766` [read]. Y is up.
+  units, 16-bit: x `$8762`, y `$8764`, z `$8766` [read]. Y is up. The
+  position is the eye: the redraw uses it as it is, with no height added
+  (`$6BAF` subtracts it from each box; `$6DCA` takes its cell).
 - **Angles** in 5° units, 0-71: pitch `$876C`, yaw `$876D`, roll `$876E`,
   taken straight from an entrance's bytes 4, 5, 6 (`$9DB0`) [read; the
   start matches, measured].
