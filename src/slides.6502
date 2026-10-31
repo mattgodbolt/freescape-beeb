@@ -18,9 +18,12 @@
 \ own. A view is held for slide_hold fields; SPACE, cursor right or cursor
 \ down step to the next, cursor left or up to the one before.
 \
-\ Beside the view, in text it draws itself (src/text.6502): the area's
+\ Below the view, in text it draws itself (src/text.6502): the area's
 \ name, the entrance, the view's number, the frames a second and fields a
-\ frame since the view came up, and the credit.
+\ frame since the view came up, and the credit. The flip comes as the beam
+\ leaves the view (decision 21), so the text goes into both buffers as the
+\ beam allows; a view's own lines are drawn before its first frame is
+\ handed over, and the figures when there's time.
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
@@ -88,7 +91,6 @@ TL_FPS      = 3             ; the frames a second, from fixed_text on
 TL_FPF      = 4             ; the fields a frame
 TEXT_LAYOUT = {{15, 3}, {16, 7}, {17, 6}, {19, 2}, {20, 2}, {22, 5}, {25, 7}, {26, 7}, {27, 7}, {28, 7}}
 ASSERT TL_FPS = TL_NAME + SLIDE_TEXT_LINES AND SLIDE_TEXT_COLS = TEXT_COLS
-ASSERT MIN(TEXT_LAYOUT[.., 0]) >= VIEW_ROW0 + VIEW_H DIV 8
 NUMBER_COL  = 12            ; the figures' four characters on their lines
 FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(REPEATED(TEXT_COLS - LEN(s) - (TEXT_COLS - LEN(s)) DIV 2, ' '))
 FUNCTION label(s) = s + CHR(REPEATED(TEXT_COLS - LEN(s), ' '))
@@ -122,28 +124,35 @@ NEXT
     JSR screen_init
     JSR raster_init
     JSR slides_init
-    LDA #ACCCON_X : TSB acccon
-    JSR text_sync                               ; shadow RAM's buffer ...
-    LDA #ACCCON_X : TRB acccon
-    JSR text_sync                               ; ... and main RAM's
+    JSR text_flush                              ; (both buffers, before anything is shown)
     JSR frame_init
     JSR input_init
     JSR irq_install
     \ (on into slides_loop)
 
-\ slides_loop: a frame at a time. A new view's inputs are copied before
-\ frame_begin, so the copy overlaps the wait for the last frame's flip.
+\ slides_loop: a frame at a time. A new view's inputs are copied, and the
+\ text drawn, before frame_begin, overlapping the wait for the last
+\ frame's flip.
 .slides_loop
     JSR slide_keys
     LDA slide_want : CMP slide_now : BEQ same
     STA slide_now
     JSR slide_load
 .same
+    \ the text as the beam allows, while the last frame waits for its flip
+.flip_wait
+    JSR text_sync
+    LDA frame_ready : BNE flip_wait
     JSR frame_begin
     JSR slide_stats
+    JSR text_sync
     JSR raster_frame
 .slide_drawn                                    ; (tools/slidecheck.mjs times raster_frame to here)
-    JSR text_sync
+    LDA slide_named : BNE named
+    LDA #TL_NAME * TEXT_COLS + RECORD_TEXT : JSR text_wait  ; a view's own lines with its first frame
+    INC slide_named
+.named
+    JSR text_catch_up
     JSR frame_end
     BRA slides_loop
 
@@ -157,10 +166,12 @@ SECTION Work
 .slide_want     SKIP 1      ; the view to show next
 .slide_hold     SKIP 1      ; fields a view is held for (0: for ever)
 .slide_fresh    SKIP 1      ; non-zero: the view has had no frame_begin yet
+.slide_named    SKIP 1      ; non-zero: the view's own text lines are drawn
 .slide_f0       SKIP 2      ; fields and frames at the view's first frame_begin
 .slide_n0       SKIP 2
 .slide_df       SKIP 2      ; fields and frames since
 .slide_dn       SKIP 2
+.slide_figs     SKIP 2      ; slide_df when the figures are next due
 .slide_count    SKIP 3      ; slide_load's: faces, vertices, pattern bytes
 ENDSECTION
 
@@ -303,6 +314,7 @@ ASSERT RECORD_TEXT < 256
     INX : CPX #ARRAYS : BNE array
     LDA #BANK_RASTER : STA romsel
     LDA #1 : STA slide_fresh
+    STZ slide_named
     RTS
 \ Each array: where it goes, and which of slide_count is its length.
 .array_lo
@@ -328,8 +340,11 @@ ASSERT SLIDE_MAX_PATTERNS * 4 < 256 AND SLIDE_MAX_VERTICES < 256
 \ slide_stats (after frame_begin, so every frame handed over is shown): at
 \ a view's first frame_begin, the fields and frames to count from; after,
 \ the frames a second and the fields a frame since, to a tenth, into their
-\ lines. The count starts again after DF_MAX fields, so a view held for
-\ ever keeps its figures in range.
+\ lines: at the view's first frame shown, then every FIGURE_FIELDS fields,
+\ since drawing them takes time from the frames they measure. The count
+\ starts again after DF_MAX fields, so a view held for ever keeps its
+\ figures in range.
+FIGURE_FIELDS = 25
 DF_MAX = 2048
 ASSERT DF_MAX * 10 < 65536                      ; (fields a frame: 10 df / dn)
 ASSERT DF_MAX * FIELDS_100S < &1000000          ; (frames a second: 100 rate dn / 10 df, dn <= df)
@@ -341,6 +356,7 @@ ASSERT DF_MAX * FIELDS_100S < &1000000          ; (frames a second: 100 rate dn 
     STZ slide_fresh
     LDA count_fields : STA slide_f0 : LDA count_fields+1 : STA slide_f0+1
     LDA count_frames : STA slide_n0 : LDA count_frames+1 : STA slide_n0+1
+    STZ slide_figs : STZ slide_figs+1
     RTS
 .running
     LDA count_fields : SEC : SBC slide_f0 : STA slide_df
@@ -352,6 +368,12 @@ ASSERT DF_MAX * FIELDS_100S < &1000000          ; (frames a second: 100 rate dn 
 .some
     LDA slide_df+1 : CMP #HI(DF_MAX) : BCS restart
     ASSERT LO(DF_MAX) = 0
+    \ time for the figures?
+    LDA slide_df : CMP slide_figs : LDA slide_df+1 : SBC slide_figs+1 : BCS figures
+    RTS
+.figures
+    LDA slide_df : CLC : ADC #FIGURE_FIELDS : STA slide_figs
+    LDA slide_df+1 : ADC #0 : STA slide_figs+1
     \ fields a frame, tenths: (10 df + dn / 2) / dn
     LDA slide_df : STA mul_a : LDA slide_df+1 : STA mul_a+1
     LDA #10 : STA mul_b : STZ mul_b+1
