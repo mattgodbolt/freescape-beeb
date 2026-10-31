@@ -11,8 +11,35 @@
 \ only for a divisor of 0, where its remainder runs on in its own way.
 \ ***************************************************************************
 
+\ mul88: (mlo, mhi) = A * Y, bytes, by quarter squares: A * Y =
+\ f(A + Y) - f(|A - Y|), f(n) = n * n DIV 4 (sq_lo and sq_hi, for n from
+\ 0 to 510). Clobbers A, X; keeps Y.
+ZA_AUTO1 mlo, mhi
+.mul88
+{
+    ZA_AUTO1 f, u
+    STA u
+    STY f
+    CLC : ADC f : TAX                           ; A + Y, and its bit 8 in C
+    BCS high
+    LDA sq_lo,X : STA mlo
+    LDA sq_hi,X : STA mhi
+    BRA less
+.high
+    LDA sq_lo + 256,X : STA mlo
+    LDA sq_hi + 256,X : STA mhi
+.less
+    LDA u : SEC : SBC f : BCS diff              ; |A - Y|
+    EOR #&FF : INC A
+.diff
+    TAX
+    LDA mlo : SEC : SBC sq_lo,X : STA mlo
+    LDA mhi : SBC sq_hi,X : STA mhi
+    RTS
+}
+
 \ mul_a_hl: m24 = A * mhl, a signed byte by a signed word, exact: the
-\ original's $910E. mhl is left as its magnitude. Clobbers A, X.
+\ original's $910E. mhl is left as its magnitude. Clobbers A, X, Y.
 ZA_AUTO2 mhl
 ZA_AUTO 3, m24
 .mul_a_hl
@@ -27,17 +54,12 @@ ZA_AUTO 3, m24
     LDA #0 : SEC : SBC mhl : STA mhl
     LDA #0 : SBC mhl+1 : STA mhl+1              ; |HL|: 32768 for -32768
 .hpos
-    STZ m24 : STZ m24+1 : STZ m24+2
-    LDX #8
-.bit
-    ASL m24 : ROL m24+1 : ROL m24+2
-    ASL ma : BCC next
-    LDA m24 : CLC : ADC mhl : STA m24
-    LDA m24+1 : ADC mhl+1 : STA m24+1
-    BCC next
-    INC m24+2
-.next
-    DEX : BNE bit
+    LDA ma : LDY mhl : JSR mul88
+    LDA mlo : STA m24
+    LDA mhi : STA m24+1
+    LDA ma : LDY mhl+1 : JSR mul88
+    LDA m24+1 : CLC : ADC mlo : STA m24+1
+    LDA mhi : ADC #0 : STA m24+2
     BIT sign : BPL done
     LDA #0 : SEC : SBC m24 : STA m24
     LDA #0 : SBC m24+1 : STA m24+1
@@ -86,32 +108,17 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     LDA #0 : SEC : SBC cd : STA cd
     LDA #0 : SBC cd+1 : STA cd+1
 .dpos
+    \ n = ct * cd: the products of their bytes, added in their places
+    LDA ct : LDY cd : JSR mul88
+    LDA mlo : STA n
+    LDA mhi : STA n+1
     STZ n+2 : STZ n+3
-    LDA ct+1 : ORA cd+1 : BNE wide
-    \ n = ct * cd, both below 256 (most of the walk's): 8 by 8 bits, the
-    \ product's low byte shifted into ct as the multiplier comes out
-    LDA #0
-    LDX #8
-    LSR ct
-.m8
-    BCC m8_next
-    CLC : ADC cd
-.m8_next
-    ROR A : ROR ct
-    DEX : BNE m8
-    STA n+1
-    LDA ct : STA n
-    BRA multiplied
-.wide
-    \ n = ct * cd, 16 by 16 bits, unsigned
-    LDX #16
-.mbit
-    LSR cd+1 : ROR cd : BCC mnext
-    LDA n+2 : CLC : ADC ct : STA n+2
-    LDA n+3 : ADC ct+1 : STA n+3
-.mnext
-    ROR n+3 : ROR n+2 : ROR n+1 : ROR n
-    DEX : BNE mbit
+    LDA ct+1 : ORA cd+1 : BEQ multiplied        ; (both below 256: most of the walk's)
+    LDA ct+1 : LDY cd+1 : JSR mul88
+    LDA mlo : STA n+2
+    LDA mhi : STA n+3
+    LDA ct : LDY cd+1 : JSR mul88 : JSR add_in
+    LDA ct+1 : LDY cd : JSR mul88 : JSR add_in
 .multiplied
     \ the divisor's magnitude, and its sign
     LDA cD : ORA cD+1 : BNE divisor
@@ -200,6 +207,15 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     LDA cs+1 : ADC n+1 : STA cres+1
     RTS
 
+    \ add_in: (mlo, mhi) added into n from its second byte
+.add_in
+    LDA n+1 : CLC : ADC mlo : STA n+1
+    LDA n+2 : ADC mhi : STA n+2
+    BCC added
+    INC n+3
+.added
+    RTS
+
     \ A divisor of 0, as the original's divide runs it: from the
     \ dividend's top 1, each bit is a quotient bit of 1, and the remainder
     \ takes rem * 2 + the bit, less what carries out of 16 bits. So the
@@ -231,5 +247,5 @@ ZA_AUTO2 ct, cd, cD, cs, cres
     SEC : ROL n : ROL n+1
     DEX : BNE ones
     STZ half : STZ half+1
-    BRA round
+    JMP round
 }

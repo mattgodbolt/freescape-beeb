@@ -5,9 +5,11 @@
 \ The logic calls these where the original calls its own routines. Each
 \ does nothing yet (or answers that nothing was drawn or hit), as the
 \ transcription's defaults do, which tools/logiccheck.mjs checks the logic
-\ against. The renderer, the sound and the screen fill them in. They run
-\ with the logic's bank paged in, and may use any of the pool's bytes the
-\ logic isn't using across the call.
+\ against. The renderer, the sound and the screen fill them in. They're in
+\ main RAM, called from either of the logic's banks: one that pages
+\ another bank in puts the caller's back before it returns (logic_paged
+\ says which: LDA logic_paged : STA romsel). They may use any of the pool's bytes
+\ the logic isn't using across the call (baron's allocator sees to it).
 \ ***************************************************************************
 
 \ hook_sound ($9574): play sound A (the original waits while it plays).

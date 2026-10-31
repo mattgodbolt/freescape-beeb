@@ -72,11 +72,14 @@ SECTION LogicWork, org = LOGIC_WORK, guard = LOGIC_WORK_END, filename = "LOGICW"
 .MoveScratch    EQUB ZXI_MoveScratch    ; the move's target cells, crossing point and deltas
 .HitRemembered  EQUB ZXI_HitRemembered  ; touch's last solid hit
 .FclOp          EQUB ZXI_FclOp          ; the FCL instruction being run
-    \ The 6502's own: the index of the area's objects and the globals, in
-    \ the original's order, which src/logic/touch.6502 scans (built from
-    \ the records by index_objects as an area loads, and by logic_init).
+    \ The 6502's own.
+.logic_paged    EQUB 0                  ; the bank src/logic/call.6502 last paged in
+    \ The index of the area's objects and the globals, in the original's
+    \ order, which src/logic/touch.6502 and lookup scan (built from the
+    \ records by index_objects as an area loads, and by logic_go_init).
     \ For object i: its first cell and its end (first plus size, AND 255)
-    \ on each axis, its id, and its record's address.
+    \ on each axis, its id, its record's flags as logic_go_shown last copied
+    \ them, and its record's address.
 IX_MAX = 48
 .ix_n           SKIP 1                  ; the objects indexed
 .ix_dirty       EQUB 1                  ; non-zero: indexed afresh, and touch's lists by face are to build
