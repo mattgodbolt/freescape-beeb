@@ -77,6 +77,21 @@ ENDMACRO
     JSR objects_frame
     HAZEL_OUT
     RTS
+\ check_shared: never called by the check; it reaches the projection's
+\ shared-coordinate entries, as a caller would, after project.
+.check_shared
+    ZA_ENTRY
+    HAZEL_IN
+    JSR shared_in : JSR project
+    JSR shared_in : JSR project_z
+    JSR shared_in : JSR project_y
+    HAZEL_OUT
+    RTS
+.shared_in
+    ZA_DISCARD proj_v
+    STZ proj_v : STZ proj_v+1 : STZ proj_v+2 : STZ proj_v+3 : STZ proj_v+4
+    STZ proj_v+5 : STZ proj_v+6 : STZ proj_v+7 : STZ proj_v+8
+    RTS
 .check_area
     EQUB 0
 ENDSECTION
@@ -89,12 +104,12 @@ SECTION ObjArea, org = &5C00, guard = &6600, virtual = TRUE
 ENDSECTION
 SECTION ObjWork, org = &6600, guard = &7400, virtual = TRUE
 ENDSECTION
-SECTION ObjMaths, org = &C000, guard = &CD00, filename = "OMATHS"
+SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
 ENDSECTION
-SECTION ObjCache, org = &CD00, guard = &D600, virtual = TRUE
+SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
-SECTION ObjOut, org = &D600, guard = &DC00, virtual = TRUE
+SECTION ObjOut, org = &7400, guard = &7C00, virtual = TRUE
 ENDSECTION
 
 INCLUDE "../gen/areas.6502"

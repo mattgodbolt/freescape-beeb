@@ -38,8 +38,26 @@ RS_VERTICES = 256                   ; vertices of all of them
 RS_PATTERNS = 64                    ; patterns (four bytes each)
 RS_HMAX     = 30000                 ; |rs_hx|, |rs_hy| at most
 POOL_NODES  = 254                   ; gaps a pool holds (1..POOL_NODES)
+\ The painter build (docs/research/raster.md): the backmost face and the
+\ background through the span buffer, then the other faces back to front.
+RASTER_PAINTER_WAY = FALSE              ; the engine's way: the span buffer's
+IF DEFINED(RASTER_OTHER_WAY)            ; (the comparison build, mk/raster.mk)
+    RASTER_PAINTER = NOT(RASTER_PAINTER_WAY)
+ELSE
+    RASTER_PAINTER = RASTER_PAINTER_WAY
+ENDIF
 UNTOUCHED   = &FF                   ; a line's head: no face there yet
 ASSERT POOL_NODES < UNTOUCHED
+\ The painter build's pools hold the backmost face's gaps alone, two a
+\ line at most, so a quarter-page each field is room enough.
+IF RASTER_PAINTER
+    POOL_HELD  = 63
+    POOL_FIELD = 64
+ELSE
+    POOL_HELD  = POOL_NODES
+    POOL_FIELD = 256
+ENDIF
+ASSERT POOL_HELD < POOL_FIELD AND 2 * VIEW_H DIV 4 <= POOL_HELD
 ASSERT VIEW_W < 128                 ; pixel positions are positive bytes
 
 \ ---------------------------------------------------------------------------
@@ -88,7 +106,7 @@ SECTION RasterWork
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
 .rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
 .rq_hi      SKIP 512
-.pools      SKIP 4 * 4 * 256
+.pools      SKIP 4 * 4 * POOL_FIELD
 ENDSECTION
 
 \ What lasts from frame to frame: each screen's lines' backgrounds
@@ -101,10 +119,10 @@ SECTION RasterState
 .hz_sky     SKIP 1                  ; hsplit holds the all-sky splits
 ENDSECTION
 
-FUNCTION pool_gs(k) = pools + (4 * k + 0) * 256
-FUNCTION pool_ge(k) = pools + (4 * k + 1) * 256
-FUNCTION pool_gh(k) = pools + (4 * k + 2) * 256
-FUNCTION pool_gn(k) = pools + (4 * k + 3) * 256
+FUNCTION pool_gs(k) = pools + (4 * k + 0) * POOL_FIELD
+FUNCTION pool_ge(k) = pools + (4 * k + 1) * POOL_FIELD
+FUNCTION pool_gh(k) = pools + (4 * k + 2) * POOL_FIELD
+FUNCTION pool_gn(k) = pools + (4 * k + 3) * POOL_FIELD
 
 \ The frame: the line; the gap before the one being looked at (0: the
 \ line's head); the lines not yet full; the next free node of each pool;
@@ -131,7 +149,7 @@ ZA_AUTO 2, ch_gl
 ZA_AUTO 2, ch_gh
 ZA_AUTO 2, ch_i
 ZA_AUTO 2, ch_end
-ZA_AUTO1 f_n, f_v0, f_kbot, f_yend
+ZA_AUTO1 f_n, f_v0, f_ktop, f_kbot, f_yend
 ZA_AUTO2 f_ytop, f_ybot
 
 SECTION RasterCode
@@ -190,6 +208,9 @@ SECTION RasterCode
 }
 
 \ raster_frame: the frame's faces and background into the screen.
+IF RASTER_PAINTER
+    ZA_AUTO1 pt_top, pt_bot             ; the lines the painted faces span
+ENDIF
 .raster_frame
 {
     ZA_ENTRY
@@ -209,6 +230,40 @@ SECTION RasterCode
     LDA #VIEW_H : STA nopen
     STZ rs_overflow
     JSR writer_begin
+IF RASTER_PAINTER
+    \ The backmost face into the span buffer, and the background round it.
+    JSR modes_insert
+    LDX rs_nfaces : STX f
+    BEQ alone
+    DEX : STX f
+    JSR raster_face
+.alone
+    JSR raster_background
+    \ The rest back to front, painted over; the lines they cover aren't
+    \ background alone any more.
+    JSR modes_paint
+    LDA #VIEW_H : STA pt_top
+    STZ pt_bot
+.paint
+    LDX f : DEX : BMI painted
+    STX f
+    JSR raster_face
+    LDA f_ktop : CMP pt_top : BCS above
+    STA pt_top
+.above
+    LDA f_kbot : CMP pt_bot : BCC paint
+    STA pt_bot
+    BRA paint
+.painted
+    LDA pt_top : ORA bg_buf : TAX
+    LDA pt_bot : ORA bg_buf : STA pt_bot
+.mark
+    CPX pt_bot : BCS marked
+    STZ bg_was,X
+    INX : BRA mark
+.marked
+    JMP writer_end
+ELSE
     LDX #0
 .faces
     CPX rs_nfaces : BCS done
@@ -219,7 +274,67 @@ SECTION RasterCode
 .done
     JSR raster_background
     JMP writer_end
+ENDIF
 }
+
+IF RASTER_PAINTER
+\ modes_insert, modes_paint: the line loop's copies insert a face's spans
+\ into the gaps, or paint them over what's there.
+.modes_insert
+    LDA #LO(ins0) : STA mode0+1 : LDA #HI(ins0) : STA mode0+2
+    LDA #LO(ins1) : STA mode1+1 : LDA #HI(ins1) : STA mode1+2
+    LDA #LO(ins2) : STA mode2+1 : LDA #HI(ins2) : STA mode2+2
+    LDA #LO(ins3) : STA mode3+1 : LDA #HI(ins3) : STA mode3+2
+    RTS
+.modes_paint
+    LDA #LO(paint0) : STA mode0+1 : LDA #HI(paint0) : STA mode0+2
+    LDA #LO(paint1) : STA mode1+1 : LDA #HI(paint1) : STA mode1+2
+    LDA #LO(paint2) : STA mode2+1 : LDA #HI(paint2) : STA mode2+2
+    LDA #LO(paint3) : STA mode3+1 : LDA #HI(paint3) : STA mode3+2
+    RTS
+
+\ The span [r_a, r_b) of line r_y painted in phase k's pattern: its whole
+\ bytes through the row's run, and the byte at an odd end read, its other
+\ pixel kept, and written back; then copy k's step.
+MACRO PAINT k, next
+{
+    LDA r_a : CMP r_b : BCS out
+    STA r_lo
+    LSR A : BCC l_even
+    \ The left end's byte: its right pixel the face's.
+    LDY r_a
+    LDA r_y : AND #7 : ORA bnd_ofs,Y
+    CPY #BND_SPLIT
+    TAY
+    BCS l_second
+    LDA (r_bp0),Y : AND #PIX_LEFT : ORA r_pvb + k : STA (r_bp0),Y
+    BRA l_even
+.l_second
+    LDA (r_bp1),Y : AND #PIX_LEFT : ORA r_pvb + k : STA (r_bp1),Y
+.l_even
+    LDA r_b : STA r_hi
+    LDA r_pv + k : JSR put_run
+    LDA r_b : LSR A : BCC out
+    \ The right end's byte: its left pixel the face's.
+    LDY r_b
+    LDA r_y : AND #7 : ORA bnd_ofs,Y
+    CPY #BND_SPLIT
+    TAY
+    BCS r_second
+    LDA (r_bp0),Y : AND #PIX_RIGHT : ORA r_pva + k : STA (r_bp0),Y
+    JMP next
+.r_second
+    LDA (r_bp1),Y : AND #PIX_RIGHT : ORA r_pva + k : STA (r_bp1),Y
+.out
+    JMP next
+}
+ENDMACRO
+
+.paint0 PAINT 0, step0
+.paint1 PAINT 1, step1
+.paint2 PAINT 2, step2
+.paint3 PAINT 3, step3
+ENDIF
 
 \ ---------------------------------------------------------------------------
 \ raster_face: face X into the span buffer.
@@ -272,7 +387,7 @@ SECTION RasterCode
     FOR i = 1..4
         ASL r_y : ROL A
     NEXT
-    STA r_y
+    STA r_y : STA f_ktop
     CMP f_kbot : BCC lines
     RTS
 .lines
@@ -439,7 +554,7 @@ MACRO INSERT k, next
     JMP found
 .split
     \ [a, b) inside the gap: it splits into [s, a) and a new [b, e).
-    LDY gtop + k : CPY #POOL_NODES + 1 : BCS overflow
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
     INC gtop + k
     LDA r_b : STA GS,Y : STA r_hi
     LDA GE,X : STA GE,Y
@@ -467,7 +582,7 @@ MACRO INSERT k, next
     JMP next
 .fresh_right
     \ [0, b): the gap [b, W) waits on the byte at b.
-    LDY gtop + k : CPY #POOL_NODES + 1 : BCS overflow
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
     INC gtop + k
     LDA r_b : STA GS,Y
     LDA #VIEW_W : STA GE,Y
@@ -479,7 +594,7 @@ MACRO INSERT k, next
 .fresh_cut
     LDA r_b : CMP #VIEW_W : BNE fresh_mid
     \ [a, W): the gap [0, a) waits on the byte at a.
-    LDY gtop + k : CPY #POOL_NODES + 1 : BCS overflow
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
     INC gtop + k
     LDA #0 : STA GS,Y : STA GN,Y
     LDA r_a : STA GE,Y
@@ -489,7 +604,7 @@ MACRO INSERT k, next
     JMP next
 .fresh_mid
     \ [a, b): gaps [0, a) and [b, W).
-    LDY gtop + k : CPY #POOL_NODES : BCC two
+    LDY gtop + k : CPY #POOL_HELD : BCC two
     JMP overflow
 .two
     INC gtop + k : INC gtop + k
@@ -516,7 +631,11 @@ ENDMACRO
         LDA r_y : BIT #4 : BNE row0
         LDX r_y : JSR row_setup
 .row0
-        INSERT 0, step0
+        IF RASTER_PAINTER
+.mode0    JMP ins0                    ; patched: ins0 or paint0
+            ZA_CANJUMP ins0, paint0
+        ENDIF
+.ins0   INSERT 0, step0
 .step0
 .sa0    BRA sag_0                        ; patched: STEP_G or STEP_NONE
         ZA_CANJUMP sag_0, sa_end0
@@ -534,7 +653,11 @@ ENDMACRO
         ZA_CANJUMP chk_test1, chk_end1
 .chk_test1 CHECK
 .chk_end1
-        INSERT 1, step1
+        IF RASTER_PAINTER
+.mode1    JMP ins1                    ; patched: ins1 or paint1
+            ZA_CANJUMP ins1, paint1
+        ENDIF
+.ins1   INSERT 1, step1
 .step1
 .sa1    BRA sag_1
         ZA_CANJUMP sag_1, sa_end1
@@ -552,7 +675,11 @@ ENDMACRO
         ZA_CANJUMP chk_test2, chk_end2
 .chk_test2 CHECK
 .chk_end2
-        INSERT 2, step2
+        IF RASTER_PAINTER
+.mode2    JMP ins2                    ; patched: ins2 or paint2
+            ZA_CANJUMP ins2, paint2
+        ENDIF
+.ins2   INSERT 2, step2
 .step2
 .sa2    BRA sag_2
         ZA_CANJUMP sag_2, sa_end2
@@ -570,7 +697,11 @@ ENDMACRO
         ZA_CANJUMP chk_test3, chk_end3
 .chk_test3 CHECK
 .chk_end3
-        INSERT 3, step3
+        IF RASTER_PAINTER
+.mode3    JMP ins3                    ; patched: ins3 or paint3
+            ZA_CANJUMP ins3, paint3
+        ENDIF
+.ins3   INSERT 3, step3
 .step3
 .sa3    BRA sag_3
         ZA_CANJUMP sag_3, sa_end3

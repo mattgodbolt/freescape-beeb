@@ -321,3 +321,41 @@ areas 14 and 18 uncover objects below their tops. Against the ZX oracle,
 99.37% of pixels agree against 99.95% with the floor as a face. The floor
 costs about a sixth of the front end (journal, 2026-10-31), so it gets a
 cheaper path instead.
+
+## 27. The projection's accuracy budget, and its method (2026-10-31, autonomous)
+
+Measured with the model on camera walks from every entrance
+(`docs/research/projection.md`): what shows as the camera moves is jitter,
+an error that differs from vertex to vertex; an error that only steps one
+way as X or Z grows hardly shows. So **the budget is: the projected
+position never steps backwards as X or Z grows, and stays within 4/16 of
+a pixel on the view.**
+
+**The projection is a 9-bit reciprocal and two byte products**, within
+that budget, replacing decision 17's first method (which was within 2/16
+at about twice the cycles). Two entries give exactly its result more
+cheaply for vertices sharing coordinates: `project_z` (the last call's Z)
+and `project_y` (its X and Z, only the y). Its input must be within
+`|X| <= 25 Z` and `|Y| <= 12 Z`, which the guard band (decision 17) is
+inside.
+
+## 28. The span buffer stays, against a painter's fill (2026-10-31, autonomous)
+
+A painter's fill (faces back to front over the backmost face and the
+background) was built, checked exact, and measured slower at the median
+over Driller's 65 views: every painted face rewrites bytes the floor or
+sky already wrote. It wins only on the busiest views. The span buffer
+stays the engine's fill; the painter's build stays checked
+(`RASTER_OTHER_WAY`) for comparison. Choosing per frame by its face-lines
+would gain a little and needs both in the bank; not built.
+
+## 29. Polar forms for a level camera (open, for Matt)
+
+Rich Talbot-Watkins's PORTAL caches each point's angle and log distance
+while the eye stands still, so a turn costs lookups. Modelled against
+Driller's views (`docs/research/projection.md`): with 2,304 steps a turn and
+12-bit logs it's within 3/16 of a pixel, and turning flicker is lower than
+the byte matrix's; a turning frame's transform and projection would come
+to about 5K cycles. It needs a second pipeline beside the matrix one (for
+pitch and roll) and a sideways bank of tables. Open until the rest of the
+frame is fast enough for it to matter.

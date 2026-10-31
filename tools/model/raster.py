@@ -390,6 +390,51 @@ def spans(faces, bg, capacity=None, crossings=None):
     return lines, counts
 
 
+def painter(faces, bg, capacity=None):
+    """The same view by the painter's way, as the 6502's painter build
+    draws it: the backmost face and the background through the span buffer
+    (spans, so every byte is written once), then the other faces back to
+    front, each span's whole bytes through the row runs and the byte at each
+    odd end read, merged and written back. Returns (lines, counts): the
+    lines' runs as spans gives them, and the work, spans' counts for the
+    backmost face with the painting's added (pieces: spans painted; whole:
+    their whole bytes; joins: their ends' bytes, so bytes is every write).
+    The image is the painter's and so the span buffer's for all the faces;
+    the pools never overflow, holding one face."""
+    lines, counts = spans(faces[-1:], bg, capacity)
+    pix = [[None] * VIEW_W for _ in range(VIEW_H)]
+    for y, runs in enumerate(lines):
+        for x0, x1, p in runs:
+            pix[y][x0:x1] = [p] * (x1 - x0)
+    for pattern, vertices in reversed(faces[:-1]):
+        counts.faces += 1
+        n = len(vertices)
+        if n >= 3:
+            ys = [y for _, y in vertices]
+            counts.face_rows += max(0, min(first_line(max(ys)), VIEW_H) - max(first_line(min(ys)), 0))
+        for i in range(n):
+            (x0, y0), (x1, y1) = vertices[i], vertices[(i + 1) % n]
+            k = list(edge_crossings(x0, y0, x1, y1))
+            if k:
+                counts.edges += 1
+                counts.edge_lines += len(k)
+        for y, (a, b) in face_spans(vertices).items():
+            counts.face_lines += 1
+            counts.pieces += 1
+            _piece_bytes(counts, a, b)
+            counts.joins += (a & 1) + (b & 1)
+            pix[y][a:b] = [pattern] * (b - a)
+    out = []
+    for row in pix:
+        runs, x0 = [], 0
+        for x in range(1, VIEW_W + 1):
+            if x == VIEW_W or row[x] != row[x0]:
+                runs.append((x0, x, row[x0]))
+                x0 = x
+        out.append(runs)
+    return out, counts
+
+
 def reference(faces, bg):
     """The same image by brute force, every pixel of the view against every
     face's edge functions (not spans), and the background pixel by pixel

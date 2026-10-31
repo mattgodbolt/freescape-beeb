@@ -29,6 +29,10 @@ CHK_MUL = 6
 CHK_DOT = 12
 \ project records: X, Y, Z (3 each) in; sx, sy (2 each) out
 CHK_PROJ = 13
+\ shared records: X, Y, Z, then X2, Y2, then Y3 (3 each) in; project's sx,
+\ sy, project_z's for X2, Y2, project_y's sy for Y3 (2 each) out
+CHK_SHARE = 28
+CHK_SHARE_IN = 18
 
 SECTION Code, org = &1900, filename = "CODE", guard = &3000, cmos = TRUE
 .chk_code
@@ -197,6 +201,103 @@ CHK_MULV = 5
     LDY #9
     LDA proj_sx : STA (chk_p),Y : INY
     LDA proj_sx+1 : STA (chk_p),Y : INY
+    LDA proj_sy : STA (chk_p),Y : INY
+    LDA proj_sy+1 : STA (chk_p),Y
+    RTS
+
+\ --- a view's vertices, each by the entry its schedule says -----------------
+\
+\ schedule records: op (0 project, 1 project_z, 2 project_y), X, Y, Z (3
+\ each) in; sx, sy (2 each) out. Labels round each call, for the harness to
+\ time them in turn.
+CHK_SCHED = 14
+.chk_sched
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_sched_loop
+    LDY #9
+    ZA_DISCARD proj_v
+.sched_in
+    LDA (chk_p),Y : STA proj_v-1,Y : ZA_INDEXEDBY 1..9
+    DEY : BNE sched_in
+    LDA (chk_p) : BEQ sched_whole
+    CMP #1 : BEQ sched_samez
+.chk_sched_y
+    JSR project_y
+.chk_sched_yd
+    BRA sched_out
+.sched_samez
+.chk_sched_z
+    JSR project_z
+.chk_sched_zd
+    BRA sched_out
+.sched_whole
+.chk_sched_p
+    JSR project
+.chk_sched_pd
+.sched_out
+    LDY #10
+    LDA proj_sx : STA (chk_p),Y : INY
+    LDA proj_sx+1 : STA (chk_p),Y : INY
+    LDA proj_sy : STA (chk_p),Y : INY
+    LDA proj_sy+1 : STA (chk_p),Y
+    CHK_NEXT CHK_SCHED, chk_sched_loop
+    RTS
+
+\ --- project_z and project_y, after project ----------------------------------
+
+.chk_share
+    ZA_ENTRY
+    CHK_BEGIN
+.chk_share_loop
+    JSR chk_proj_in
+    JSR project
+    LDY #CHK_SHARE_IN : JSR chk_share_out
+    JSR chk_share_xy
+    JSR project_z
+    LDY #CHK_SHARE_IN+4 : JSR chk_share_out
+    JSR chk_share_y
+    JSR project_y
+    LDY #CHK_SHARE_IN+8 : JSR chk_share_sy
+    CHK_NEXT CHK_SHARE, chk_share_loop
+    RTS
+
+\ The same for the first record, the calls timed.
+.chk_share1
+    ZA_ENTRY
+    CHK_BEGIN
+    JSR chk_proj_in
+    JSR project
+    JSR chk_share_xy
+.chk_share1_z
+    JSR project_z
+.chk_share1_zdone
+    JSR chk_share_y
+.chk_share1_y
+    JSR project_y
+.chk_share1_ydone
+    RTS
+
+\ proj_x, proj_y from the record's X2, Y2; proj_y from its Y3
+.chk_share_xy
+    LDY #9
+    ZA_DISCARD proj_v
+.xy
+    LDA (chk_p),Y : STA proj_v-9,Y : ZA_INDEXEDBY 9..14
+    INY : CPY #15 : BNE xy
+    RTS
+.chk_share_y
+    LDY #15
+.y
+    LDA (chk_p),Y : STA proj_y-15,Y : ZA_INDEXEDBY 15..17
+    INY : CPY #18 : BNE y
+    RTS
+
+\ sx, sy (Y their offset in the record); sy alone
+.chk_share_out
+    LDA proj_sx : STA (chk_p),Y : INY
+    LDA proj_sx+1 : STA (chk_p),Y : INY
+.chk_share_sy
     LDA proj_sy : STA (chk_p),Y : INY
     LDA proj_sy+1 : STA (chk_p),Y
     RTS
