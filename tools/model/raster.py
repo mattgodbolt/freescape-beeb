@@ -83,10 +83,10 @@ def first_line(y):
     return ceil_div(y - HALF, SUB)
 
 
-def edge_crossings(x0, y0, x1, y1):
-    """The lines an edge crosses and its pixel boundary on each: (line, p) for
-    each line whose centre is in [top, bottom) of the edge. A horizontal edge
-    crosses none."""
+def edge_crossings_exact(x0, y0, x1, y1):
+    """The fill rule's exact boundaries: (line, p) for each line whose centre
+    is in [top, bottom) of the edge, p = ceil((x - 8) / 16) of its x there.
+    A horizontal edge crosses none. (The reference the DDA is held to.)"""
     if y0 == y1:
         return
     if y0 > y1:
@@ -97,15 +97,78 @@ def edge_crossings(x0, y0, x1, y1):
         yield k, pixel_of(x0 * dy + dx * (c - y0), dy)
 
 
-def face_spans(vertices):
+# The gradient's reciprocal (portalc's, docs/research/rtw-sources.md 1.5):
+# dy, normalised to a byte n in [128, 255] at a power of two and rounded up,
+# has 256 + RECIPF[n - 128] <= 65536 / n.
+RECIPF = [65536 // n - 256 for n in range(128, 256)]
+
+
+def normalise(dy):
+    """(n, s) with n in [128, 255] and n * 2^s >= dy: exact when s <= 0,
+    dy's top byte rounded up otherwise."""
+    s = dy.bit_length() - 8
+    if s <= 0:
+        return dy << -s, s
+    n = -((-dy) >> s)
+    if n == 256:
+        return 128, s + 1
+    return n, s
+
+
+def edge_crossings(x0, y0, x1, y1):
+    """The lines an edge crosses (those whose centres are in [top, bottom) of
+    it, as the fill rule has it) and its pixel boundary on each: (line, p).
+    A horizontal edge crosses none.
+
+    The boundary is the exact one, (x + 7) >> 4, for a vertical edge, and
+    otherwise a DDA in 8.8 fixed point (decision 21), as the 6502 steps it.
+    With dy normalised to n at 2^s (normalise) and r = 256 + f(n), its
+    reciprocal: the gradient g = |dx| r >> (8 + s) pixels a line (0 for an
+    edge no taller than a line, which crosses one line at most), and the
+    first line's offset from the top vertex |dx| t0 r >> (12 + s), t0 the
+    line's distance below it in sixteenths. X starts at 16 (x0 - 8) + 255
+    plus or minus that, steps by g a line, and p is X >> 8. Every term
+    rounds toward x0, so an edge never passes its far vertex and p stays
+    inside the view; edge_crossings_exact is what it approximates, within
+    a pixel."""
+    if y0 == y1:
+        return
+    if y0 > y1:
+        x0, y0, x1, y1 = x1, y1, x0, y0
+    k0, k1 = max(first_line(y0), 0), min(first_line(y1), VIEW_H)
+    if k0 >= k1:
+        return
+    if x0 == x1:
+        p = (x0 + SUB // 2 - 1) >> 4
+        for k in range(k0, k1):
+            yield k, p
+        return
+    dx, dy = x1 - x0, y1 - y0
+    adx = abs(dx)
+    n, s = normalise(dy)
+    r = 256 + RECIPF[n - 128]
+    t0 = SUB * k0 + HALF - y0
+    g = (adx * r) >> (8 + s) if dy > SUB else 0
+    off = (adx * t0 * r) >> (12 + s)
+    if dx < 0:
+        g, off = -g, -off
+    x = (x0 - HALF) * 16 + 255 + off
+    for k in range(k0, k1):
+        yield k, x >> 8
+        x += g
+
+
+def face_spans(vertices, crossings=None):
     """A convex polygon's span on each line it covers: {line: (x0, x1)}, x1
     exclusive, only lines where x0 < x1. Either winding; a degenerate
-    polygon (no area) covers nothing."""
+    polygon (no area) covers nothing. crossings is edge_crossings unless
+    given (edge_crossings_exact, for the reference)."""
+    crossings = crossings or edge_crossings
     cross = {}
     n = len(vertices)
     for i in range(n):
         (x0, y0), (x1, y1) = vertices[i], vertices[(i + 1) % n]
-        for k, p in edge_crossings(x0, y0, x1, y1):
+        for k, p in crossings(x0, y0, x1, y1):
             cross.setdefault(k, []).append(p)
     spans = {}
     for k, ps in cross.items():
@@ -218,7 +281,7 @@ def rasterise(faces, sky, ground, horizon=None, stats=None):
     return lines
 
 
-def spans(faces, bg, capacity=None):
+def spans(faces, bg, capacity=None, crossings=None):
     """faces: [(pattern, [(x, y), ...]), ...] nearest first, vertices inside
     [0, 16 VIEW_W] x [0, 16 VIEW_H]; bg: a Background. Returns (lines,
     counts): lines[y] = [(x0, x1, pattern), ...] in order, covering
@@ -233,7 +296,9 @@ def spans(faces, bg, capacity=None):
     holds (one for each value of line AND 3), counting every gap a frame
     makes: a line's first face makes the gaps it leaves, and a span inside
     a gap splits it into two. A span whose gaps don't fit isn't drawn on
-    that line, and counts.overflow says so."""
+    that line, and counts.overflow says so. crossings is the edges' rule
+    (edge_crossings unless given; edge_crossings_exact for the check against
+    the brute force)."""
     counts = Counts()
     gaps = [[[0, VIEW_W]] for _ in range(VIEW_H)]
     touched = [False] * VIEW_H
@@ -255,7 +320,7 @@ def spans(faces, bg, capacity=None):
             if k:
                 counts.edges += 1
                 counts.edge_lines += len(k)
-        for y, (a, b) in sorted(face_spans(vertices).items()):
+        for y, (a, b) in sorted(face_spans(vertices, crossings).items()):
             line = gaps[y]
             if not line:
                 continue

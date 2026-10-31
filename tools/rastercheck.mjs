@@ -51,8 +51,14 @@ const sequences = (all.sequences || []).filter((q) => !only || q.name.includes(o
 
 const m = await headless({ symbols: symFile });
 const S = (name) => m.sym(name);
-m.load(`${dir}/RCODE`, sections.RasterCode.org);
-m.load(`${dir}/RRUNS`, sections.RasterRuns.org, "hazel");
+// Each section's file into the space its address is in: main RAM, the
+// rasteriser's sideways bank, or HAZEL.
+const BANK = m.sym("RASTER_BANK");
+for (const [name, a] of Object.entries(sections)) {
+    if (!a.filename) continue;
+    const space = a.org < 0x8000 ? "main" : a.org < 0xc000 ? BANK : "hazel";
+    m.load(`${dir}/${a.filename}`, a.org, space);
+}
 
 const VIEW_W = S("VIEW_W");
 const VIEW_H = S("VIEW_H");
@@ -71,8 +77,9 @@ const allowed = [
     [0x00, 0x90],
     [0x100, 0x200],
     [S("acccon"), S("acccon") + 1],
+    [S("romsel"), S("romsel") + 1],
 ];
-for (const name of ["RasterCode", "RasterIn", "RasterRuns", "RasterWork", "RasterState"]) {
+for (const name of ["RasterCheck", "RasterCode", "RasterIn", "RasterRuns", "RasterWork", "RasterState"]) {
     const a = sections[name];
     allowed.push([a.org, a.guard]);
 }
@@ -105,13 +112,12 @@ const BUCKETS = [
     ["bytes", "rr_rows"],
 ];
 const marks = BUCKETS.map(([b, l]) => [S(l), b]).sort((p, q) => p[0] - q[0]);
-const runsEnd = sections.RasterRuns.guard;
 const bucketOf = new Map();
 const bucket = (a) => {
     let b = bucketOf.get(a);
     if (b === undefined) {
         b = "other";
-        if (a < runsEnd) for (const [at, name] of marks) if (a >= at) b = name;
+        if (a < 0xc000) for (const [at, name] of marks) if (a >= at) b = name;
         bucketOf.set(a, b);
     }
     return b;
@@ -179,7 +185,7 @@ async function frame(s, shadow, fresh) {
     const other = shadow ? "main" : "shadow";
     m.poke(S("check_acccon"), ACCCON_Y | (shadow ? ACCCON_X : 0));
     if (fresh) {
-        await m.call(S("raster_forget"));
+        await m.call(S("check_forget"));
         for (const sp of [space, other]) {
             const fill = new Uint8Array(0x8000 - SCREEN);
             for (let a = 0; a < fill.length; a++) fill[a] = (a * 7 + (sp === space ? 0x5a : 0xa5)) & 255;

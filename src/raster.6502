@@ -84,6 +84,8 @@ SECTION RasterWork
 .hsplit     SKIP VIEW_H
     ALIGN 256
 .lo16       SKIP 256                ; n >> 4 (raster_init)
+.k8         SKIP 256                ; n's bit length (raster_init)
+.nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
 .pools      SKIP 4 * 4 * 256
 ENDSECTION
 
@@ -112,23 +114,18 @@ ZA_AUTO 4, r_pvb
 
 \ The face's two chains, each an edge at a time from the top vertex down,
 \ one walking the vertices forwards and the other backwards (ch_dir 0 or
-\ not): its pixel boundary on the line, and its stepping (per line e -= b;
-\ when that goes below 0, e += dy and p += a + 1, and otherwise p += a;
-\ ch_a holds a - 1 and ch_a1 holds a), its end vertex and the line its
-\ edge ends before. Once a face's line shows which chain is left, that one
-\ is chain 0 (decide), so the span is [ch_p, ch_p+1).
+\ not): its x on the line in 8.8 fixed point with 255 added, so its pixel
+\ boundary is the high byte (ch_p) and ch_xl the low; its gradient a line
+\ (ch_gl, ch_gh, two's complement); its end vertex and the line its edge
+\ ends before. Once a face's line shows which chain is left, that one is
+\ chain 0 (decide), so the span is [ch_p, ch_p+1).
 ZA_AUTO 2, ch_p
 r_a = ch_p
 r_b = ch_p + 1
 ZA_AUTO 2, ch_dir
-ZA_AUTO 2, ch_e
-ZA_AUTO 2, ch_eh
-ZA_AUTO 2, ch_b
-ZA_AUTO 2, ch_bh
-ZA_AUTO 2, ch_dy
-ZA_AUTO 2, ch_dyh
-ZA_AUTO 2, ch_a
-ZA_AUTO 2, ch_a1
+ZA_AUTO 2, ch_xl
+ZA_AUTO 2, ch_gl
+ZA_AUTO 2, ch_gh
 ZA_AUTO 2, ch_i
 ZA_AUTO 2, ch_end
 ZA_AUTO1 f_n, f_v0, f_kbot, f_yend
@@ -144,6 +141,21 @@ SECTION RasterCode
     LDX #0
 .shift
     TXA : LSR A : LSR A : LSR A : LSR A : STA lo16,X
+    \ X's bit length, and X shifted up until its top bit is set
+    TXA : LDY #0
+.length
+    CMP #0 : BEQ counted
+    LSR A : INY
+    BRA length
+.counted
+    TYA : STA k8,X
+    TXA
+.up
+    CPY #8 : BCS normed
+    ASL A : INY
+    BRA up
+.normed
+    STA nrm,X
     INX : BNE shift
     JSR raster_forget
     JMP writer_init
@@ -255,7 +267,7 @@ SECTION RasterCode
     LDA #CHK_SKIP
     JMP patch_checks
 .swap
-    FOR v = {ch_p, ch_e, ch_eh, ch_b, ch_bh, ch_dy, ch_dyh, ch_a, ch_a1, ch_i, ch_end, ch_dir}
+    FOR v = {ch_p, ch_xl, ch_gl, ch_gh, ch_i, ch_end, ch_dir}
         LDA v : LDY v + 1 : STA v + 1 : STY v
     NEXT
     LDA ch_dir : STA f_dir
@@ -298,9 +310,8 @@ SECTION RasterCode
 \ The line loop, a copy for each value of line AND 3: until the face's left
 \ chain is known, a test of it (through a BRA patched past it once it is);
 \ the span [ch_p, ch_p+1) into the line's gaps; both chains stepped to the
-\ next line (each through a BRA patched to its edge's stepping: STEP8 when
-\ the error fits a byte, STEP16, or none for a vertical edge); the next
-\ line.
+\ next line (each through a BRA patched to its edge's stepping: its x plus
+\ its gradient, or nothing for a vertical edge); the next line.
 
 MACRO CHECK
     LDA ch_p : CMP ch_p+1 : BEQ undecided
@@ -308,29 +319,10 @@ MACRO CHECK
 .undecided
 ENDMACRO
 
-MACRO STEP8 c, done
-    LDA ch_e + c : SEC : SBC ch_b + c : BCS no_borrow
-    ADC ch_dy + c : STA ch_e + c        ; (and C = 1: one more than a)
-    LDA ch_p + c : ADC ch_a1 + c : STA ch_p + c
-    BRA done
-.no_borrow
-    STA ch_e + c
-    LDA ch_p + c : ADC ch_a + c : STA ch_p + c
-    BRA done
-ENDMACRO
-
-MACRO STEP16 c
-    LDA ch_e + c : SEC : SBC ch_b + c : STA ch_e + c
-    LDA ch_eh + c : SBC ch_bh + c : BCC borrow
-    STA ch_eh + c
-    LDA ch_p + c : ADC ch_a + c : STA ch_p + c
-    BRA done
-.borrow
-    TAY
-    LDA ch_e + c : ADC ch_dy + c : STA ch_e + c
-    TYA : ADC ch_dyh + c : STA ch_eh + c    ; (and C = 1)
-    LDA ch_p + c : ADC ch_a1 + c : STA ch_p + c
-.done
+MACRO STEPG c
+    CLC
+    LDA ch_xl + c : ADC ch_gl + c : STA ch_xl + c
+    LDA ch_p + c : ADC ch_gh + c : STA ch_p + c
 ENDMACRO
 
 \ The span [r_a, r_b) of line r_y into its gaps (pool k), writing what
@@ -496,15 +488,13 @@ ENDMACRO
 .row0
         INSERT 0, step0
 .step0
-.sa0    BRA sa8_0                       ; patched
-        ZA_CANJUMP sa8_0, sa16_0, sa_end0
-.sa8_0  STEP8 0, sa_end0
-.sa16_0 STEP16 0
+.sa0    BRA sag_0                        ; patched: STEP_G or STEP_NONE
+        ZA_CANJUMP sag_0, sa_end0
+.sag_0  STEPG 0
 .sa_end0
-.sb0    BRA sb8_0                       ; patched
-        ZA_CANJUMP sb8_0, sb16_0, sb_end0
-.sb8_0  STEP8 1, sb_end0
-.sb16_0 STEP16 1
+.sb0    BRA sbg_0                        ; patched: STEP_G or STEP_NONE
+        ZA_CANJUMP sbg_0, sb_end0
+.sbg_0  STEPG 1
 .sb_end0
 .next0  INC r_y : LDA r_y : CMP f_yend : BNE loop1
         JMP seg_end
@@ -516,15 +506,13 @@ ENDMACRO
 .chk_end1
         INSERT 1, step1
 .step1
-.sa1    BRA sa8_1
-        ZA_CANJUMP sa8_1, sa16_1, sa_end1
-.sa8_1  STEP8 0, sa_end1
-.sa16_1 STEP16 0
+.sa1    BRA sag_1
+        ZA_CANJUMP sag_1, sa_end1
+.sag_1  STEPG 0
 .sa_end1
-.sb1    BRA sb8_1
-        ZA_CANJUMP sb8_1, sb16_1, sb_end1
-.sb8_1  STEP8 1, sb_end1
-.sb16_1 STEP16 1
+.sb1    BRA sbg_1
+        ZA_CANJUMP sbg_1, sb_end1
+.sbg_1  STEPG 1
 .sb_end1
 .next1  INC r_y : LDA r_y : CMP f_yend : BNE loop2
         JMP seg_end
@@ -536,15 +524,13 @@ ENDMACRO
 .chk_end2
         INSERT 2, step2
 .step2
-.sa2    BRA sa8_2
-        ZA_CANJUMP sa8_2, sa16_2, sa_end2
-.sa8_2  STEP8 0, sa_end2
-.sa16_2 STEP16 0
+.sa2    BRA sag_2
+        ZA_CANJUMP sag_2, sa_end2
+.sag_2  STEPG 0
 .sa_end2
-.sb2    BRA sb8_2
-        ZA_CANJUMP sb8_2, sb16_2, sb_end2
-.sb8_2  STEP8 1, sb_end2
-.sb16_2 STEP16 1
+.sb2    BRA sbg_2
+        ZA_CANJUMP sbg_2, sb_end2
+.sbg_2  STEPG 1
 .sb_end2
 .next2  INC r_y : LDA r_y : CMP f_yend : BNE loop3
         JMP seg_end
@@ -556,15 +542,13 @@ ENDMACRO
 .chk_end3
         INSERT 3, step3
 .step3
-.sa3    BRA sa8_3
-        ZA_CANJUMP sa8_3, sa16_3, sa_end3
-.sa8_3  STEP8 0, sa_end3
-.sa16_3 STEP16 0
+.sa3    BRA sag_3
+        ZA_CANJUMP sag_3, sa_end3
+.sag_3  STEPG 0
 .sa_end3
-.sb3    BRA sb8_3
-        ZA_CANJUMP sb8_3, sb16_3, sb_end3
-.sb8_3  STEP8 1, sb_end3
-.sb16_3 STEP16 1
+.sb3    BRA sbg_3
+        ZA_CANJUMP sbg_3, sb_end3
+.sbg_3  STEPG 1
 .sb_end3
 .next3  INC r_y : LDA r_y : CMP f_yend : BEQ seg_end3
         JMP loop0
@@ -577,17 +561,16 @@ CHK_SKIP  = chk_end0 - (chk0 + 2)
 ASSERT chk_test1 - (chk1 + 2) = CHK_TEST AND chk_end1 - (chk1 + 2) = CHK_SKIP
 ASSERT chk_test2 - (chk2 + 2) = CHK_TEST AND chk_end2 - (chk2 + 2) = CHK_SKIP
 ASSERT chk_test3 - (chk3 + 2) = CHK_TEST AND chk_end3 - (chk3 + 2) = CHK_SKIP
-STEP_8    = sa8_0 - (sa0 + 2)
-STEP_16   = sa16_0 - (sa0 + 2)
+STEP_G    = sag_0 - (sa0 + 2)
 STEP_NONE = sa_end0 - (sa0 + 2)
 ASSERT STEP_NONE < 128
-ASSERT sa8_1 - (sa1 + 2) = STEP_8 AND sa16_1 - (sa1 + 2) = STEP_16 AND sa_end1 - (sa1 + 2) = STEP_NONE
-ASSERT sa8_2 - (sa2 + 2) = STEP_8 AND sa16_2 - (sa2 + 2) = STEP_16 AND sa_end2 - (sa2 + 2) = STEP_NONE
-ASSERT sa8_3 - (sa3 + 2) = STEP_8 AND sa16_3 - (sa3 + 2) = STEP_16 AND sa_end3 - (sa3 + 2) = STEP_NONE
-ASSERT sb8_0 - (sb0 + 2) = STEP_8 AND sb16_0 - (sb0 + 2) = STEP_16 AND sb_end0 - (sb0 + 2) = STEP_NONE
-ASSERT sb8_1 - (sb1 + 2) = STEP_8 AND sb16_1 - (sb1 + 2) = STEP_16 AND sb_end1 - (sb1 + 2) = STEP_NONE
-ASSERT sb8_2 - (sb2 + 2) = STEP_8 AND sb16_2 - (sb2 + 2) = STEP_16 AND sb_end2 - (sb2 + 2) = STEP_NONE
-ASSERT sb8_3 - (sb3 + 2) = STEP_8 AND sb16_3 - (sb3 + 2) = STEP_16 AND sb_end3 - (sb3 + 2) = STEP_NONE
+ASSERT sbg_0 - (sb0 + 2) = STEP_G AND sb_end0 - (sb0 + 2) = STEP_NONE
+ASSERT sag_1 - (sa1 + 2) = STEP_G AND sa_end1 - (sa1 + 2) = STEP_NONE
+ASSERT sbg_1 - (sb1 + 2) = STEP_G AND sb_end1 - (sb1 + 2) = STEP_NONE
+ASSERT sag_2 - (sa2 + 2) = STEP_G AND sa_end2 - (sa2 + 2) = STEP_NONE
+ASSERT sbg_2 - (sb2 + 2) = STEP_G AND sb_end2 - (sb2 + 2) = STEP_NONE
+ASSERT sag_3 - (sa3 + 2) = STEP_G AND sa_end3 - (sa3 + 2) = STEP_NONE
+ASSERT sbg_3 - (sb3 + 2) = STEP_G AND sb_end3 - (sb3 + 2) = STEP_NONE
 
 \ patch_steps: chain X's stepping in every copy, A one of STEP_*.
 .patch_steps
@@ -628,21 +611,19 @@ ASSERT sb8_3 - (sb3 + 2) = STEP_8 AND sb16_3 - (sb3 + 2) = STEP_16 AND sb_end3 -
 
 \ edge_setup: the edge from vertex e_u to vertex e_w (relative to f_v0) as
 \ chain X's, which starts at line r_y. C = 0 when it crosses no line from
-\ r_y on; otherwise C = 1, with the chain's boundary on line r_y, the line
-\ it ends before and its stepping set, and the loop patched to step it.
-\ Keeps X.
+\ r_y on; otherwise C = 1, with the chain's x on line r_y, the line it ends
+\ before and its gradient set, and the loop patched to step it. Keeps X.
 \
-\ The boundary on line k is p = ceil((x - 8) / 16) of the edge's x at the
-\ line's centre c = 16 k + 8. With dx, dy the edge's extent (dy > 0),
-\ t0 = c - y0 for the first line (0..15) and x0 - 8 = 16 U + w (w 0..15):
-\   dx = a dy + b (b in [0, dy)), W = w + a t0 = 16 W1 + W2 (W2 0..15),
-\   R = W2 dy + b t0, q = ceil(R / (16 dy)) (0, 1 or 2),
-\   p = U + W1 + q, and the error e = q dy - ceil(R / 16), in [0, dy).
-\ That steps exactly (docs/research/raster.md derives it). A 16-bit value's
-\ bits 4-11 are lo16 of its low byte OR its high byte shifted up 4.
+\ tools/model/raster.py's edge_crossings is the rule (decision 21): a
+\ vertical edge's boundary is (x + 7) >> 4; another's x is a DDA in 8.8,
+\ X = 16 (x0 - 8) + 255 + |dx| t0 r >> (12 + s) on the first line (the
+\ offset taken with dx's sign) and the gradient |dx| r >> (8 + s) a line
+\ after, where dy is n 2^s (n in [128, 255], rounded up) and r = 256 + f(n)
+\ its reciprocal, from recipf. The products are quarter squares, by the
+\ maths' tables with f patched in (mulf).
 
-ZA_AUTO1 e_c, e_u, e_w, e_k1, e_n, e_t0, e_wf, e_ux, e_neg, e_p
-ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
+ZA_AUTO1 e_c, e_u, e_w, e_k1, e_t0, e_neg, e_sh
+ZA_AUTO2 e_dx, e_dy, e_x, e_q
 
 .edge_setup
 {
@@ -660,7 +641,6 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
     RTS
 .some
     STA e_k1
-    SBC r_y : STA e_n                   ; (C = 1)
     LDA e_u : CLC : ADC f_v0 : TAX
     \ A vertical edge (the commonest, for a level camera's boxes): its
     \ boundary is ceil((x - 8) / 16) = (x + 7) >> 4 on every line.
@@ -677,127 +657,103 @@ ZA_AUTO2 e_dx, e_dy, e_q, e_r, e_w2, e_e, e_16
     SEC
     RTS
 .sloped
-    \ dy = y1 - y0, dx = x1 - x0 (Y the end vertex, X the start)
+    \ dy = y1 - y0; |dx| = |x1 - x0| and its sign (Y the end vertex, X the
+    \ start)
     SEC
     LDA rs_vyl,Y : SBC rs_vyl,X : STA e_dy
     LDA rs_vyh,Y : SBC rs_vyh,X : STA e_dy+1
     SEC
     LDA rs_vxl,Y : SBC rs_vxl,X : STA e_dx
     LDA rs_vxh,Y : SBC rs_vxh,X : STA e_dx+1
-    \ t0 = (8 - y0) AND 15
-    LDA #SUB DIV 2 : SEC : SBC rs_vyl,X : AND #SUB - 1 : STA e_t0
-    \ x0 + 8 = 16 (U + 1) + w
-    LDA rs_vxl,X : CLC : ADC #SUB DIV 2 : TAY
-    AND #SUB - 1 : STA e_wf
-    LDA rs_vxh,X : ADC #0
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
-    DEC A : STA e_ux
-    LDX e_c
-    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
-    \ |dx| divmod dy, then a, b = floor divmod(dx, dy): for dx < 0,
-    \ a = -q and b = 0 when the remainder is 0, else a = -q - 1, b = dy - r.
-    STZ e_neg
-    LDA e_dx+1 : BPL positive
-    DEC e_neg
+    STA e_neg                           ; (bit 7: dx < 0)
+    BPL positive
     SEC : LDA #0 : SBC e_dx : STA e_dx : LDA #0 : SBC e_dx+1 : STA e_dx+1
 .positive
-    LDA e_dx : CMP e_dy : LDA e_dx+1 : SBC e_dy+1 : BCS shallow
-    \ Steep (|dx| < dy): q = 0, r = |dx|.
-    STZ e_q : STZ e_q+1
-    LDA e_dx : STA e_r : LDA e_dx+1 : STA e_r+1
-    BRA divided
-.shallow
-    JSR divide
-.divided
-    LDA e_neg : BEQ signed
-    LDA e_r : ORA e_r+1 : BEQ signed
-    SEC
-    LDA e_dy : SBC e_r : STA e_r
-    LDA e_dy+1 : SBC e_r+1 : STA e_r+1
-    INC e_q : BNE signed
-    INC e_q+1
-.signed
-    \ e_q = |a|, e_neg its sign, e_r = b. W = w + a t0, signed 16-bit: |a| t0
-    \ is 0 or t0 for a steep edge.
-    LDA e_q+1 : BNE product
-    LDA e_q : CMP #2 : BCS product
-    STZ m_r+1
-    LSR A : LDA #0 : BCC times
-    LDA e_t0
-.times
-    STA m_r
-    BRA a_times
-.product
-    LDA e_q : STA m_v : LDA e_q+1 : STA m_v+1
-    LDA e_t0 : JSR mul4
-.a_times
-    LDA e_neg : BEQ w_pos
-    SEC : LDA #0 : SBC m_r : STA m_r : LDA #0 : SBC m_r+1 : STA m_r+1
-.w_pos
-    CLC
-    LDA m_r : ADC e_wf : TAY
-    AND #SUB - 1 : STA e_wf             ; W2
-    LDA m_r+1 : ADC #0
-    \ p (so far) = U + W1, W1's low byte (the sum is right modulo 256)
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
-    CLC : ADC e_ux : STA e_p
-    \ R = W2 dy + b t0
-    LDA e_dy : STA m_v : LDA e_dy+1 : STA m_v+1
-    LDA e_wf : JSR mul4
-    LDA m_r : STA e_w2 : LDA m_r+1 : STA e_w2+1
-    LDA e_r : STA m_v : LDA e_r+1 : STA m_v+1
-    LDA e_t0 : JSR mul4
-    CLC
-    LDA m_r : ADC e_w2 : STA e_w2
-    LDA m_r+1 : ADC e_w2+1 : STA e_w2+1
-    \ q = (R > 0) + (R > 16 dy); e = q dy - ceil(R / 16)
-    STZ e_e : STZ e_e+1
-    LDA e_w2 : ORA e_w2+1 : BEQ q_done
-    INC e_p
-    LDA e_dy : STA e_e : LDA e_dy+1 : STA e_e+1
-    \ 16 dy (fits: dy <= SUB * VIEW_H)
-    LDA e_dy : ASL A : ASL A : ASL A : ASL A : STA e_16
+    \ t0 = (8 - y0) AND 15, and X0 = 16 (x0 - 8) + 255 = 16 x0 + 127
+    LDA #SUB DIV 2 : SEC : SBC rs_vyl,X : AND #SUB - 1 : STA e_t0
+    LDA rs_vxl,X : STA e_x
+    LDA rs_vxh,X
+    FOR i = 1..4
+        ASL e_x : ROL A
+    NEXT
+    STA e_x+1
+    LDA e_x : CLC : ADC #255 - SUB DIV 2 * 16 : STA e_x
+    BCC normalise
+    INC e_x+1
+.normalise
+    \ dy as n 2^s, n in [128, 255]: e_sh = 8 + s
+    LDY e_dy+1 : BNE wide
     LDY e_dy
-    LDA e_dy+1 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA e_16+1
-    LDA e_16 : CMP e_w2 : LDA e_16+1 : SBC e_w2+1 : BCS q_done   ; 16 dy >= R
-    INC e_p
+    LDA k8,Y : STA e_sh                 ; (8 + s is dy's bit length)
+    LDA nrm,Y
+    BRA normed
+.wide
+    \ dy >= 256: s = the high byte's bit length, n = dy >> s rounded up
+    LDA k8,Y : TAX
+    CLC : ADC #8 : STA e_sh
+    LDA e_dy : STA e_q : STZ e_q+1
+    TYA
+.shr
+    LSR A : ROR e_q
+    BCC kept
+    STX e_q+1                           ; (a bit went: round up)
+.kept
+    DEX : BNE shr
+    LDA e_q+1 : CMP #1                  ; C = a bit went
+    LDA e_q : ADC #0
+    BNE normed
+    INC e_sh                            ; 256: 128 at one more shift
+    LDA #128
+.normed
+    TAY
+    CPY #128 : BNE reciprocal
+    DEC e_sh                            ; (512 v >> sh is 256 v >> sh - 1)
+.reciprocal
+    LDA recipf - 128,Y
+    JSR mulf_set
+    \ The offset: |dx| t0 r >> (12 + s)
+    LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
+    LDA e_t0 : JSR mul4
+    LDA m_r : STA m_v : LDA m_r+1 : STA m_v+1
+    JSR mulf
+    LDA e_sh : CLC : ADC #4 : JSR shr24
+    \ X0 plus or minus it
+    LDA e_neg : BMI minus
     CLC
-    LDA e_e : ADC e_dy : STA e_e
-    LDA e_e+1 : ADC e_dy+1 : STA e_e+1
-.q_done
-    LDA e_p : STA ch_p,X : ZA_INDEXEDBY 0..1
-    \ An edge of one line needn't step.
-    LDA e_n : CMP #2 : BCS steps
+    LDA e_x : ADC m_r : STA e_x
+    LDA e_x+1 : ADC m_r+1 : STA e_x+1
+    BRA placed
+.minus
+    SEC
+    LDA e_x : SBC m_r : STA e_x
+    LDA e_x+1 : SBC m_r+1 : STA e_x+1
+.placed
+    LDX e_c
+    LDA e_x : STA ch_xl,X : ZA_INDEXEDBY 0..1
+    LDA e_x+1 : STA ch_p,X : ZA_INDEXEDBY 0..1
+    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
+    \ An edge of one line needn't step (and one no taller than a line has
+    \ no gradient).
+    SEC : SBC r_y : CMP #2 : BCS steps
     LDA #STEP_NONE : JSR patch_steps
     SEC
     RTS
 .steps
-    \ e -= (R + 15) >> 4
-    CLC
-    LDA e_w2 : ADC #SUB - 1 : TAY
-    LDA e_w2+1 : ADC #0 : STA e_16+1
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA e_16
-    LSR e_16+1 : LSR e_16+1 : LSR e_16+1 : LSR e_16+1
+    \ The gradient: |dx| r >> (8 + s), with dx's sign
+    LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
+    JSR mulf
+    LDA e_sh : JSR shr24
+    LDX e_c
+    LDA e_neg : BMI down
+    LDA m_r : STA ch_gl,X : ZA_INDEXEDBY 0..1
+    LDA m_r+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
+    BRA stepped
+.down
     SEC
-    LDA e_e : SBC e_16 : STA ch_e,X : ZA_INDEXEDBY 0..1
-    LDA e_e+1 : SBC e_16+1 : STA ch_eh,X : ZA_INDEXEDBY 0..1
-    LDA e_r : STA ch_b,X : ZA_INDEXEDBY 0..1
-    LDA e_r+1 : STA ch_bh,X : ZA_INDEXEDBY 0..1
-    LDA e_dy : STA ch_dy,X : ZA_INDEXEDBY 0..1
-    LDA e_dy+1 : STA ch_dyh,X : ZA_INDEXEDBY 0..1
-    \ a and a - 1, signed bytes (|a| < 128 for an edge of two lines or more)
-    LDA e_q
-    LDY e_neg : BEQ a_set
-    EOR #&FF : INC A
-.a_set
-    STA ch_a1,X : ZA_INDEXEDBY 0..1
-    DEC A : STA ch_a,X : ZA_INDEXEDBY 0..1
-    \ The stepping: a byte's error when dy fits a byte.
-    LDA #STEP_8
-    LDY e_dy+1 : BEQ narrow
-    LDA #STEP_16
-.narrow
-    JSR patch_steps
+    LDA #0 : SBC m_r : STA ch_gl,X : ZA_INDEXEDBY 0..1
+    LDA #0 : SBC m_r+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
+.stepped
+    LDA #STEP_G : JSR patch_steps
     SEC
     RTS
 }
@@ -828,34 +784,79 @@ ZA_AUTO2 m_v, m_r
     RTS
 }
 
-\ divide: e_q, e_r = e_dx divmod e_dy, unsigned, e_dx >= e_dy > 0: the
-\ divisor shifted up while it fits, then a bit of the quotient a shift.
-.divide
+\ mulf_set: A = f, mulf's multiplier.
+\ mulf: m_p = m_v (256 + f), 24 bits: m_v f by quarter squares, u f =
+\ f(u + f) - f(u - f) from sq (f(j)) and ng (f(j - 255)) for each byte u
+\ of m_v, f patched into the operands' low bytes (the tables are page-
+\ aligned), and m_v 256 added.
+ZA_AUTO 3, m_p
+ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
+.mulf_set
+    STA mulf.a1+1 : STA mulf.a3+1 : STA mulf.a5+1 : STA mulf.a7+1
+    EOR #&FF
+    STA mulf.a2+1 : STA mulf.a4+1 : STA mulf.a6+1 : STA mulf.a8+1
+    RTS
+.mulf
 {
-    ZA_AUTO1 k
-    ZA_AUTO2 d, t
-    LDA e_dy : STA d : LDA e_dy+1 : STA d+1
-    LDA e_dx : STA e_r : LDA e_dx+1 : STA e_r+1
-    STZ e_q : STZ e_q+1
-    STZ k
-.up
-    LDA d : ASL A : STA t : LDA d+1 : ROL A : STA t+1
-    BCS bits                            ; 2d is past 16 bits, so past r
-    LDA e_r : CMP t : LDA e_r+1 : SBC t+1 : BCC bits
-    LDA t : STA d : LDA t+1 : STA d+1
-    INC k
-    BRA up
-.bits
-    ASL e_q : ROL e_q+1
-    LDA e_r : CMP d : LDA e_r+1 : SBC d+1 : BCC zero
-    STA e_r+1
-    LDA e_r : SEC : SBC d : STA e_r
-    INC e_q
-.zero
-    LSR d+1 : ROR d
-    DEC k : BPL bits
+    LDX m_v
+    SEC
+.a1 LDA sq_lo,X                         ; (the low byte's product)
+.a2 SBC ng_lo,X
+    STA m_p
+.a3 LDA sq_hi,X
+.a4 SBC ng_hi,X
+    STA m_p+1
+    LDX m_v+1
+    SEC
+.a5 LDA sq_lo,X                         ; (the high byte's)
+.a6 SBC ng_lo,X
+    TAY
+.a7 LDA sq_hi,X
+.a8 SBC ng_hi,X
+    STA m_p+2
+    \ + the high byte's product 256, + m_v 256
+    CLC
+    TYA : ADC m_p+1 : STA m_p+1
+    LDA m_p+2 : ADC #0 : STA m_p+2
+    CLC
+    LDA m_p+1 : ADC m_v : STA m_p+1
+    LDA m_p+2 : ADC m_v+1 : STA m_p+2
     RTS
 }
+
+\ shr24: m_r = m_p >> A, A 1..15, the result under 65536.
+.shr24
+{
+    CMP #8 : BCC low
+    \ (C = 1) a byte, then the rest
+    SBC #8 : TAX
+    LDA m_p+1 : STA m_r : LDA m_p+2
+    CPX #0 : BEQ done8
+.bits8
+    LSR A : ROR m_r
+    DEX : BNE bits8
+.done8
+    STA m_r+1
+    RTS
+.low
+    \ fewer than 8: up by 8 - A, and the top two bytes
+    EOR #7 : TAX : INX                  ; 8 - A
+.bitsl
+    ASL m_p : ROL m_p+1 : ROL m_p+2
+    DEX : BNE bitsl
+    LDA m_p+1 : STA m_r
+    LDA m_p+2 : STA m_r+1
+    RTS
+}
+
+\ recipf: f(n) for n = 128..255, with 256 + f(n) <= 65536 / n
+\ (tools/model/raster.py's RECIPF); for n = 128, where that's 512, 0 at one
+\ shift less (edge_setup).
+.recipf
+    EQUB 0
+FOR n = 129..255
+    EQUB 65536 DIV n - 256
+NEXT
 
 \ ---------------------------------------------------------------------------
 \ raster_background: what the faces left, sky on one side of the horizon
