@@ -50,17 +50,26 @@ class View:
 # off, the near clip, the guard band and the 2D clip as before (decisions
 # 15, 17 and 24), to measure the one against the other.
 CONE = True
+# The cone takes no line for an edge with both ends at or behind the eye:
+# the face's image (what's in front of the eye) is inside that edge's
+# plane already, wherever it is. Off, every edge's line.
+BEHIND_EDGES = True
 
 
 def edge_lines(s, m, loop, cs):
     """The screen lines of a face's edges' planes through the eye (clip.py,
     "The cone"): a box's edges along M's columns, any other's from its
-    ends."""
+    ends; and each line's edge, its two vertices' indices. An edge with
+    both ends at or behind the eye (z <= 0) has none: the face's image is
+    inside its plane already (BEHIND_EDGES)."""
     box = s.corner is not None or (s.obj["type"] == objects.RECTANGLE and not s.line)
     lines = []
+    ends = []
     n = len(loop)
     for j in range(n):
         i, k = loop[j], loop[(j + 1) % n]
+        if BEHIND_EDGES and cs[i][2] <= 0 and cs[k][2] <= 0:
+            continue
         if box:
             d = [s.vertices[k][a] - s.vertices[i][a] for a in range(3)]
             axis = next(a for a in range(3) if d[a])
@@ -69,10 +78,23 @@ def edge_lines(s, m, loop, cs):
         else:
             normal = clip.edge_normal(cs[i], cs[k])
         lines.append(clip.screen_line(normal))
-    return lines
+        ends.append((i, k))
+    if FRONT_FIRST:
+        order = sorted(range(len(lines)), key=lambda j: not (cs[ends[j][0]][2] > 0 and cs[ends[j][1]][2] > 0))
+        lines = [lines[j] for j in order]
+        ends = [ends[j] for j in order]
+    return lines, ends
 
 
-def _cone_face(s, m, f, poly, cs, project, tally):
+# The lines of edges with both ends in front come first, then the rest, each
+# in the loop's order: a floor's far edge, say, before its sides, whose
+# lines then mostly cut nothing it hasn't. With side crossings and joins
+# the same point whatever the order, it changes only the general crossings,
+# which it makes rare. Off, the loop's order.
+FRONT_FIRST = True
+
+
+def _cone_face(s, m, f, poly, cs, project, image, tally):
     """One face with the cone on: (its polygon, whether it went through the
     cone or a 3D clip, whether it crossed the view's edges), or None if
     nothing of it is drawn. A polygon the projection takes whole is
@@ -85,7 +107,15 @@ def _cone_face(s, m, f, poly, cs, project, tally):
             every_code = 0xFF
             for v in poly:
                 every_code &= clip.code3(v)
-            out = [] if every_code else clip.cone_clip(edge_lines(s, m, f.loop, cs))
+            if every_code:
+                out = []
+            else:
+                lines, ends = edge_lines(s, m, f.loop, cs)
+                # the lines made, up to one with every corner outside, which
+                # ends the face (not one of counts.KEYS: tools/objectcases.py's)
+                made = next((k + 1 for k, line in enumerate(lines) if clip.corners_out(line) == 4), len(lines))
+                tally["cone_lines"] = tally.get("cone_lines", 0) + made
+                out = clip.cone_clip(lines, ends, image)
             return (out, True, True) if clip.drawable(out) else None
     near = not all(clip.projectable(v) for v in poly)
     if near:
@@ -95,6 +125,9 @@ def _cone_face(s, m, f, poly, cs, project, tally):
         assert all(clip.projectable(v) for v in poly)
         if not poly:
             return None
+    if s.line or s.point:
+        # (a line's or a point's ends, each projected as it's drawn)
+        tally["vertices_numbered"] = tally.get("vertices_numbered", 0) + len(poly)
     flat = [project(v) for v in poly]
     # Wholly beyond one of the view's edges, it isn't drawn; beyond any,
     # it's clipped (clip.outcode2d).
@@ -137,18 +170,29 @@ def draw_faces(cand, m, c, tally, check=False):
             assert cs[i] == transform.cached(transform.mul(m, s.vertices[i]), mc)
     tally["vertices_transformed"] += len(used)
     projected = {}
+    numbered = set()            # (a polygon object's vertices projected, by index)
 
     def project(v):
         if v not in projected:
             projected[v] = parts.project(*v)
         return projected[v]
 
+    def image(i):
+        """Vertex i's view coordinates, if the projection takes it (the
+        cone's joins), else None."""
+        if not clip.projectable(cs[i]):
+            return None
+        numbered.add(i)
+        return project(cs[i])
+
     drawn = []
     for f in cand.faces:
         tally["faces_seen"] += 1
         poly = [cs[i] for i in f.loop]
         if CONE:
-            face = _cone_face(s, m, f, poly, cs, project, tally)
+            if not (s.line or s.point) and all(clip.projectable(v) for v in poly):
+                numbered.update(f.loop)
+            face = _cone_face(s, m, f, poly, cs, project, image, tally)
             if face is None:
                 tally["faces_rejected"] += 1
                 continue
@@ -207,6 +251,8 @@ def draw_faces(cand, m, c, tally, check=False):
             tally["faces_clipped_2d"] += 1
         drawn.append(DrawnFace(cand.index, s.id, f.colour, out, near, bool(any_code)))
     tally["vertices_projected"] += len(projected)
+    # (not one of counts.KEYS: tools/objectcases.py's)
+    tally["vertices_numbered"] = tally.get("vertices_numbered", 0) + len(numbered)
     world = {cs[i]: s.vertices[i] for i in used}
     return drawn, [(world[v], p) for v, p in projected.items() if v in world]
 

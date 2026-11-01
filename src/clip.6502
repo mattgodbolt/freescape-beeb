@@ -68,19 +68,21 @@ SECTION ObjWork
 .vsxh       SKIP VALL
 .vsyl       SKIP VALL
 .vsyh       SKIP VALL
-.fp_idx     SKIP NPOLY              ; the face's loop, as vertex indices
+.fp_idx     SKIP NPOLY              ; the face's loop, as vertex indices (the cone's: the first again after the last)
+.fp_bh      SKIP VMAX + 1           ; the cone's: 1 for a vertex of the loop at or behind the eye, the first again
 \ the 2D polygons, 16-bit coordinates: the clip's passes go from one
-\ buffer to the other and back
+\ buffer to the other and back; each pb array follows its pa array, so
+\ that the cone's passes can take either as theirs by an index's base
 .pa_xl      SKIP NP2
-.pa_xh      SKIP NP2
-.pa_yl      SKIP NP2
-.pa_yh      SKIP NP2
 .pb_xl      SKIP NP2
+.pa_xh      SKIP NP2
 .pb_xh      SKIP NP2
+.pa_yl      SKIP NP2
 .pb_yl      SKIP NP2
+.pa_yh      SKIP NP2
 .pb_yh      SKIP NP2
-.p_fl       SKIP NP2 + 1            ; a pass's f (bound - v, or v - bound) for each
-.p_fh       SKIP NP2 + 1            ; vertex, the first again after the last
+.p_fl       SKIP 2 * NP2 + 1        ; a pass's f (bound - v, or v - bound) for each
+.p_fh       SKIP 2 * NP2 + 1        ; vertex, the first again after the last (either half's)
 .p_n        SKIP 1                  ; the 2D polygon's vertices
 \ the faces drawn, in the order found
 .tf_n       SKIP 1
@@ -100,6 +102,7 @@ SECTION ObjWork
 .vp_off     SKIP 1                  ; the object's vertices the projection can't take
 .vp_need    SKIP 1                  ; ... and those to project, before they are
 .vs_last    SKIP 1                  ; the vertex last projected (vertex_shared), or &FF
+.vp_done    SKIP 1                  ; the object's vertices projected so far
 \ the cone's: the vectors a plane's normal is made from, its lines (the
 \ kept ones' f = A x + B y + C, as A, B and f at the rectangle's corners),
 \ and the f of each vertex of the polygon a line clips (the first again
@@ -112,13 +115,20 @@ SECTION ObjWork
 .lnb0       SKIP NLINES             ; B, 16-bit
 .lnb1       SKIP NLINES
 .lfc        SKIP 16 * NLINES        ; f at corner k, byte b: lfc + 32 k + 8 b
-.cf0        SKIP NP2 + 1
-.cf1        SKIP NP2 + 1
-.cf2        SKIP NP2 + 1
-.cf3        SKIP NP2 + 1
+.cf0        SKIP 2 * NP2 + 1        ; (by the vertex's index, either half's)
+.cf1        SKIP 2 * NP2 + 1
+.cf2        SKIP 2 * NP2 + 1
+.cf3        SKIP 2 * NP2 + 1
 .pa_tg      SKIP NP2                ; the cone's tags: the rectangle's sides a vertex is on
 .pb_tg      SKIP NP2
+.pa_lb      SKIP NP2                ; ... and its edge to the next: LB_SIDE + a side, or a line's slot
+.pb_lb      SKIP NP2
+.ln_v0      SKIP NLINES             ; a kept line's edge: its vertices
+.ln_v1      SKIP NLINES
+.cp_src     SKIP 1                  ; the cone's polygon: at pa (0) or pb (NP2)
 ENDSECTION
+ASSERT pb_xl = pa_xl + NP2 AND pb_xh = pa_xh + NP2 AND pb_yl = pa_yl + NP2 AND pb_yh = pa_yh + NP2
+ASSERT pb_tg = pa_tg + NP2 AND pb_lb = pa_lb + NP2
 
 SECTION ObjOut
 .out_nf     SKIP 1                  ; faces, nearest first
@@ -457,19 +467,104 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
     EQUB LO(-HALF), LO(HALF), LO(HALF), LO(-HALF)
     EQUB HI(-HALF), HI(HALF), HI(HALF), HI(-HALF)
 
+\ The 2D clip is in ObjMore (main RAM, which any bank paged sees), its four
+\ sides' passes each written out, with its crossings (clip_cut) and their
+\ table; lerp and dedupe are ObjCode's.
+ENDSECTION
+SECTION ObjMore
+
 \ clip_cut: r = the crossing's other coordinate, P's + lerp(Q's - P's) by
-\ t from fp >= 0 at P and fq < 0 at Q (16-bit signed each, so fp - fq fits
-\ 16 bits unsigned).
+\ the 2D clip's fraction (the model's crossing_r), from fp >= 0 at P and fq
+\ < 0 at Q (16-bit signed each, so d = fp - fq fits 16 bits unsigned): d's
+\ nine bits from its top one, dn = d >> s (s = bitlen(d) - 9, a shift left
+\ when it's negative), R = 256 + clip_m[dn - 256], and t = fp R >> k, k = s
+\ + 1, at most &FFFF, then patched into lerp's products.
 .clip_cut
 {
     ZA_AUTO2 fp, fq, po, qo, r
-    LDA fp : STA frac16.fp
-    SEC : SBC fq : STA frac16.fd
-    LDA fp+1 : STA frac16.fp+1
-    SBC fq+1 : STA frac16.fd+1
-    STZ frac16.fp+2 : STZ frac16.fp+3
-    STZ frac16.fd+2 : STZ frac16.fd+3
-    JSR frac16
+    ZA_AUTO2 d
+    ZA_AUTO 4, pr
+    ZA_AUTO1 k
+    LDA fp : SEC : SBC fq : STA d
+    LDA fp+1 : SBC fq+1 : STA d+1 : BEQ small
+    \ d >= 256: k = bitlen(d's high byte), 1 to 8, and dn's low byte is d's
+    \ low byte with s = k - 1 of its high byte's bits shifted in from above
+    TAY : LDA proj_bl2,Y : LSR A : STA k
+    TAY : DEY
+    LDA d
+    CPY #0 : BEQ indexed
+.right
+    LSR d+1 : ROR A
+    DEY : BNE right
+    BRA indexed
+.small
+    \ d < 256: k = bitlen(d) - 8, -7 to 0, and dn = d << (1 - k), its top
+    \ bit (the implicit one) shifted out
+    LDY d : LDA proj_bl2,Y : LSR A
+    SEC : SBC #8 : STA k
+    EOR #&FF : TAY : INY : INY
+    LDA d
+.left
+    ASL A
+    DEY : BNE left
+.indexed
+    \ fp R = fp M + 256 fp, M = clip_m[dn - 256], by cone_qs's products
+    TAY : LDA clip_m,Y
+    STA cone_qs.a+1 : STA cone_qs.c+1   ; (QS_SET's)
+    EOR #&FF
+    STA cone_qs.b+1 : STA cone_qs.d+1
+    LDX fp : JSR cone_qs
+    STA pr+1
+    LDA cq_lo : STA pr
+    LDX fp+1 : JSR cone_qs
+    STA pr+2
+    STZ pr+3
+    LDA cq_lo : CLC : ADC pr+1 : STA pr+1
+    BCC carried
+    INC pr+2                            ; (hi(fh M) < 255: no carry on)
+.carried
+    LDA pr+1 : CLC : ADC fp : STA pr+1
+    LDA pr+2 : ADC fp+1 : STA pr+2      ; (fp < 2^15, R < 2^9: no carry on)
+    \ t = fp R >> k: k from 4 up, left 8 - k and a byte down; 1 to 3,
+    \ right k; at most 0, left -k
+    LDA k : BMI up
+    BEQ shifted
+    CMP #4 : BCS byte
+    TAY
+.down
+    LSR pr+3 : ROR pr+2 : ROR pr+1 : ROR pr
+    DEY : BNE down
+    BRA shifted
+.byte
+    LDA #8 : SEC : SBC k : TAY          ; 8 - k, 0 to 4
+    BEQ moved
+.across
+    ASL pr : ROL pr+1 : ROL pr+2 : ROL pr+3
+    DEY : BNE across
+.moved
+    LDA pr+1 : STA pr
+    LDA pr+2 : STA pr+1
+    LDA pr+3 : STA pr+2
+    STZ pr+3
+    BRA shifted
+.up
+    EOR #&FF : TAY : INY                ; -k, 1 to 7
+.lift
+    ASL pr : ROL pr+1 : ROL pr+2 : ROL pr+3
+    DEY : BNE lift
+.shifted
+    \ at most &FFFF, then into lerp's products (lerp.t0, lerp.t1)
+    LDA pr+2 : ORA pr+3 : BEQ fits
+    LDA #&FF : STA pr : STA pr+1
+.fits
+    LDA pr
+    STA lerp.a1+1 : STA lerp.a3+1
+    EOR #&FF
+    STA lerp.a2+1 : STA lerp.a4+1
+    LDA pr+1
+    STA lerp.b1+1 : STA lerp.b3+1
+    EOR #&FF
+    STA lerp.b2+1 : STA lerp.b4+1
     \ Q's - P's, 17 bits signed, as lerp's 32
     LDA qo : SEC : SBC po : STA lerp.ld
     LDA qo+1 : SBC po+1 : STA lerp.ld+1
@@ -477,55 +572,57 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
     LDA #0 : BVC no_overflow
     LDA #&FF
 .no_overflow
-    EOR lerp.ld+1 : ASL A           ; C = the true sign
+    EOR lerp.ld+1 : ASL A               ; C = the true sign
     SEXT : STA lerp.ld+2 : STA lerp.ld+3
     JSR lerp
     LDA lerp.lr : CLC : ADC po : STA r
     LDA lerp.lr+1 : ADC po+1 : STA r+1
     RTS
 }
+\ the 2D clip's reciprocals, less 256 (tools/model/maths.py's CLIP_M)
+.clip_m
+    EQUB CLIP_M
+ASSERT CLIP_RBITS = 9 AND LEN(CLIP_M) = 256
 
-\ The 2D clip is in ObjMore (main RAM, which any bank paged sees), its four
-\ sides' passes each written out; its arithmetic (clip_cut, frac16, lerp)
-\ and dedupe are ObjCode's.
-ENDSECTION
-SECTION ObjMore
 
-\ CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below: one side of
-\ the view's rectangle (the model's _clip_edge), from the source buffer (its
-\ arrays on the side's axis, then the other) to the destination: keep the
-\ axis's coordinate <= bound if below, else >= bound (which is 0); a
-\ crossing from the edge's inside end.
-MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
-    LDX #0
+\ CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below: one side of the view's
+\ rectangle (the model's _clip_edge), from the polygon's half of the pa and
+\ pb arrays (clip2d.src: 0 or NP2) to the other: its arrays on the side's
+\ axis, then the other's; keep the axis's coordinate <= bound if below,
+\ else >= bound (which is 0); a crossing from the edge's inside end. Z set
+\ if nothing's left.
+MACRO CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below
+    LDX clip2d.src
+    TXA : CLC : ADC p_n : STA clip2d.end
 .f
     IF below
-        LDA #LO(bound) : SEC : SBC sal,X : STA p_fl,X
-        LDA #HI(bound) : SBC sah,X : STA p_fh,X
+        LDA #LO(bound) : SEC : SBC sa_l,X : STA p_fl,X
+        LDA #HI(bound) : SBC sa_h,X : STA p_fh,X
     ELSE
         ASSERT bound = 0
-        LDA sal,X : STA p_fl,X
-        LDA sah,X : STA p_fh,X
+        LDA sa_l,X : STA p_fl,X
+        LDA sa_h,X : STA p_fh,X
     ENDIF
-    INX : CPX p_n : BNE f
-    LDA p_fl : STA p_fl,X               ; the first again after the last
-    LDA p_fh : STA p_fh,X
-    STZ clip2d.m
-    LDX #0
+    INX : CPX clip2d.end : BNE f
+    LDY clip2d.src                      ; the first again after the last
+    LDA p_fl,Y : STA p_fl,X
+    LDA p_fh,Y : STA p_fh,X
+    LDA #NP2 : SEC : SBC clip2d.src : STA clip2d.m
+    TYA : TAX
 .vertex
     STX clip2d.i
     LDA p_fh,X : BMI a_out
     LDY clip2d.m
-    LDA sal,X : STA dal,Y
-    LDA sah,X : STA dah,Y
-    LDA sol,X : STA dol,Y
-    LDA soh,X : STA doh,Y
+    LDA sa_l,X : STA sa_l,Y
+    LDA sa_h,X : STA sa_h,Y
+    LDA so_l,X : STA so_l,Y
+    LDA so_h,X : STA so_h,Y
     INC clip2d.m
     LDA p_fh+1,X : BPL next             ; both in
     \ the crossing from a (X) to b
     STX clip2d.ip
-    INX : CPX p_n : BNE b_set
-    LDX #0
+    INX : CPX clip2d.end : BNE b_set
+    LDX clip2d.src
 .b_set
     STX clip2d.iq
     BRA cut
@@ -533,8 +630,8 @@ MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
     LDA p_fh+1,X : BMI next             ; both out
     \ the crossing from b to a (X)
     STX clip2d.iq
-    INX : CPX p_n : BNE p_set
-    LDX #0
+    INX : CPX clip2d.end : BNE p_set
+    LDX clip2d.src
 .p_set
     STX clip2d.ip
 .cut
@@ -543,78 +640,78 @@ MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
     LDA p_fh,X : STA clip_cut.fp+1
     LDA p_fl,Y : STA clip_cut.fq
     LDA p_fh,Y : STA clip_cut.fq+1
-    LDA sol,X : STA clip_cut.po
-    LDA soh,X : STA clip_cut.po+1
-    LDA sol,Y : STA clip_cut.qo
-    LDA soh,Y : STA clip_cut.qo+1
+    LDA so_l,X : STA clip_cut.po
+    LDA so_h,X : STA clip_cut.po+1
+    LDA so_l,Y : STA clip_cut.qo
+    LDA so_h,Y : STA clip_cut.qo+1
     JSR clip_cut
     LDY clip2d.m
-    LDA #LO(bound) : STA dal,Y
-    LDA #HI(bound) : STA dah,Y
-    LDA clip_cut.r : STA dol,Y
-    LDA clip_cut.r+1 : STA doh,Y
+    LDA #LO(bound) : STA sa_l,Y
+    LDA #HI(bound) : STA sa_h,Y
+    LDA clip_cut.r : STA so_l,Y
+    LDA clip_cut.r+1 : STA so_h,Y
     INC clip2d.m
 .next
-    LDX clip2d.i : INX : CPX p_n : BEQ finished
+    LDX clip2d.i : INX : CPX clip2d.end : BEQ finished
     JMP vertex
 .finished
-    LDA clip2d.m : STA p_n
+    \ the other half's now
+    LDA #NP2 : SEC : SBC clip2d.src : STA clip2d.src
+    LDA clip2d.m : SEC : SBC clip2d.src : STA p_n
 ENDMACRO
 ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 
-\ clip2d: the polygon clipped to the view's rectangle, [0, CLIP_W] x [0,
-\ CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges a
-\ vertex is beyond (OC_*): the passes for the others are skipped, as they'd
-\ change nothing (a crossing lies between its edge's ends, so it isn't
-\ beyond an edge neither of them is). Each pass goes from pa to pb, and
-\ back.
+\ clip2d: the polygon in pa clipped to the view's rectangle, [0, CLIP_W] x
+\ [0, CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges
+\ a vertex is beyond (OC_*): the passes for the others are skipped, as
+\ they'd change nothing (a crossing lies between its edge's ends, so it
+\ isn't beyond an edge neither of them is). Each pass writes the other half
+\ of the pa and pb arrays; the polygon comes back to pa at the end.
 .clip2d
 {
-    ZA_AUTO1 m, i, ip, iq, edges
+    ZA_AUTO1 m, i, ip, iq, edges, src, end
     STA edges
+    STZ src
     LDA #OC_LEFT : BIT edges : BNE pass1
     JMP pass2
 .pass1
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, 0, FALSE
-    JSR back
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, 0, FALSE
     BNE pass2
     RTS
 .pass2
     LDA #OC_RIGHT : BIT edges : BNE pass2_do
     JMP pass3
 .pass2_do
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, CLIP_W, TRUE
-    JSR back
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
     BNE pass3
     RTS
 .pass3
     LDA #OC_TOP : BIT edges : BNE pass3_do
     JMP pass4
 .pass3_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, 0, FALSE
-    JSR back
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, 0, FALSE
     BNE pass4
     RTS
 .pass4
     LDA #OC_BOTTOM : BIT edges : BNE pass4_do
-    JMP dedupe
+    JMP passed
 .pass4_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, CLIP_H, TRUE
-    JSR back
-    JMP dedupe
-\ back: pb's polygon to pa; Z set if it's empty
-.back
-    LDX p_n : BEQ empty
-.copy
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
+    BNE passed
+    RTS
+.passed
+    \ in pb: down to pa
+    LDA src : BEQ in_pa
+    LDX p_n
+.down
     DEX
     LDA pb_xl,X : STA pa_xl,X
     LDA pb_xh,X : STA pa_xh,X
     LDA pb_yl,X : STA pa_yl,X
     LDA pb_yh,X : STA pa_yh,X
-    TXA : BNE copy
-    LDA p_n
-.empty
-    RTS
+    TXA : BNE down
+.in_pa
+    JMP dedupe
 }
 
 ENDSECTION
@@ -1815,7 +1912,8 @@ ENDMACRO
 \ line's own, and a side's the corner's at its start plus a product (A x
 \ along the top and bottom, B y down the left and right); any other's two
 \ products. (Every way gives the same f, the tag only the shortest.) Its A
-\ and B in the readers (cone_line). Y is kept.
+\ and B in the readers (cone_line). Y is kept, and A is f's top byte
+\ (cf3,Y: every way's last store).
 .cone_eval
     LDX pa_tg,Y
     JMP (ce_jump,X)
@@ -1853,36 +1951,90 @@ ASSERT OC_LEFT = 2 AND OC_RIGHT = 4 AND OC_TOP = 8 AND OC_BOTTOM = 16
 ZA_AUTO 4, ce_t
 ZA_AUTO1 cp_line                        ; the line cone_pass clips by
 
-\ CC_AXIS sl, sh, dl, dh: cone_cut's new vertex on one axis: P + lerp(Q -
-\ P), straight across when they're the same
-MACRO CC_AXIS sl, sh, dl, dh
+\ CC_AXIS sl, sh: cone_cut's new vertex on one axis: P + lerp(Q - P),
+\ straight across when they're the same
+MACRO CC_AXIS sl, sh
     LDX cone_cut.ip : LDY cone_cut.iq
     LDA sl,Y : SEC : SBC sl,X : STA lerp.ld
     LDA sh,Y : SBC sh,X : STA lerp.ld+1
     ORA lerp.ld : BNE across
-    LDY cone_pass_rect.m
-    LDA sl,X : STA dl,Y
-    LDA sh,X : STA dh,Y
+    LDY cp_m
+    LDA sl,X : STA sl,Y
+    LDA sh,X : STA sh,Y
     BRA done
 .across
     LDA lerp.ld+1 : ASL A : SEXT        ; (inside the rectangle: 12 bits)
     STA lerp.ld+2 : STA lerp.ld+3
     JSR lerp
-    LDY cone_pass_rect.m : LDX cone_cut.ip
-    LDA lerp.lr : CLC : ADC sl,X : STA dl,Y
-    LDA lerp.lr+1 : ADC sh,X : STA dh,Y
+    LDY cp_m : LDX cone_cut.ip
+    LDA lerp.lr : CLC : ADC sl,X : STA sl,Y
+    LDA lerp.lr+1 : ADC sh,X : STA sh,Y
 .done
 ENDMACRO
 
-\ cone_cut: pb's vertex cone_pass_rect.m = the crossing (the model's crossing)
-\ from pa's vertex X, inside the line (cf >= 0), to pa's vertex Y, outside;
-\ its tag the sides both are on.
+\ CLAMP sl, sh, dl, dh, top: d,Y (16-bit) = s,X (16-bit, signed) clamped
+\ to [0, top]
+MACRO CLAMP sl, sh, dl, dh, top
+    LDA sh,X : BMI low
+    CMP #HI(top) : BCC within : BNE high
+    LDA sl,X : CMP #LO(top) : BCC within : BEQ within
+.high
+    LDA #LO(top) : STA dl,Y
+    LDA #HI(top) : STA dh,Y
+    BRA done
+.low
+    LDA #0 : STA dl,Y : STA dh,Y
+    BRA done
+.within
+    LDA sl,X : STA dl,Y
+    LDA sh,X : STA dh,Y
+.done
+ENDMACRO
+
+\ The cone's polygon is in one half of the pa and pb arrays and a pass
+\ writes the other, its vertices indexed with their half's base (cp_src, 0
+\ or NP2): pa_xl,X for vertex X is pb's when X >= NP2.
+
+\ cone_cut: the polygon's vertex cp_m = where its edge labelled
+\ cc_edge (a side, or the line it lies along), from vertex X, inside line
+\ cp_line (cf >= 0), to vertex Y, outside, crosses that line, labelled
+\ cc_new (the model's _cone_pass): on a side, the line's own crossing with
+\ it (side_cut); along the line of an edge sharing a vertex with cp_line's,
+\ that vertex's image if the projection takes it (projected now if it
+\ wasn't), clamped to the rectangle; else the model's crossing, its tag the
+\ sides both ends are on.
 .cone_cut
 {
     ZA_AUTO1 ip, iq
     STX ip : STY iq
+    LDY cp_m
+    LDA cc_new : STA pa_lb,Y
+    LDA cc_edge : BPL along
+    AND #3 : TAY
+    JMP side_cut
+.along
+    \ along line slot cc_edge: consecutive edges share a vertex
+    TAX : LDY cp_line
+    LDA ln_v1,X : CMP ln_v0,Y : BEQ shared
+    LDA ln_v1,Y : CMP ln_v0,X : BEQ shared
+.not_joined
+    JMP general
+.shared
+    TAX : LDA bit8,X : BIT vp_off : BNE not_joined
+    BIT vp_done : BNE projected
+    TSB vp_done
+    JSR vertex_shared
+    STX vs_last
+.projected
+    LDY cp_m
+    LDA #0 : STA pa_tg,Y
+    CLAMP vsxl, vsxh, pa_xl, pa_xh, CLIP_W
+    CLAMP vsyl, vsyh, pa_yl, pa_yh, CLIP_H
+    RTS
+.general
+    LDX ip : LDY iq
     LDA pa_tg,X : AND pa_tg,Y
-    LDY cone_pass_rect.m : STA pb_tg,Y
+    LDY cp_m : STA pa_tg,Y
     LDY iq
     LDA cf0,X : STA frac16.fp
     SEC : SBC cf0,Y : STA frac16.fd
@@ -1893,88 +2045,154 @@ ENDMACRO
     LDA cf3,X : STA frac16.fp+3
     SBC cf3,Y : STA frac16.fd+3
     JSR frac16
-    CC_AXIS pa_xl, pa_xh, pb_xl, pb_xh
-    CC_AXIS pa_yl, pa_yh, pb_yl, pb_yh
+    CC_AXIS pa_xl, pa_xh
+    CC_AXIS pa_yl, pa_yh
     RTS
 }
+ZA_AUTO1 cc_edge, cc_new
+ZA_AUTO1 cp_m                           ; the vertex a pass writes next
+LB_SIDE = &80                           ; a label: the rectangle's side k is LB_SIDE + k
+ASSERT NLINES < LB_SIDE
 
-\ cone_pass: pa's polygon (p_n vertices, tagged) clipped to line X (the
-\ model's _clip_poly), through pb and back: p_n left, Z set if none.
-\ cone_pass_rect: the same for the rectangle, its corners' f the line's.
+\ cone_pass: the polygon (p_n vertices, tagged and labelled, in cp_src's
+\ half) clipped to line X (the model's _cone_pass) into the other half,
+\ which cp_src then names: p_n left, Z set if none. With every vertex
+\ inside the line, it's left where it is, as it was.
 .cone_pass
-    JSR cone_line
-.cone_pass_rect
 {
-    ZA_AUTO1 m, i
+    ZA_AUTO1 i, end, outs
+    JSR cone_line
     STX cp_line
-    LDY #0
+    STZ outs
+    LDA cp_src : TAY : CLC : ADC p_n : STA end
 .f
     JSR cone_eval
-    INY : CPY p_n : BNE f
-    LDA cf0 : STA cf0,Y                 ; the first again after the last
-    LDA cf1 : STA cf1,Y
-    LDA cf2 : STA cf2,Y
-    LDA cf3 : STA cf3,Y
-    STZ m
-    LDX #0
+    ORA outs : STA outs                 ; (f's sign)
+    INY : CPY end : BNE f
+    BIT outs : BMI some_out
+    LDA p_n                             ; (none: Z clear)
+    RTS
+.some_out
+    LDX cp_src                          ; the first again after the last
+    LDA cf0,X : STA cf0,Y
+    LDA cf1,X : STA cf1,Y
+    LDA cf2,X : STA cf2,Y
+    LDA cf3,X : STA cf3,Y
+    LDA #NP2 : SEC : SBC cp_src : STA cp_m
 .vertex
     STX i
+    LDA pa_lb,X : STA cc_edge           ; (its edge to the next)
     LDA cf3,X : BMI a_out
-    LDY m
-    LDA pa_xl,X : STA pb_xl,Y
-    LDA pa_xh,X : STA pb_xh,Y
-    LDA pa_yl,X : STA pb_yl,Y
-    LDA pa_yh,X : STA pb_yh,Y
-    LDA pa_tg,X : STA pb_tg,Y
-    INC m
+    LDY cp_m
+    LDA pa_xl,X : STA pa_xl,Y
+    LDA pa_xh,X : STA pa_xh,Y
+    LDA pa_yl,X : STA pa_yl,Y
+    LDA pa_yh,X : STA pa_yh,Y
+    LDA pa_tg,X : STA pa_tg,Y
+    LDA cc_edge : STA pa_lb,Y
+    INC cp_m
     LDA cf3+1,X : BPL next              ; both in
-    \ from a (X) to b
-    INX : CPX p_n : BNE b_set
-    LDX #0
+    \ from a (X) to b: the crossing's edge is along this line
+    LDA cp_line : STA cc_new
+    INX : CPX end : BNE b_set
+    LDX cp_src
 .b_set
     TXA : TAY : LDX i
     BRA cut
 .a_out
     LDA cf3+1,X : BMI next              ; both out
-    \ from b to a (X)
+    \ from b to a (X): the crossing's edge goes on along this one
+    LDA cc_edge : STA cc_new
     TXA : TAY
-    INX : CPX p_n : BNE p_set
-    LDX #0
+    INX : CPX end : BNE p_set
+    LDX cp_src
 .p_set
 .cut
     JSR cone_cut
-    INC m
+    INC cp_m
 .next
-    LDX i : INX : CPX p_n : BNE vertex
-    \ pb back to pa
-    LDX m : STX p_n : BEQ empty
-.copy
-    DEX
-    LDA pb_xl,X : STA pa_xl,X
-    LDA pb_xh,X : STA pa_xh,X
-    LDA pb_yl,X : STA pa_yl,X
-    LDA pb_yh,X : STA pa_yh,X
-    LDA pb_tg,X : STA pa_tg,X
-    TXA : BNE copy
-    LDA p_n
-.empty
+    LDX i : INX : CPX end : BNE vertex
+    \ the other half's now
+    LDA #NP2 : SEC : SBC cp_src : STA cp_src
+    LDA cp_m : SEC : SBC cp_src : STA p_n
     RTS
 }
+
+\ The rectangle's corner k, (0, 0), (W, 0), (W, H) and (0, H), and its tag
+FUNCTION RECT_X(k) = WHERE(k = 1 OR k = 2, CLIP_W, 0)
+FUNCTION RECT_Y(k) = WHERE(k >= 2, CLIP_H, 0)
+FUNCTION RECT_TG(k) = WHERE(k = 1 OR k = 2, OC_RIGHT, OC_LEFT) OR WHERE(k >= 2, OC_BOTTOM, OC_TOP)
+
+\ CF_CORNER k: cone_first's corner k, and its side's crossing if its ends
+\ are either side of the line (the rectangle's own pass of the model's
+\ _cone_pass, from the corners' signs)
+MACRO CF_CORNER k
+    LDX cp_line
+    LDA lfc + 32 * k + 24,X : BMI out
+    LDY cp_m
+    LDA #LO(RECT_X(k)) : STA pa_xl,Y
+    LDA #HI(RECT_X(k)) : STA pa_xh,Y
+    LDA #LO(RECT_Y(k)) : STA pa_yl,Y
+    LDA #HI(RECT_Y(k)) : STA pa_yh,Y
+    LDA #RECT_TG(k) : STA pa_tg,Y
+    LDA #LB_SIDE + k : STA pa_lb,Y
+    INY : STY cp_m
+    LDA lfc + 32 * ((k + 1) MOD 4) + 24,X : BPL done
+    TXA                                 ; (on from the corner: along the line)
+    BRA cut
+.out
+    LDA lfc + 32 * ((k + 1) MOD 4) + 24,X : BMI done
+    LDA #LB_SIDE + k                    ; (on to the next corner: along the side)
+.cut
+    LDY cp_m : STA pa_lb,Y
+    LDY #k : JSR side_cut
+    INC cp_m
+.done
+ENDMACRO
+
+\ cone_first: the rectangle clipped to line X, into pa (the model's
+\ _cone_pass on the rectangle): each corner inside it, and each side's
+\ crossing where its corners are either side. Z set if none's left.
+.cone_first
+    STX cp_line
+    STZ cp_src
+    STZ cp_m
+    CF_CORNER 0
+    CF_CORNER 1
+    CF_CORNER 2
+    CF_CORNER 3
+    LDA cp_m : STA p_n
+    RTS
 
 \ cone_face: face X of the object being drawn, the projection unable to
 \ take some vertex of it, as the cone's polygon in pa (p_n vertices, its
 \ repeats dropped): C clear if nothing's left. (render.py's draw_faces and
-\ clip.py's cone_clip.)
+\ edge_lines, and clip.py's cone_clip.) An edge with both ends at or behind
+\ the eye (z <= 0) has no line; the lines of those with both in front come
+\ first, then those with one, each in the loop's order.
 .cone_face
 {
-    ZA_AUTO1 face, n, j, every, nl
+    ZA_AUTO1 face, n, j, every, nl, vi, vk, phase
     STX face
     LDA fa_nv,X : STA n
     LDY fa_loop,X
     LDX #0
 .index
     LDA lp_table,Y : STA fp_idx,X
+    \ fp_bh: 1 if it's at or behind the eye (z <= 0)
+    PHY : TAY
+    LDA vz2,Y : BMI behind
+    ORA vz1,Y : ORA vz0,Y : BEQ behind
+    LDA #0
+    BRA placed
+.behind
+    LDA #1
+.placed
+    STA fp_bh,X
+    PLY
     INY : INX : CPX n : BNE index
+    LDA fp_idx : STA fp_idx,X           ; the first again after the last
+    LDA fp_bh : STA fp_bh,X
     \ every vertex in one of code3's half-spaces: not seen (the AND is
     \ settled once it's 0)
     LDA #&FF : STA every
@@ -1986,37 +2204,36 @@ ENDMACRO
     INX : CPX n : BNE code
     JMP none
 .coded
-    \ each edge's line, kept if it cuts the rectangle
+    \ each edge's line, kept if it cuts the rectangle: in phase 0 those with
+    \ both ends in front, in phase 1 those with one behind (an edge's ends
+    \ behind, counted, is its phase)
     STZ nl
+    STZ phase
+.phases
     STZ j
 .edge
-    LDX j : LDA fp_idx,X : PHA
-    INX : CPX n : BNE no_wrap
-    LDX #0
-.no_wrap
-    LDY fp_idx,X
-    PLX
+    LDX j
+    LDA fp_bh,X : CLC : ADC fp_bh+1,X : CMP phase : BNE passed
+    LDA fp_idx+1,X : STA vk : TAY
+    LDA fp_idx,X : STA vi : TAX
     JSR edge_normal
     LDX nl
     JSR edge_line
     CMP #4 : BEQ none                   ; (every corner out)
     CMP #0 : BEQ passed                 ; (every corner in: it cuts nothing)
+    LDX nl
+    LDA vi : STA ln_v0,X
+    LDA vk : STA ln_v1,X
     INC nl
 .passed
     INC j : LDA j : CMP n : BNE edge
+    LDA phase : BNE made
+    INC phase : BRA phases
+.made
     \ the rectangle, clipped by each line kept
-    LDX #3
-.corner
-    LDA rect_x,X : STA pa_xl,X
-    LDA rect_x+4,X : STA pa_xh,X
-    LDA rect_y,X : STA pa_yl,X
-    LDA rect_y+4,X : STA pa_yh,X
-    LDA rect_tg,X : STA pa_tg,X
-    DEX : BPL corner
-    LDA #4 : STA p_n
-    LDA nl : BEQ clipped
+    LDA nl : BEQ whole
     LDX #0
-    JSR cone_pass_rect
+    JSR cone_first
     BEQ none
     LDA #1 : STA j
 .line
@@ -2024,22 +2241,165 @@ ENDMACRO
     JSR cone_pass
     BEQ none
     INC j : BRA line
-.clipped
-    JSR dedupe
-    SEC
-    RTS
 .none
     CLC
     RTS
+.whole
+    LDX #3
+.corner
+    LDA rect_x,X : STA pa_xl,X
+    LDA rect_x+4,X : STA pa_xh,X
+    LDA rect_y,X : STA pa_yl,X
+    LDA rect_y+4,X : STA pa_yh,X
+    DEX : BPL corner
+    LDA #4 : STA p_n
+    BRA deduped
+.clipped
+    \ in pb: down to pa
+    LDA cp_src : BEQ in_pa
+    LDX p_n
+.down
+    DEX
+    LDA pb_xl,X : STA pa_xl,X
+    LDA pb_xh,X : STA pa_xh,X
+    LDA pb_yl,X : STA pa_yl,X
+    LDA pb_yh,X : STA pa_yh,X
+    TXA : BNE down
+.in_pa
+    JSR dedupe
+.deduped
+    SEC
+    RTS
 .rect_x
-    EQUB LO(0), LO(CLIP_W), LO(CLIP_W), LO(0)
-    EQUB HI(0), HI(CLIP_W), HI(CLIP_W), HI(0)
+    EQUB LO(RECT_X(0..3))
+    EQUB HI(RECT_X(0..3))
 .rect_y
-    EQUB LO(0), LO(0), LO(CLIP_H), LO(CLIP_H)
-    EQUB HI(0), HI(0), HI(CLIP_H), HI(CLIP_H)
-.rect_tg
-    EQUB OC_LEFT OR OC_TOP, OC_RIGHT OR OC_TOP, OC_RIGHT OR OC_BOTTOM, OC_LEFT OR OC_BOTTOM
+    EQUB LO(RECT_Y(0..3))
+    EQUB HI(RECT_Y(0..3))
 }
+ENDSECTION
+SECTION ObjMore
+
+\ SC_STEP: a step of side_cut's division: the next dividend bit from sc_l's
+\ top into the remainder (sc_r and A), the last quotient bit (C) into sc_l's
+\ bottom, and the divisor taken off if it goes (C set).
+MACRO SC_STEP
+    ROL sc_l : ROL sc_l+1
+    ROL sc_r : ROL A
+    CMP sc_a+1 : BCC zero : BNE one
+    LDY sc_r : CPY sc_a : BCC zero
+.one
+    TAY
+    LDA sc_r : SBC sc_a : STA sc_r      ; (C set)
+    TYA : SBC sc_a+1
+    SEC
+.zero
+ENDMACRO
+
+\ side_cut: the cone's vertex cp_m = where line cp_line crosses side
+\ Y of the rectangle (0 top, 1 right, 2 bottom, 3 left), which it cuts (the
+\ model's side_crossing): from the side's corner K inside the line (f >= 0),
+\ d = (f(K) + (a >> 1)) DIV a along it, a = |A| along the top and bottom
+\ and |B| down the sides, which is f(K) / a rounded half up; tagged with
+\ the side. f(K) < a W (the side's other corner is outside), so d has
+\ eleven bits and D >> 11 is under a: eleven steps of a long division.
+.side_cut
+{
+    ZA_AUTO1 side, flip
+    ZA_AUTO 4, dv
+    STY side
+    \ K: the side's first corner (corner Y) if f >= 0 there, else the next;
+    \ the coordinate along the side is d from the side's start (top, right)
+    \ or its end (bottom, left), the other way from the second corner
+    TYA : LSR A : AND #1 : STA flip     ; (sides 2 and 3: from the end)
+    TYA : ASL A : ASL A : ASL A : ASL A : ASL A
+    ORA cp_line : TAX                   ; lfc's index for corner Y
+    LDA lfc + 24,X : BPL first
+    TXA : CLC : ADC #32 : AND #127 : TAX
+    LDA flip : EOR #1 : STA flip
+.first
+    LDA lfc,X : STA dv
+    LDA lfc + 8,X : STA dv+1
+    LDA lfc + 16,X : STA dv+2
+    LDA lfc + 24,X : STA dv+3
+    \ a
+    LDX cp_line
+    LDA side : LSR A : BCS sides
+    LDA lna1,X : BPL a_pos
+    LDA #0 : SEC : SBC lna0,X : STA sc_a
+    LDA #0 : SBC lna1,X : STA sc_a+1
+    BRA got_a
+.a_pos
+    STA sc_a+1
+    LDA lna0,X : STA sc_a
+    BRA got_a
+.sides
+    LDA lnb1,X : BPL b_pos
+    LDA #0 : SEC : SBC lnb0,X : STA sc_a
+    LDA #0 : SBC lnb1,X : STA sc_a+1
+    BRA got_a
+.b_pos
+    STA sc_a+1
+    LDA lnb0,X : STA sc_a
+.got_a
+    \ D = f(K) + (a >> 1), then D << 5 as D << 8 >> 3: the remainder starts
+    \ at D >> 11 (sc_r and A), and D's low eleven bits at sc_l's top
+    LDA sc_a+1 : LSR A : TAY
+    LDA sc_a : ROR A
+    CLC : ADC dv : STA dv
+    TYA : ADC dv+1 : STA dv+1
+    BCC added
+    INC dv+2
+    BNE added
+    INC dv+3
+.added
+    STZ sc_l
+    FOR k = 1..3
+        LSR dv+3 : ROR dv+2 : ROR dv+1 : ROR dv : ROR sc_l
+    NEXT
+    LDA dv : STA sc_l+1
+    LDA dv+1 : STA sc_r
+    LDA dv+2
+    CLC
+    FOR k = 1..11
+        SC_STEP
+    NEXT
+    ROL sc_l : ROL sc_l+1               ; (d: eleven bits)
+    \ the point: d, or W less it, along the side
+    LDA flip : BEQ along
+    LDA #LO(CLIP_W) : SEC : SBC sc_l : STA sc_l
+    LDA #HI(CLIP_W) : SBC sc_l+1 : STA sc_l+1
+.along
+    LDY cp_m
+    LDX side
+    LDA sc_tag,X : STA pa_tg,Y
+    TXA : LSR A : BCS on_y
+    LDA sc_l : STA pa_xl,Y
+    LDA sc_l+1 : STA pa_xh,Y
+    LDA sc_fixl,X : STA pa_yl,Y
+    LDA sc_fixh,X : STA pa_yh,Y
+    RTS
+.on_y
+    LDA sc_l : STA pa_yl,Y
+    LDA sc_l+1 : STA pa_yh,Y
+    LDA sc_fixl,X : STA pa_xl,Y
+    LDA sc_fixh,X : STA pa_xh,Y
+    RTS
+\ by side: its tag, and its other coordinate (y on the top and bottom, x
+\ on the right and left)
+.sc_tag
+    EQUB OC_TOP, OC_RIGHT, OC_BOTTOM, OC_LEFT
+.sc_fixl
+    EQUB LO(0), LO(CLIP_W), LO(CLIP_H), LO(0)
+.sc_fixh
+    EQUB HI(0), HI(CLIP_W), HI(CLIP_H), HI(0)
+}
+ZA_AUTO2 sc_l, sc_a
+ZA_AUTO1 sc_r
+ASSERT CLIP_W = CLIP_H AND CLIP_W < 2048    ; (d has eleven bits whichever side)
+ASSERT NLINES <= 32                         ; (lfc's index: 32 corner + slot)
+ENDSECTION
+SECTION ObjCode
 
 \ ===========================================================================
 \ The vertex pass: which of the object's vertices the projection takes,
@@ -2184,6 +2544,7 @@ ZA_AUTO1 band_t
     INX
     LDA mask : BNE need
 .needed
+    LDA vp_need : STA vp_done           ; (the cone projects more as it needs them)
     \ the order
     LDX of_slot
     LDA ob_flags,X : AND #K_MASK : TAY
@@ -2366,6 +2727,7 @@ VP_CUBOID = 0 : VP_RECT = 8 : VP_GENERIC = 20
     EQUB 0, 1, 2, 3, 4, 5, 6, 7         ; anything else
 ASSERT VMAX = 8
 ASSERT CONE                             ; (the model's render.CONE: the 6502 has only it)
+ASSERT BEHIND_EDGES AND FRONT_FIRST AND SIDE_CROSSINGS AND JOINS AND RECIP_2D   ; (and these)
 \ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
 \ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
 \ bytes and the mask of the bits from k + 1 up.

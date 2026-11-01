@@ -64,6 +64,10 @@ def consts():
         "\\ twice the bit length of each byte, for the projection's dispatch",
         blist("PROJ_BL2", [2 * b.bit_length() for b in range(256)]),
         "",
+        "\\ the 2D clip's reciprocals less 256, for d's nine bits dn = 256..511",
+        f"CLIP_RBITS = {m.CLIP_RBITS}",
+        blist("CLIP_M", m.CLIP_M),
+        "",
     ])
 
 

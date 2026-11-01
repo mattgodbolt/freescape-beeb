@@ -71,6 +71,19 @@ class Crossings(unittest.TestCase):
             exact = (fp << clip.T_BITS) // (fp - fq)
             self.assertLessEqual(abs(t - exact), 2)
 
+    def test_reciprocal_fraction(self):
+        """The 2D clip's fraction by a reciprocal: within 2^-8 of the exact
+        one, and every d's nine bits in the table."""
+        self.assertEqual(clip.crossing_r(0, -5), 0)
+        rng = random.Random(29)
+        for _ in range(20000):
+            d = rng.randint(1, (1 << 16) - 1)
+            fp = rng.randint(0, d - 1)
+            t = clip.crossing_r(fp, fp - d)
+            self.assertTrue(0 <= t < 1 << clip.T_BITS)
+            exact = (fp << clip.T_BITS) / d
+            self.assertLessEqual(abs(t - exact), exact / 256 + 1)
+
     def test_lerp_rounds_half_up(self):
         h = 1 << (clip.T_BITS - 1)
         self.assertEqual(clip.lerp(0, 1, h), 1)
@@ -196,6 +209,86 @@ class Cone(unittest.TestCase):
                 self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in flat), 12)
             checked += 1
         self.assertGreater(checked, 100)
+
+    def test_joins_match_the_projection(self):
+        """With its edges' ends and its vertices' images, where the edges'
+        lines meet is each vertex's image: the polygon is the same face to
+        within the projection's error."""
+        from tools.model import parts
+        rng = random.Random(41)
+        checked = 0
+        for _ in range(400):
+            quad = self.face(rng)
+            if quad is None or not all(clip.projectable(v) for v in quad):
+                continue
+            lines = [clip.screen_line(clip.edge_normal(quad[i], quad[(i + 1) % 4])) for i in range(4)]
+            ends = [(i, (i + 1) % 4) for i in range(4)]
+            cone = clip.cone_clip(lines, ends, lambda i: parts.project(*quad[i]))
+            flat = clip.clip2d([parts.project(*v) for v in quad])
+            self.assertEqual(clip.drawable(cone), clip.drawable(flat))
+            if not cone or not flat:
+                continue
+            for p in cone:
+                self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in flat), 12)
+            checked += 1
+        self.assertGreater(checked, 100)
+
+    def test_side_crossing(self):
+        """A line's crossing with a side is its exact crossing rounded half
+        up from the corner inside it, whichever way the line faces."""
+        from fractions import Fraction
+        rng = random.Random(61)
+        checked = 0
+        for _ in range(3000):
+            line = (rng.randint(-1 << 14, 1 << 14), rng.randint(-1 << 13, 1 << 13),
+                    rng.randint(-1 << 25, 1 << 25))
+            for k in range(4):
+                c0, c1 = clip.RECT[k], clip.RECT[(k + 1) % 4]
+                if (clip.line_f(line, c0) >= 0) == (clip.line_f(line, c1) >= 0):
+                    continue
+                p = clip.side_crossing(line, k)
+                axis = 0 if k in (0, 2) else 1
+                a, b, c = line
+                exact = (-(b * p[1] + c) / Fraction(a)) if axis == 0 else (-(a * p[0] + c) / Fraction(b))
+                self.assertLessEqual(abs(p[axis] - exact), Fraction(1, 2))
+                self.assertTrue(0 <= p[0] <= clip.WIDTH and 0 <= p[1] <= clip.HEIGHT)
+                self.assertEqual(p[1 - axis], c0[1 - axis])
+                # the line facing the other way crosses at the same point, but
+                # for a tie, from the other corner
+                q = clip.side_crossing(tuple(-v for v in line), k)
+                self.assertLessEqual(abs(p[axis] - q[axis]), 1)
+                checked += 1
+        self.assertGreater(checked, 1000)
+
+    def test_behind_edges_redundant(self):
+        """An edge with both ends behind the eye takes nothing off the
+        face's image: without its line, the same polygon."""
+        rng = random.Random(67)
+        checked = 0
+        for _ in range(3000):
+            quad = self.face(rng)
+            if quad is None:
+                continue
+            # move it back so that one edge is behind the eye
+            dz = max(quad[0][2], quad[1][2]) + rng.randint(1, 500)
+            quad = [(x, y, z - dz) for x, y, z in quad]
+            # (still facing the eye, as the object pass leaves every face)
+            n = clip.cross(tuple(quad[1][k] - quad[0][k] for k in range(3)),
+                           tuple(quad[2][k] - quad[1][k] for k in range(3)))
+            if sum(n[k] * quad[0][k] for k in range(3)) >= 0:
+                continue
+            edges = [(quad[i], quad[(i + 1) % 4]) for i in range(4)]
+            if sum(1 for a, b in edges if a[2] <= 0 and b[2] <= 0) != 1:
+                continue
+            every = [clip.screen_line(clip.edge_normal(a, b)) for a, b in edges]
+            front = [clip.screen_line(clip.edge_normal(a, b)) for a, b in edges if a[2] > 0 or b[2] > 0]
+            whole, cut = clip.cone_clip(every), clip.cone_clip(front)
+            self.assertEqual(clip.drawable(whole), clip.drawable(cut))
+            if whole and cut:
+                for p in cut:
+                    self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in whole), 4)
+            checked += 1
+        self.assertGreater(checked, 50)
 
     def test_inside_the_view(self):
         rng = random.Random(43)

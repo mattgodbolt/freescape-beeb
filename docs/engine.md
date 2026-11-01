@@ -178,7 +178,11 @@ In order. Formats are the model's; the 6502 matches them exactly.
    polygon goes through **the cone**: the view's rectangle clipped, in 2D,
    by its edges' planes through the eye, each a line on the screen, exactly
    the face's image with nothing cut away (`tools/model/clip.py`), so there
-   is no near plane for polygons, and no far plane. A line or a point with
+   is no near plane for polygons, and no far plane. An edge with both ends
+   behind the eye has no line (the image is inside its plane already); a
+   line's crossing with a side of the rectangle is that line's own, one
+   division; and two consecutive edges' lines meet at their shared vertex's
+   projected image when the projection takes it. A line or a point with
    an end outside the band is clipped in 3D to `ZNEAR` and the planes
    `x = ±z`, `2y = ±z` first.
 5. **Project.** `x = XC + FX · X / Z` and `y = YC − FY · Y / Z`, in

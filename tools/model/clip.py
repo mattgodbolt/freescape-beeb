@@ -28,7 +28,12 @@ up. One division a crossing instead of one a coordinate, and taken from
 the inside end, so the two faces that share an edge cut it at the same
 point.
 """
+from tools.model import maths
 from tools.model.view import FX, FY, SUB, VIEW_H, VIEW_W, XC, YC, ZNEAR
+
+# The 2D clip's crossings by a reciprocal (crossing_r); off, by
+# crossing_t's division, as the cone's and a line's 3D clip's still are.
+RECIP_2D = True
 
 NEAR, LEFT, RIGHT, TOP, BOTTOM = 1, 2, 4, 8, 16
 assert FY == 2 * FX                 # (the cone's lines)
@@ -59,6 +64,24 @@ def crossing_t(fp, fq):
     d = fp - fq
     s = max(0, d.bit_length() - T_BITS)
     return min(((fp >> s) << T_BITS) // (d >> s), (1 << T_BITS) - 1)
+
+
+def crossing_r(fp, fq):
+    """The 2D clip's crossing fraction (RECIP_2D), from its inside end (fp
+    >= 0) to its outside end (fq < 0), by a reciprocal rather than a
+    division: d = fp - fq, normalised to nine bits dn = d >> s (s =
+    bitlen(d) - 9; a shift left when negative), R = 256 + maths.CLIP_M[dn -
+    256], about 2^17 / d's nine bits, and t = fp R >> (s + 1), at most
+    2^T_BITS - 1. Within about 2^-8 of crossing_t's fraction, and still from
+    the inside end, so two faces sharing an edge cut it at the same point."""
+    assert fp >= 0 > fq
+    d = fp - fq                 # (the 6502's within 16 bits: the guard band)
+    s = d.bit_length() - maths.CLIP_RBITS
+    dn = d >> s if s >= 0 else d << -s
+    r = 256 + maths.CLIP_M[dn - 256]
+    k = s + 1
+    t = (fp * r) >> k if k >= 0 else (fp * r) << -k
+    return min(t, (1 << T_BITS) - 1)
 
 
 def lerp(p, q, t):
@@ -209,7 +232,7 @@ def _clip_edge(poly, axis, bound, keep_below):
     def cut(p, q, fp, fq):
         c = [0, 0]
         c[axis] = bound
-        c[other] = lerp(p[other], q[other], crossing_t(fp, fq))
+        c[other] = lerp(p[other], q[other], (crossing_r if RECIP_2D else crossing_t)(fp, fq))
         return tuple(c)
 
     out = []
@@ -389,44 +412,118 @@ def line_f(line, p):
 
 
 RECT = [(0, 0), (WIDTH, 0), (WIDTH, HEIGHT), (0, HEIGHT)]
+# The rectangle's sides, each from corner k to corner k + 1: the top, the
+# right, the bottom and the left. Each vertex of the polygon the cone clips
+# carries the label of its edge to the next one: ("side", k), or ("line", j)
+# for an edge along the line of the face's edge j.
+
+# A crossing on one of the rectangle's sides is the line's own crossing
+# with that side, from the side's corner inside the line (side_crossing):
+# one division, and the same point whichever piece of the side is being
+# cut. Off, crossing() along the piece, as every other crossing.
+SIDE_CROSSINGS = True
+# Where the lines of two consecutive edges cross, the polygon takes their
+# shared vertex's image when the projection takes that vertex: the point
+# they meet at, to the projection's accuracy, and the same point a face
+# projected whole has there. Off, crossing() along the edge.
+JOINS = True
 
 
-def _clip_poly(poly, line):
-    """Sutherland-Hodgman against one line, new vertices by crossing() from
-    the inside end."""
-    fs = [line_f(line, p) for p in poly]
+def side_crossing(line, k):
+    """Where a line crosses side k of the rectangle, which it cuts (its
+    corners on either side of it): from the corner K inside the line (f >=
+    0), along the side by f(K) / |a|, rounded half up, a the line's
+    coefficient along the side (A along the top and bottom, B down the
+    sides)."""
+    c0, c1 = RECT[k], RECT[(k + 1) % 4]
+    f0, f1 = line_f(line, c0), line_f(line, c1)
+    assert (f0 >= 0) != (f1 >= 0)
+    (ka, fk), other = ((c0, f0), c1) if f0 >= 0 else ((c1, f1), c0)
+    axis = 0 if k in (0, 2) else 1
+    a = abs(line[axis])
+    d = (2 * fk + a) // (2 * a)
+    p = list(ka)
+    p[axis] += d if other[axis] > ka[axis] else -d
+    return tuple(p)
+
+
+def _join(j, k, ends, image):
+    """The image of the vertex the edges of lines j and k share, clamped to
+    the rectangle, if they're consecutive and the projection takes it; else
+    None."""
+    if ends is None or image is None:
+        return None
+    if ends[j][1] == ends[k][0]:
+        v = ends[j][1]
+    elif ends[k][1] == ends[j][0]:
+        v = ends[k][1]
+    else:
+        return None
+    p = image(v)
+    if p is None:
+        return None
+    x, y = p
+    return (min(max(x, 0), WIDTH), min(max(y, 0), HEIGHT))
+
+
+def _cone_pass(poly, lines, k, ends, image):
+    """Sutherland-Hodgman against line k, on labelled vertices: a crossing on
+    a side by side_crossing, one where two consecutive edges' lines meet by
+    their vertex's image (_join), any other by crossing() from the inside
+    end."""
+    line = lines[k]
+
+    def cut(p, q, fp, fq, label):
+        kind, j = label
+        if kind == "side" and SIDE_CROSSINGS:
+            return side_crossing(line, j)
+        if kind == "line" and JOINS:
+            joined = _join(j, k, ends, image)
+            if joined is not None:
+                return joined
+        return crossing(p, q, fp, fq)
+
+    fs = [line_f(line, p) for p, _ in poly]
     out = []
     n = len(poly)
     for i in range(n):
-        a, b = poly[i], poly[(i + 1) % n]
+        (a, la), (b, _) = poly[i], poly[(i + 1) % n]
         fa, fb = fs[i], fs[(i + 1) % n]
         if fa >= 0:
-            out.append(a)
+            out.append((a, la))
             if fb < 0:
-                out.append(crossing(a, b, fa, fb))
+                out.append((cut(a, b, fa, fb, la), ("line", k)))
         elif fb >= 0:
-            out.append(crossing(b, a, fb, fa))
+            out.append((cut(b, a, fb, fa, la), la))
     return out
 
 
-def cone_clip(lines):
+def corners_out(line):
+    """How many of the rectangle's corners are outside a line (f < 0)."""
+    return sum(1 for p in RECT if line_f(line, p) < 0)
+
+
+def cone_clip(lines, ends=None, image=None):
     """The view's rectangle inside every line (the face's edges' planes, in
     its loop's order), repeats dropped: [] if nothing's left. A line with
     the rectangle's every corner inside it cuts nothing and is passed over;
-    one with every corner outside leaves nothing."""
+    one with every corner outside leaves nothing. ends[k] is line k's
+    edge's two vertices, as indices, and image(v) vertex v's view
+    coordinates if the projection takes it, else None (for JOINS; without
+    them, no joins)."""
     cutting = []
-    for line in lines:
-        fs = [line_f(line, p) for p in RECT]
-        if all(f < 0 for f in fs):
+    for k, line in enumerate(lines):
+        out = corners_out(line)
+        if out == 4:
             return []
-        if any(f < 0 for f in fs):
-            cutting.append(line)
-    poly = list(RECT)
-    for line in cutting:
-        poly = _clip_poly(poly, line)
+        if out:
+            cutting.append(k)
+    poly = [(RECT[k], ("side", k)) for k in range(4)]
+    for k in cutting:
+        poly = _cone_pass(poly, lines, k, ends, image)
         if not poly:
             return []
-    return dedupe(poly)
+    return dedupe([p for p, _ in poly])
 
 
 def point_square(a):

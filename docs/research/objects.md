@@ -260,6 +260,32 @@ M, below). A polygon object's vertices go first, then its faces:
     common), so a pass's f at a vertex (`cone_eval`) is a corner's own, a
     side's corner f plus one product (A x along the top and bottom, B y down
     the sides), or two products inside; every way gives the same f.
+  - An edge with both ends at or behind the eye (z <= 0) has no line: the
+    face's image is what's in front of the eye, a convex region whose
+    boundary is the images of its edges' parts in front, so it's inside
+    such an edge's plane already (`render.BEHIND_EDGES`).
+  - Each vertex also carries the label of its edge to the next (`pa_lb`):
+    a side of the rectangle, or the kept line it runs along, so a crossing
+    knows what it's on. **On a side** it's the line's own crossing with that
+    side (`side_cut`, the model's `side_crossing`): from the side's corner
+    inside the line, f there over |A| (or |B| down the sides), rounded half
+    up, by an eleven-step division, the same point whatever piece of the
+    side is being cut. **Along a line** whose edge shares a vertex with the
+    cutting line's edge, the two lines meet at that vertex's image: if the
+    projection takes the vertex, its projected position, clamped to the
+    rectangle (projected then if the vertex pass hadn't), the point a face
+    projected whole has there too (`clip.JOINS`). Any other crossing is the
+    model's crossing from the inside end, as before.
+  - The lines of edges with both ends in front come first, then those
+    with one end behind, each in the loop's order (`render.FRONT_FIRST`):
+    a floor's far edge's line before its sides', which then mostly cut
+    nothing more. Side crossings and joins being the same points whatever
+    the order, that leaves the general crossings, which it makes rare.
+  - The first line's pass is made from the rectangle's corners' signs
+    (`cone_first`), and each later pass writes the other half of one pair
+    of arrays (pb follows pa, `cp_src` naming the polygon's half), so
+    nothing is copied back between passes; a pass that finds every vertex
+    inside its line leaves the polygon where it is.
 - **A line's face, or a point's** (`draw_segment`): with an end off the
   band, a point isn't drawn and a line is clipped in 3D to `ZNEAR` and the
   planes x = ±z, 2y = ±z, by crossings from the inside end (`seg_clip`, the
@@ -272,11 +298,20 @@ M, below). A polygon object's vertices go first, then its faces:
   then the rest right, or the other way left and a byte down), then sixteen
   unrolled steps; `frac16` patches t's bytes into `lerp`'s quarter-square
   readers, and `lerp` takes the size of P to Q (up to 24 bits) by them,
-  rounded half up.
+  rounded half up. The cone's general crossings and a line's 3D clip take
+  t so; the 2D clip's, below, by a reciprocal.
 - **The 2D clip** is 16-bit (inside the band everything projects within
   the guard band's range), and runs only the passes for edges a vertex is
   beyond; its four passes, each written out (`CLIP_PASS`), are in
-  `ObjMore`, outside the bank.
+  `ObjMore`, outside the bank, each writing the other half of the pa and pb
+  arrays as the cone's do. Its crossings' t is by a reciprocal
+  (`clip_cut`, the model's `crossing_r`, `clip.RECIP_2D`), with no
+  division: d = f_P − f_Q normalised to nine bits dn (d >> s, s =
+  bitlen(d) − 9, or a shift left), R = 256 + `clip_m[dn − 256]` (about 2^17
+  / dn: `maths.CLIP_M`, a page in `ObjMore`), and t = f_P R >> (s + 1),
+  two byte products and a shift, then `lerp` as before. It's within about
+  2^-8 of the division's t and still taken from the inside end, so two
+  faces sharing an edge cut it at the same point.
 - **The drawn test** (`clip.drawable`, on the polygon staged in the
   output): three vertices or more, one off the line through the first two,
   decided by the products' signs and zeros where it can be, then by the
@@ -339,7 +374,8 @@ Faces nearest first, in the rasteriser's input's shape
 - **Sections** (each placed by the build's memory map; the check build's
   in `mk/objects.mk`): `ObjCode` (this track's code, and the vertex pass's
   and the cone's tables), `ObjMore` (more of it, outside the code's bank:
-  main RAM on the live disc, which any bank paged sees; the 2D clip),
+  main RAM on the live disc, which any bank paged sees; the 2D clip, its
+  crossings and their reciprocals, and the cone's side crossings),
   `ObjConst` (the loops, the sine table, the
   matrix's quarter squares), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
   `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjMemo` (the
@@ -361,8 +397,11 @@ round: before it, 2,485 cameras). The checker runs each through
 `objects_frame` headless
 and compares the matrix, the candidates and their masks, every candidate's
 camera-space vertices (read as `transform_object` returns), every
-candidate's drawn faces, the order and the output, exactly; and that
-nothing outside the pipeline's memory was written. It reports each stage's
+candidate's drawn faces, the order and the output, exactly; the work no
+output need show, because what it would change can be cut away later (the
+lines the cone makes, `edge_line`'s calls, and the vertices projected,
+`vertex_shared`'s); and that nothing outside the pipeline's memory was
+written. It reports each stage's
 cycles (each instruction's to the innermost stage routine running) and the
 arithmetic's calls; `--profile` gives cycles by routine.
 
@@ -516,6 +555,54 @@ What's left:
   about a third of a step, and the projected faces' path (vertex pass,
   projection, faces, 2D clip, drawn test) as much again.
 
+## The fifth round: the cone restructured again (track Q)
+
+Track Q took the cone on, and then the 2D clip's crossings, model and 6502
+together (the figures, before and after, by stage, step and turn, and the
+picture's, are in the journal's entry for track Q). The cone was already
+in 2D (each edge's plane a line on the screen, the rectangle clipped by
+them), so the round went for fewer lines, cheaper crossings and less
+copying, every picture change proposed below:
+
+- **No line for an edge behind the eye** (both ends at z <= 0): the
+  face's image is the image of its part in front, a convex region whose
+  boundary is the images of its edges' parts in front, so it's inside such
+  an edge's plane already. A floor's back edge, and a wall's near one,
+  are such edges in most frames.
+- **Side crossings from the line**, an eleven-step division from the
+  side's corner inside the line (`side_cut`), not a fraction along the
+  piece of the side the polygon has and a product; and **joins**, two
+  consecutive edges' lines meeting at their vertex's projected image. Both
+  are the same point whatever the polygon's state, so the passes' order
+  touches only the general crossings, which the order **lines with both
+  ends in front first** then makes rare: a floor's far edge's line goes
+  first, and its sides' lines then mostly cut nothing more.
+- **Passes**: the first made from the rectangle's corners' signs, the rest
+  writing the other half of the pa and pb arrays in turn, and one whose
+  line has every vertex inside leaving the polygon where it is; the 2D
+  clip's passes in turn the same way.
+- **The 2D clip's crossings by a reciprocal** (above), with no division.
+- **The check** compares the work as well as the output (the lines the
+  cone makes, the vertices projected), which caught mutants the polygons
+  alone didn't: with side crossings and joins, a redundant line changes no
+  polygon.
+
+Measured and not kept: sharing the crossing of a line parallel to two
+sides (A or B zero) between them, too rare to pay; a test on N' for lines
+that cut nothing, as after the behind edges nearly every line made cuts;
+`vertex_code3` testing only the half-spaces the face's AND still holds,
+whose tests cost what they saved; lines of eleven bits (`LINE_BITS`), so
+that every f fits three bytes, measured in the model and not built (its
+picture changes a few dozen pixels over the entrance views and walks).
+
+What's left: the lines (`edge_normal` and `edge_line`) are now the cone's
+largest part, with `side_cut`'s division; a level camera's horizontal box
+edges have closed forms (the normal's middle term is the edge's world
+offset times M's y cofactor), and the floor's share a height. Outside the
+cone, the projected faces' path (vertex pass, projection, faces, drawn
+test) is the frame's largest block; `vertex_shared`'s own copies and
+compares cost about what the projection's arithmetic does.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -581,6 +668,19 @@ From the third round:
 2. **No picture change, recorded for the record**: every face's loop winds
    anticlockwise about its outward normal (a rectangle's high or low face
    was the other way), so its output polygon's vertices run the other way.
+
+From the fifth round (track Q; the pixel figures, against the model before
+each and the ZX oracle, are in the journal's entry):
+
+3. **The cone's lines and crossings** (amending decision 33): no line for
+   an edge with both ends behind the eye; a crossing on the rectangle's
+   side the line's own, rounded half up from the side's corner inside it;
+   two consecutive edges' lines meeting at their vertex's projected image
+   when the projection takes it; the lines of edges with both ends in front
+   first.
+4. **The 2D clip's crossings by a reciprocal** (amending decision 24): t
+   from a nine-bit reciprocal of the ends' distance and two byte products,
+   within about 2^-8 of the division's, still from the inside end.
 
 ## What's left
 
