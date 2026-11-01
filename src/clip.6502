@@ -684,11 +684,15 @@ ENDMACRO
     RTS
 }
 
-\ DIFF2D dst, arr_l, arr_h: dst = pa's coordinate at X less vertex 0's
-\ (16-bit; inside the view, so small)
+\ A drawn face goes into the output in three steps: its polygon into out_v*
+\ from out_vn (stage_pa from pa, or poly_face's own), the drawn test on it
+\ there (drawable), and its record (commit), which counts its vertices in.
+
+\ DIFF2D dst, arr_l, arr_h: dst = out_v's coordinate at X less vertex 0's
+\ at Y (16-bit; inside the view, so small)
 MACRO DIFF2D dst, arr_l, arr_h
-    LDA arr_l,X : SEC : SBC arr_l : STA dst
-    LDA arr_h,X : SBC arr_h : STA dst+1
+    LDA arr_l,X : SEC : SBC arr_l,Y : STA dst
+    LDA arr_h,X : SBC arr_h,Y : STA dst+1
 ENDMACRO
 
 \ ABS16 v: |v| (16-bit), and A = v's sign: &81 negative, 1 positive, 0 (Z
@@ -716,32 +720,54 @@ MACRO PSIGN s
 .done
 ENDMACRO
 
-\ drawable: C set if the polygon (p_n vertices, its repeats dropped, inside
-\ the view) is drawn (the model's drawable): three or more vertices, one off
-\ the line through the first two. dx ey = dy ex is decided by the products'
-\ signs and zeros where it can be, else by the products.
+\ ORDER16 a, b: A = 1 if |a| > |b|, &FF if less, 0 if equal (sizes under
+\ 2^15). Clobbers X.
+MACRO ORDER16 a, b
+    LDA a : SEC : SBC b : TAX
+    LDA a+1 : SBC b+1 : BMI less
+    BNE more
+    CPX #0 : BEQ done               ; (A = 0)
+.more
+    LDA #1
+    BRA done
+.less
+    LDA #&FF
+.done
+ENDMACRO
+
+\ drawable: C set if the polygon staged in out_v (p_n vertices from out_vn,
+\ its repeats dropped, inside the view) is drawn (the model's drawable):
+\ three or more vertices, one off the line through the first two. dx ey =
+\ dy ex is decided by the products' signs and zeros where it can be, then
+\ by the sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger,
+\ and the other way about), else by the products.
 .drawable
 {
     ZA_AUTO2 dx, dy, ex, ey
-    ZA_AUTO1 i, sa, sb, s
+    ZA_AUTO1 i, sa, sb, s, s1, end
     LDA p_n : CMP #3 : BCS enough
     RTS                             ; (C clear)
 .enough
-    LDX #1
-    DIFF2D dx, pa_xl, pa_xh
-    DIFF2D dy, pa_yl, pa_yh
+    CLC : ADC out_vn : STA end
+    LDY out_vn : LDX out_vn : INX
+    DIFF2D dx, out_vxl, out_vxh
+    DIFF2D dy, out_vyl, out_vyh
     ABS16 dx : STA sa               ; (dx, dy kept as sizes, their signs here)
     ABS16 dy : STA sb
-    LDA #2 : STA i
+    ORDER16 dx, dy : STA s1
+    LDA out_vn : CLC : ADC #2 : STA i
 .vertex
-    LDX i
-    DIFF2D ex, pa_xl, pa_xh
-    DIFF2D ey, pa_yl, pa_yh
+    LDX i : LDY out_vn
+    DIFF2D ex, out_vxl, out_vxh
+    DIFF2D ey, out_vyl, out_vyh
     ABS16 ey : PSIGN sa : STA s     ; dx ey's sign
     ABS16 ex : PSIGN sb             ; dy ex's
     CMP s : BNE off_line            ; (their signs or zeros differ)
     CMP #0 : BEQ next               ; (both zero: on the line)
-    \ the same sign: the sizes decide
+    \ the same sign: the sizes decide, by their order if it can
+    LDA s1 : BEQ products
+    ORDER16 ey, ex : CMP s1 : BEQ off_line
+.products
     LDA dx : STA umul16.ma
     LDA dx+1 : STA umul16.ma+1
     LDA ey : STA umul16.mb
@@ -761,7 +787,7 @@ ENDMACRO
     PLA : CMP umul16.mp+1 : BNE pop1
     PLA : CMP umul16.mp : BNE off_line
 .next
-    INC i : LDA i : CMP p_n : BEQ on_line
+    INC i : LDA i : CMP end : BEQ on_line
     JMP vertex
 .on_line
     CLC
@@ -777,12 +803,12 @@ ENDMACRO
     RTS
 }
 
-\ emit_face: the polygon as a drawn face of colour A: its vertices into
-\ out_v*, its record into tf_*. Nothing if they'd run out (out_over set).
-.emit_face
+\ stage_pa: pa's polygon (p_n vertices) into out_v* from out_vn, not yet
+\ counted: C clear if it has fewer than three vertices, or if it wouldn't
+\ fit (out_over set).
+.stage_pa
 {
-    ZA_AUTO1 col
-    STA col
+    LDA p_n : CMP #3 : BCC none
     LDA tf_n : CMP #OUT_FACES : BCS over
     LDA out_vn : CLC : ADC p_n : BCS over
     LDY out_vn
@@ -794,17 +820,25 @@ ENDMACRO
     LDA pa_yh,X : STA out_vyh,Y
     INY
     INX : CPX p_n : BNE vertex
-    LDX tf_n
-    LDA p_n : STA tf_fn,X
-    LDA out_vn : STA tf_fv,X
-    LDA col : STA tf_fc,X
-    STY out_vn
-    INC tf_n
+    SEC
     RTS
 .over
     LDA #1 : STA out_over
+    CLC
+.none
     RTS
 }
+
+\ commit: the polygon staged in out_v (p_n vertices from out_vn) as a drawn
+\ face of colour A: its record into tf_*, its vertices counted.
+.commit
+    LDX tf_n
+    STA tf_fc,X
+    LDA p_n : STA tf_fn,X
+    LDA out_vn : STA tf_fv,X
+    CLC : ADC p_n : STA out_vn
+    INC tf_n
+    RTS
 
 \ ===========================================================================
 \ A line's face, or a point's (the model's _cone_face for them): with an end
@@ -982,9 +1016,10 @@ ASSERT VMAX + 5 <= VALL                 ; (a new vertex a plane at most)
 .widened
     LDA #OC_LEFT OR OC_RIGHT OR OC_TOP OR OC_BOTTOM
     JSR clip2d
+    JSR stage_pa : BCC rejected
     JSR drawable : BCC rejected
     LDX face : LDA fa_col,X
-    JMP emit_face
+    JMP commit
 .rejected
     RTS
 }
@@ -2171,48 +2206,98 @@ ZA_AUTO1 band_t
 \ vertex beyond any it's clipped (clip2d), else its repeats are dropped;
 \ then the drawn test.
 
-\ poly_face: face X of the object being drawn, its vertices projected.
+\ poly_face: face X of the object being drawn, its vertices projected. They
+\ go into the output from out_vn as they're gathered, with their outcodes'
+\ AND and OR: wholly inside the view, with no vertex the one before it again
+\ (the last before the first), the drawn test takes them there; else they go
+\ to pa for the 2D clip, or for dedupe, and are staged back.
 .poly_face
 {
-    ZA_AUTO1 face, n, every, any
+    ZA_AUTO1 face, lp, end, every, any
     STX face
-    LDA fa_nv,X : STA n
-    LDY fa_loop,X
-    LDX #0
-.index
-    LDA lp_table,Y : STA fp_idx,X
-    INY : INX : CPX n : BNE index
+    LDA fa_loop,X : STA lp
+    LDA fa_nv,X : STA p_n
     LDA #&FF : STA every
     STZ any
-    LDX #0
+    \ (no room where they'd go: by pa, and stage_pa finds no room unless the
+    \ clip leaves fewer)
+    LDA tf_n : CMP #OUT_FACES : BCS no_room
+    LDA out_vn : TAX : CLC : ADC p_n : BCC room
+.no_room
+    JMP by_pa
+.room
+    STA end
 .gather
-    LDY fp_idx,X
+    LDY lp : INC lp
+    LDA lp_table,Y : TAY
+    LDA voc,Y : TSB any
+    AND every : STA every
+    LDA vsxl,Y : STA out_vxl,X
+    LDA vsxh,Y : STA out_vxh,X
+    LDA vsyl,Y : STA out_vyl,X
+    LDA vsyh,Y : STA out_vyh,X
+    INX : CPX end : BNE gather
+    LDA every : BEQ seen
+    RTS
+.seen
+    LDA any : BNE to_pa
+    \ a repeat? each vertex against the one before it, the first against the last
+    LDX out_vn : LDY end : DEY
+.repeat
+    LDA out_vxl,X : CMP out_vxl,Y : BNE differ
+    LDA out_vxh,X : CMP out_vxh,Y : BNE differ
+    LDA out_vyl,X : CMP out_vyl,Y : BNE differ
+    LDA out_vyh,X : CMP out_vyh,Y : BEQ to_pa
+.differ
+    TXA : TAY
+    INX : CPX end : BNE repeat
+    JSR drawable : BCC rejected
+    LDX face : LDA fa_col,X
+    JMP commit
+.to_pa
+    LDY out_vn
+    LDX #0
+.copy
+    LDA out_vxl,Y : STA pa_xl,X
+    LDA out_vxh,Y : STA pa_xh,X
+    LDA out_vyl,Y : STA pa_yl,X
+    LDA out_vyh,Y : STA pa_yh,X
+    INY
+    INX : CPX p_n : BNE copy
+.in_pa
+    LDA any : BEQ repeats
+    JSR clip2d
+    BRA staged
+.repeats
+    JSR dedupe
+.staged
+    JSR stage_pa : BCC rejected
+    JSR drawable : BCC rejected
+    LDX face : LDA fa_col,X
+    JMP commit
+.rejected
+    RTS
+.by_pa
+    LDX #0
+.pa_gather
+    LDY lp : INC lp
+    LDA lp_table,Y : TAY
     LDA voc,Y : TSB any
     AND every : STA every
     LDA vsxl,Y : STA pa_xl,X
     LDA vsxh,Y : STA pa_xh,X
     LDA vsyl,Y : STA pa_yl,X
     LDA vsyh,Y : STA pa_yh,X
-    INX : CPX n : BNE gather
-    STX p_n
+    INX : CPX p_n : BNE pa_gather
     LDA every : BNE rejected
-    LDA any : BEQ inside
-    JSR clip2d
-    BRA clipped
-.inside
-    JSR dedupe
-.clipped
-    JSR drawable : BCC rejected
-    LDX face : LDA fa_col,X
-    JMP emit_face
-.rejected
-    RTS
+    BRA in_pa
 }
 
 \ draw_object: the candidate of_cand's seen faces, in order; it joins the
 \ draw list if any is drawn. A polygon object's vertices go through the
 \ vertex pass first; a face with every vertex projected goes by poly_face,
-\ and the rest of its faces, and a line's or a point's, by draw_face3d.
+\ and the rest of its faces by cone_face; a line's or a point's by
+\ draw_segment.
 .draw_object
 {
     ZA_ENTRY
@@ -2233,9 +2318,10 @@ ZA_AUTO1 band_t
     BRA next
 .hard
     JSR cone_face : BCC next
+    JSR stage_pa : BCC next
     JSR drawable : BCC next
     LDX face : LDA fa_col,X
-    JSR emit_face
+    JSR commit
 .next
     INC face
     LDA mask : BNE face_loop
