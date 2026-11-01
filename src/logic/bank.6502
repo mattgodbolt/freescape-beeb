@@ -10,7 +10,10 @@
 \
 \ LOGIC_CODE_BANK (file LOGICC) holds the rest of the logic: the pass and
 \ the keys, the movement, the walk and the object test, and the
-\ arithmetic, with the original's tables they read. It has room to share.
+\ arithmetic, with the original's tables they read, the quarter squares
+\ its multiplies use and the object test's lists by face (unless the
+\ includer places those: LOGIC_SQUARES, LogicFaces, below). It has room to
+\ share.
 \
 \ The code and the database together come to more than a bank. The two
 \ halves call each other through main RAM (src/logic/call.6502), which is
@@ -49,11 +52,22 @@ INCLUDE "arith.6502"
 .KeyActions EQUB ZX_ACTIONS                     ; each code's action, from the key table ...
 .KeyShootActions EQUB ZX_SHOOT_ACTIONS          ; ... and in shooting mode
 ASSERT LEN(ZX_ACTIONS) = 128 AND MAX(ZX_KEY_CODES) < 128
-    \ the quarter squares, n * n DIV 4 for n from 0 to 511 (mul88)
+    \ the quarter squares, n * n DIV 4 for n from 0 to 511 (mul88): the
+    \ includer's (LOGIC_SQUARES, the address of a table laid out as this
+    \ one: the live disc shares the maths' in HAZEL), or the logic's own
+IF DEFINED(LOGIC_SQUARES)
+    lq_lo = LOGIC_SQUARES
+    lq_hi = LOGIC_SQUARES + 512
+ELSE
 ALIGN 256
-.sq_lo      EQUB LO((0..511) * (0..511) DIV 4)
-.sq_hi      EQUB HI((0..511) * (0..511) DIV 4)
-    \ the lists of the objects by face (src/logic/touch.6502's link_faces)
+.lq_lo      EQUB LO((0..511) * (0..511) DIV 4)
+.lq_hi      EQUB HI((0..511) * (0..511) DIV 4)
+ENDIF
+    \ the lists of the objects by face (src/logic/touch.6502's link_faces),
+    \ in section LogicFaces: here, or wherever the includer declared it
+    \ first (the live disc keeps them in shadow RAM, which its passes run
+    \ with)
+SECTION LogicFaces
 .face_xo    SKIP 256
 .face_xe    SKIP 256
 .face_yo    SKIP 256
@@ -66,5 +80,6 @@ ALIGN 256
 .next_ye    SKIP IX_MAX
 .next_zo    SKIP IX_MAX
 .next_ze    SKIP IX_MAX
+ENDSECTION
 .logic_code_end
 ENDSECTION

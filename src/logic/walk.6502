@@ -225,6 +225,7 @@ ZA_AUTO1 mc                                     ; the axes the move crosses, as 
     LDA #0
     RTS
 .keep
+    JSR hook_walked                             ; (the segment walked, for the frames between)
     JSR keep_clear
     LDA InJet : BNE commit
     LDA BodyHeight : DEC A : BEQ commit         ; each of the probe's cells above the feet
