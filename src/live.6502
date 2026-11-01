@@ -33,8 +33,13 @@
 \ frame; the cycles a frame of stages 1-7 (objects_frame's call) and of
 \ stages 8-10 (raster_frame's), timed by User VIA T2 (clock); the keys and
 \ the credit. Each figure is the mean over the frames since the figures
-\ were last drawn, every FIGURE_FIELDS fields. Every frame is drawn whole,
-\ the camera still or not, so the figures are always the pipeline's cost.
+\ were last drawn, every FIGURE_FIELDS fields, or once the frames stop.
+\ A frame is drawn only when something it's made from has changed since
+\ the frame last handed over (the camera, the area, the objects'
+\ visibility, the crosshair: docs/research/live.md, "The idle loop"), and
+\ then whole, so the figures are always the pipeline's cost; while nothing
+\ changes, the loop goes on taking the keys and the logic's passes, and
+\ draws nothing.
 \
 \ This file is the glue, and the only place that knows how the stages meet:
 \ the memory map, the paging, the camera, the area's patterns, the
@@ -365,10 +370,12 @@ ENDIF
     \ (on into live_loop)
 
 \ live_loop: a frame at a time. The logic's pass when one is due, and the
-\ frame's camera (or the free camera's keys), objects_frame makes the faces
-\ in rs_*'s arrays, and raster_frame draws them, between frame_begin and
-\ frame_end, with the crosshair over them; the text when the beam allows,
-\ and the figures (live_measure) from the clock round each.
+\ frame's camera (or the free camera's keys); then, if anything the view is
+\ made from has changed since the frame last handed over (lv_inputs),
+\ objects_frame makes the faces in rs_*'s arrays, and raster_frame draws
+\ them, between frame_begin and frame_end, with the crosshair over them;
+\ the text when the beam allows, and the figures (live_measure) from the
+\ clock round each. If nothing has, nothing is drawn (live_idle).
 .live_loop
 IF LIVE_LOGIC
     JSR read_counters
@@ -384,8 +391,19 @@ ELSE
     PAGE_IN BANK_GLUE
     JSR live_keys
 ENDIF
+    JSR lv_inputs                               ; (vw_new: whether there's anything new to draw)
     PAGE_IN BANK_DATA
     JSR text_sync
+    LDA vw_new : BNE live_draw
+    \ Nothing new since the frame last handed over, so nothing is drawn
+    \ (docs/research/live.md, "The idle loop"): the keys and passes go on,
+    \ so the next frame starts as soon as anything changes. (The text needs
+    \ no waiting for here: text_sync, every loop, finds the beam's window.)
+.live_idle                                      ; (tools/livecheck.mjs: the loop drew nothing)
+    PAGE_IN BANK_GLUE
+    JSR live_idle_measure
+    JMP live_loop
+.live_draw
     \ stages 1-7
     LDX #LV_CAM_BYTES - 1
 .camera
@@ -447,7 +465,10 @@ SECTION Work
 .lv_roll        SKIP 1
 LV_CAM_BYTES = P% - lv_cam
 .lv_area        SKIP 1      ; the area entered (its index in the records' directory)
+.lv_entered     SKIP 1      ; areas entered, mod 256 (lv_inputs)
 .lv_named       SKIP 1      ; non-zero once the area's lines are drawn
+.vw_new         SKIP 1      ; non-zero: the frame's inputs aren't the last frame's (lv_inputs)
+.vw_none        SKIP 1      ; non-zero until the first frame's
 ENDSECTION
 ASSERT cam_y = cam_x + 2 AND cam_z = cam_x + 4 AND cam_yaw = cam_x + 6
 ASSERT cam_pitch = cam_x + 7 AND cam_roll = cam_x + 8 AND LV_CAM_BYTES = 9
@@ -506,6 +527,7 @@ REGIONS = P% - regions
 {
     ZA_AUTO2 p
     STA lv_area
+    INC lv_entered
     PAGE_IN BANK_DATA
     \ the area's patterns: ld_pats + 4 LIVE_PATTERNS area
     ASSERT LIVE_PATTERNS * 4 = 64
@@ -626,10 +648,14 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_minute+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
     JSR logic_go_minute
 .timed
+    \ (with the interrupt held off, so a key the vertical sync reads between
+    \ the two isn't taken as held now and as gone down by the next pass)
+    PHP : SEI
     LDX #KEYS_BYTES - 1
 .key
     JSR key_take : ORA keys,X : STA lv_lkeys,X
     DEX : BPL key
+    PLP
     \ the camera before
     LDX #5
 .was
@@ -651,8 +677,20 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     PAGE_IN BANK_DATA
     JSR live_lines                              ; ("game over")
 .ran
+    \ The next pass after the waits the pass asked for, and on a reading of
+    \ the keys made after this pass ends (the vertical sync's, a field
+    \ apart): a pass that shows nothing needn't wait for a frame (live.md,
+    \ "The idle loop"), so held keys that change nothing would otherwise
+    \ make passes as fast as the loop goes, on readings already taken.
     LDA lv_now : CLC : ADC lv_wait : STA lv_until
     LDA lv_now+1 : ADC #0 : STA lv_until+1
+    JSR read_counters
+    LDA count_fields : CLC : ADC #1 : TAX
+    LDA count_fields+1 : ADC #0 : TAY
+    CPX lv_until : SBC lv_until+1               ; (the later of the two)
+    BMI waits
+    STX lv_until : STY lv_until+1
+.waits
     LDA lv_loaded : BNE away
     JSR logic_go_shown                          ; (with an area's change, once it's entered)
 .away
@@ -845,7 +883,8 @@ SECTION LiveData
     LDA fixed_text,Y : JSR text_set
     INX : INY : CPY #FIXED_BYTES : BNE fixed
     STZ rs_sky : STZ rs_ground : STZ rs_horizon
-    LDA #&FF : STA lv_area
+    LDA #&FF : STA lv_area : STA vw_none
+    STZ lv_entered
     JMP figures_blank
 .fixed_text
     EQUS SUM(FIXED_TEXT)
@@ -915,19 +954,110 @@ ENDSECTION
 SECTION LiveGlue
 
 \ ---------------------------------------------------------------------------
+\ lv_inputs (every loop, after the camera's made): whether anything the
+\ frame's view is made from differs from the frame last handed over's
+\ (docs/research/live.md, "The idle loop"), in vw_new, non-zero if so;
+\ and the record (vw_rec) made this frame's. What a view is made from: the camera (lv_cam), the area and
+\ how many times one has been entered (lv_entered: entering puts the area's
+\ records together again, and the logic moves the rig's parts as it loads
+\ one), and with the logic what's hidden of every object it indexes
+\ (ix_flags AND IX_HIDDEN, all IX_MAX, as the object pass reads them
+\ through ob_ix) and the crosshair (CrossOn, and CrossX and CrossY if it's
+\ on). A frame differing is always drawn after it, so the record is the
+\ last frame's. Nothing else the frame reads changes but as an area is
+\ entered (the patterns, the working copy).
+VW_CAM   = 0                    ; vw_rec: lv_cam's bytes ...
+VW_AREA  = LV_CAM_BYTES         ; ... lv_entered ...
+IF LIVE_LOGIC
+    VW_CROSS = VW_AREA + 1      ; ... CrossOn (0 or 1), CrossX, CrossY (0 when off) ...
+    VW_HID   = VW_CROSS + 3     ; ... and each index's flags AND IX_HIDDEN
+    VW_BYTES = VW_HID + IX_MAX
+ELSE
+    VW_BYTES = VW_AREA + 1
+ENDIF
+ASSERT VW_CAM = 0 AND IX_MAX <= 128
+.vw_rec     SKIP VW_BYTES
+.lv_inputs
+{
+    LDA vw_none : STA vw_new                    ; (no frame yet: one's new)
+    STZ vw_none
+    LDX #LV_CAM_BYTES - 1
+.camera
+    LDA lv_cam,X : JSR vw_byte
+    DEX : BPL camera
+    LDX #VW_AREA : LDA lv_entered : JSR vw_byte
+IF LIVE_LOGIC
+    INX
+    LDA CrossOn : BEQ off
+    LDA #1 : JSR vw_byte
+    INX : LDA CrossX : JSR vw_byte
+    INX : LDA CrossY : JSR vw_byte
+    BRA flags
+.off
+    JSR vw_byte                                 ; (A is 0)
+    INX : LDA #0 : JSR vw_byte
+    INX : LDA #0 : JSR vw_byte
+.flags
+    LDX #IX_MAX - 1
+.flag
+    LDA ix_flags,X : AND #IX_HIDDEN
+    CMP vw_rec + VW_HID,X : BEQ same
+    STA vw_rec + VW_HID,X
+    LDA #&FF : STA vw_new
+.same
+    DEX : BPL flag
+ENDIF
+    RTS
+\ vw_byte: A, the input at vw_rec + X, against the record: if it differs,
+\ the record takes it and vw_new is set. Keeps X and Y.
+.vw_byte
+    CMP vw_rec,X : BEQ unchanged
+    STA vw_rec,X
+    LDA #&FF : STA vw_new
+.unchanged
+    RTS
+}
+
+\ ---------------------------------------------------------------------------
 \ live_measure (after each frame's spans): the frame added to the window,
-\ and every FIGURE_FIELDS fields the figures drawn from it: frames a second
-\ and fields a frame from the frames shown (flips), and each span's mean
-\ cycles, in thousands; then a new window.
+\ and every FIGURE_FIELDS fields the figures drawn from it (live_figures).
+\ live_idle_measure (each loop that draws nothing): once the window's last
+\ frame is shown, its figures drawn at once; a window with no frames
+\ starts again from now, so its first frame is measured from the loop
+\ before it, not from the fields nothing was drawn in.
 .live_measure
 {
     INC win_n
-    JSR read_counters
-    LDA count_fields : SEC : SBC win_f0 : STA div_n
-    LDA count_fields+1 : SBC win_f0+1 : STA div_n+1
+    JSR fig_fields
     LDA div_n : CMP #LO(FIGURE_FIELDS) : LDA div_n+1 : SBC #HI(FIGURE_FIELDS) : BCS figures
     RTS
 .figures
+    JMP live_figures
+}
+.live_idle_measure
+{
+    LDA win_n : BEQ again
+    LDA frame_ready : BNE wait                  ; (its last frame isn't shown yet)
+    JSR fig_fields
+    JMP live_figures
+.again
+    JSR read_counters
+    JMP fig_restart
+.wait
+    RTS
+}
+\ fig_fields: the fields since the window began, in div_n.
+.fig_fields
+    JSR read_counters
+    LDA count_fields : SEC : SBC win_f0 : STA div_n
+    LDA count_fields+1 : SBC win_f0+1 : STA div_n+1
+    RTS
+
+\ live_figures: the figures drawn from the window: frames a second and
+\ fields a frame from the frames shown (flips), and each span's mean
+\ cycles, in thousands; then a new window from read_counters' time.
+.live_figures
+{
     LDA count_frames : SEC : SBC win_s0 : STA mul_b
     LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
     ORA mul_b : BEQ restart                     ; (no flip yet: none to measure)
@@ -951,14 +1081,7 @@ SECTION LiveGlue
     LDY #T_FRONT : LDX #TL_FRONT * TEXT_COLS + NUMBER_COL : JSR kilo
     LDY #T_FILL : LDX #TL_FILL * TEXT_COLS + NUMBER_COL : JSR kilo
 .restart
-    LDA count_fields : STA win_f0 : LDA count_fields+1 : STA win_f0+1
-    LDA count_frames : STA win_s0 : LDA count_frames+1 : STA win_s0+1
-    STZ win_n
-    LDX #7
-.zero
-    STZ win_us,X
-    DEX : BPL zero
-    RTS
+    JMP fig_restart
 \ kilo: span Y's window as thousands of cycles a frame, into cell X on.
 .kilo
     PHX
@@ -970,6 +1093,18 @@ SECTION LiveGlue
     JSR fig_divide
     PLX
     JMP thousands
+}
+\ fig_restart: a new window, from read_counters' time.
+.fig_restart
+{
+    LDA count_fields : STA win_f0 : LDA count_fields+1 : STA win_f0+1
+    LDA count_frames : STA win_s0 : LDA count_frames+1 : STA win_s0+1
+    STZ win_n
+    LDX #7
+.zero
+    STZ win_us,X
+    DEX : BPL zero
+    RTS
 }
 
 \ ---------------------------------------------------------------------------
@@ -1226,11 +1361,13 @@ IF LIVE_LOGIC
 }
 ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
 
-\ lv_camera (every frame): the frame's camera into lv_cam: the logic's,
+\ lv_camera (every loop): the frame's camera into lv_cam: the logic's,
 \ or, while a pass's frames show, the fraction of the way PASS_FIELDS
 \ fields take: f = 256 e / PASS_FIELDS at e fields on (pace_f); each
 \ coordinate an_p0 + sign(d) ((|d| f) >> 8), y an_p0's if an_hold; each
-\ angle an_a0 + sign(t) ((|t| f + 128) >> 8), mod 72.
+\ angle an_a0 + sign(t) ((|t| f + 255) >> 8), mod 72: each 5-degree step
+\ as soon as the fraction is into it, so a turn shows from its first field
+\ (live.md, "The idle loop"), as a step does.
 .lv_camera
 {
     ZA_AUTO1 f, k
@@ -1288,7 +1425,7 @@ ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
 .amag
     STA m : STZ m+1
     JSR times_f                                 ; |t| f >> 8 ...
-    LDA k : BPL rounded                         ; ... and the bit below it
+    LDA k : BEQ rounded                         ; ... rounded up by the bits below it
     INC m
 .rounded
     LDA an_a0,X
@@ -1521,6 +1658,7 @@ LIVE_KEY_COUNT = LEN(LIVE_KEYS)
     \ the keys held, and those that went down since the last frame (a tap
     \ shorter than a frame acts once), each byte with any made in lv_any
     STZ lv_any
+    PHP : SEI                                   ; (as lv_pass takes them)
     LDX #KEYS_BYTES - 1
 .take
     JSR key_take
@@ -1529,6 +1667,7 @@ LIVE_KEY_COUNT = LEN(LIVE_KEYS)
     ORA keys,X : STA lv_keys,X
     DEX : BPL take
     LDA keys_any : TSB lv_any
+    PLP
     LDA lv_keys + K_SPACE DIV 8 : AND #1 << (K_SPACE AND 7) : BEQ no_space
     JSR keyed
     LDA lv_entrance : INC A

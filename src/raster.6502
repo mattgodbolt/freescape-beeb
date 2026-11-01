@@ -532,11 +532,13 @@ MACRO BND_PUT
 ENDMACRO
 
 \ The span [r_a, r_b) of line r_y, which is in X, into its gaps (pool k),
-\ writing what shows; each way out goes to next. Only a span that starts
-\ inside a gap and ends inside it too (split), or one on a line no face has
-\ touched (fresh), can be empty (r_a >= r_b), so only those test it.
+\ writing what shows; each way out goes to next, but a fresh line's, which
+\ goes on to the stretch's next copy (stretch) when it can. Only a span
+\ that starts inside a gap and ends inside it too (split), or one on a line
+\ no face has touched (fresh), can be empty (r_a >= r_b), so only those
+\ test it.
 ASSERT UNTOUCHED >= 128 AND POOL_FIELD <= 128   ; a node is a positive byte
-MACRO INSERT k, next
+MACRO INSERT k, next, stretch
 {
     GS = pool_gs(k)
     GE = pool_ge(k)
@@ -660,7 +662,10 @@ MACRO INSERT k, next
     STZ put_go + 1                      ; (the slot for pixel 0)
     PLANT_END
     GO_V PV
+    LDA sa0 + 1 : AND sb0 + 1 : BNE on_whole       ; (both chains vertical: STEP_G is 0)
     JMP next
+.on_whole
+    LDY #ST_WHOLE : JMP fresh_on
 .fresh_right
     \ [0, b): the gap [b, W) waits on the byte at b.
     LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
@@ -673,7 +678,10 @@ MACRO INSERT k, next
     STZ put_go + 1
     PLANT_ZP r_b
     GO_V PV
+    LDA sa0 + 1 : AND sb0 + 1 : BNE on_right       ; (both chains vertical: STEP_G is 0)
     JMP next
+.on_right
+    LDY #ST_RIGHT : JMP fresh_on
 .fresh_cut
     LDA r_b : CMP #VIEW_W : BNE fresh_mid
     \ [a, W): the gap [0, a) waits on the byte at a.
@@ -686,7 +694,10 @@ MACRO INSERT k, next
     ENTER_ZP r_a
     PLANT_END
     GO_V PV
+    LDA sa0 + 1 : AND sb0 + 1 : BNE on_left       ; (both chains vertical: STEP_G is 0)
     JMP next
+.on_left
+    LDY #ST_LEFT : JMP fresh_on
 .overflow2
     JMP overflow
 .fresh_mid
@@ -705,7 +716,106 @@ MACRO INSERT k, next
     ENTER_ZP r_a
     PLANT_ZP r_b
     GO_V PV
+    LDA sa0 + 1 : AND sb0 + 1 : BEQ fresh_next
+    LDY #ST_MID
+.fresh_on
+    \ (Y the span's kind) With both chains vertical, the lines after this
+    \ one in the segment have its span, so while they're fresh they take the
+    \ stretch, the same span written as this line's was.
+    LDX r_y : INX : CPX f_yend : BEQ fresh_next
+    LDA head,X : BPL fresh_next         ; (the next line has a face: no stretch)
+    STY st_kind
+    JMP stretch
+.fresh_next
     JMP next
+}
+ENDMACRO
+
+\ The stretch: line X (in pool k) and the lines after it in the face's
+\ segment, while they're fresh, given the span the line before had, which
+\ both chains being vertical keeps: each is what INSERT's fresh path does
+\ with the span (its kind in st_kind: a gap left of it in bit 7, one right
+\ of it in bit 6), the same nodes and the same bytes, with the run's entry
+\ and plant as they are, but where a line starts a character row
+\ (row_setup, and the plant there). Copies 0 to 2 fall into the next. A
+\ line that isn't fresh goes back to the line loop (entry, for pool k), and
+\ the segment's end to seg_end.
+ST_WHOLE = &00                          ; st_kind: [0, W)
+ST_RIGHT = &40                          ; ... [0, b), the gap [b, W)
+ST_LEFT  = &80                          ; ... [a, W), the gap [0, a)
+ST_MID   = &C0                          ; ... [a, b), both
+ZA_AUTO1 st_kind
+MACRO STRETCH k, entry
+{
+    GS = pool_gs(k)
+    GE = pool_ge(k)
+    GH = pool_gh(k)
+    GN = pool_gn(k)
+    PV = r_pv + k
+    PVA = r_pva + k
+    PVB = r_pvb + k
+    IF k = 0
+        TXA : BIT #4 : BNE row
+        JSR row_setup
+        PLANT_ZP r_b                    ; (rr_pl's at VIEW_W is RR_END: PLANT_END's)
+    .row
+    ENDIF
+    LDA head,X : BMI fresh
+    STX r_y                             ; (a face is here: the line loop takes it)
+    JMP entry
+.fresh
+    BIT st_kind : BMI left_gap : BVS right
+    \ the whole line
+    STZ head,X
+    DEC nopen
+    JMP go
+.right
+    \ [0, b): the gap [b, W)
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS over
+    INC gtop + k
+    LDA r_b : STA GS,Y
+    LDA #VIEW_W : STA GE,Y
+    LDA PVA : STA GH,Y
+    LDA #0 : STA GN,Y
+    TYA : STA head,X
+    BRA go
+.left_gap
+    BVS mid
+    \ [a, W): the gap [0, a)
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS over
+    INC gtop + k
+    LDA #0 : STA GS,Y : STA GN,Y
+    LDA r_a : STA GE,Y
+    LDA PVB : STA GH,Y
+    TYA : STA head,X
+    BRA go
+.over
+    \ (as INSERT's overflow: the line isn't drawn)
+    LDA #&FF : STA rs_overflow
+    JMP next
+.mid
+    \ [a, b): gaps [0, a) and [b, W)
+    LDY gtop + k : CPY #POOL_HELD : BCS over
+    INC gtop + k : INC gtop + k
+    LDA #0 : STA GS,Y
+    LDA r_a : STA GE,Y
+    LDA PVB : STA GH,Y
+    TYA : STA head,X
+    INY : TYA : STA GN - 1,Y
+    LDA r_b : STA GS,Y
+    LDA #VIEW_W : STA GE,Y
+    LDA PVA : STA GH,Y
+    LDA #0 : STA GN,Y
+.go
+    TXA : TAY : LDA PV : JSR put_go
+.next
+    INX : CPX f_yend : BNE more
+    STX r_y
+    JMP seg_end
+.more
+    IF k = 3
+        JMP st0
+    ENDIF
 }
 ENDMACRO
 
@@ -725,7 +835,7 @@ ENDMACRO
 .mode0    JMP ins0                    ; patched: ins0 or paint0
             ZA_CANJUMP ins0, paint0
         ENDIF
-.ins0   INSERT 0, step0
+.ins0   INSERT 0, step0, st1
 .step0
 .sa0    BRA sag_0                        ; patched: STEP_G or STEP_NONE
         ZA_CANJUMP sag_0, sa_end0
@@ -748,7 +858,7 @@ ENDMACRO
 .mode1    JMP ins1                    ; patched: ins1 or paint1
             ZA_CANJUMP ins1, paint1
         ENDIF
-.ins1   INSERT 1, step1
+.ins1   INSERT 1, step1, st2
 .step1
 .sa1    BRA sag_1
         ZA_CANJUMP sag_1, sa_end1
@@ -771,7 +881,7 @@ ENDMACRO
 .mode2    JMP ins2                    ; patched: ins2 or paint2
             ZA_CANJUMP ins2, paint2
         ENDIF
-.ins2   INSERT 2, step2
+.ins2   INSERT 2, step2, st3
 .step2
 .sa2    BRA sag_2
         ZA_CANJUMP sag_2, sa_end2
@@ -794,7 +904,7 @@ ENDMACRO
 .mode3    JMP ins3                    ; patched: ins3 or paint3
             ZA_CANJUMP ins3, paint3
         ENDIF
-.ins3   INSERT 3, step3
+.ins3   INSERT 3, step3, st0
 .step3
 .sa3    BRA sag_3
         ZA_CANJUMP sag_3, sa_end3
@@ -809,6 +919,11 @@ ENDMACRO
 .seg_end3
         JMP seg_end
 
+.st0    STRETCH 0, entry0
+.st1    STRETCH 1, entry1
+.st2    STRETCH 2, entry2
+.st3    STRETCH 3, entry3
+
 \ The patched BRAs' offsets, the same in every copy and for both chains.
 CHK_TEST  = chk_test0 - (chk0 + 2)
 CHK_SKIP  = chk_end0 - (chk0 + 2)
@@ -818,6 +933,7 @@ ASSERT chk_test3 - (chk3 + 2) = CHK_TEST AND chk_end3 - (chk3 + 2) = CHK_SKIP
 STEP_G    = sag_0 - (sa0 + 2)
 STEP_NONE = sa_end0 - (sa0 + 2)
 ASSERT STEP_NONE < 128
+ASSERT STEP_G = 0 AND STEP_NONE <> 0    ; (INSERT's fresh paths: both vertical when the two AND to non-zero)
 ASSERT sbg_0 - (sb0 + 2) = STEP_G AND sb_end0 - (sb0 + 2) = STEP_NONE
 ASSERT sag_1 - (sa1 + 2) = STEP_G AND sa_end1 - (sa1 + 2) = STEP_NONE
 ASSERT sbg_1 - (sb1 + 2) = STEP_G AND sb_end1 - (sb1 + 2) = STEP_NONE
