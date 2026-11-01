@@ -432,6 +432,51 @@ ENDMACRO
 CUBE_PARENT = {0, 0, 0, 1, 0, 1, 2, 3}
 CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
 
+\ Under a level camera (mat_tilt 0) M's y row and column are (0, 64, 0), so
+\ the cache's edges along x and z have y 0 and the one along y has x and z
+\ 0, exactly: those coordinates are copies.
+\ V_XZ d, s, e: vertex d = vertex s + cache slot X + e's vector, an edge along
+\ x or z: x and z added, y copied
+MACRO V_XZ d, s, e
+    LDA vx0+s : CLC : ADC ca_x0+e,X : STA vx0+d
+    LDA vx1+s : ADC ca_x1+e,X : STA vx1+d
+    LDA vx2+s : ADC ca_x2+e,X : STA vx2+d
+    LDA vz0+s : CLC : ADC ca_z0+e,X : STA vz0+d
+    LDA vz1+s : ADC ca_z1+e,X : STA vz1+d
+    LDA vz2+s : ADC ca_z2+e,X : STA vz2+d
+    LDA vy0+s : STA vy0+d
+    LDA vy1+s : STA vy1+d
+    LDA vy2+s : STA vy2+d
+ENDMACRO
+\ V_UP d, s, e: the same along y: y added, x and z copied
+MACRO V_UP d, s, e
+    LDA vy0+s : CLC : ADC ca_y0+e,X : STA vy0+d
+    LDA vy1+s : ADC ca_y1+e,X : STA vy1+d
+    LDA vy2+s : ADC ca_y2+e,X : STA vy2+d
+    LDA vx0+s : STA vx0+d
+    LDA vx1+s : STA vx1+d
+    LDA vx2+s : STA vx2+d
+    LDA vz0+s : STA vz0+d
+    LDA vz1+s : STA vz1+d
+    LDA vz2+s : STA vz2+d
+ENDMACRO
+\ V_COPY d, s, u: vertex d's x and z vertex s's, its y vertex u's
+MACRO V_COPY d, s, u
+    LDA vx0+s : STA vx0+d
+    LDA vx1+s : STA vx1+d
+    LDA vx2+s : STA vx2+d
+    LDA vz0+s : STA vz0+d
+    LDA vz1+s : STA vz1+d
+    LDA vz2+s : STA vz2+d
+    LDA vy0+u : STA vy0+d
+    LDA vy1+u : STA vy1+d
+    LDA vy2+u : STA vy2+d
+ENDMACRO
+\ V_IF j: on past the next unless vertex j is wanted (transform_object's want)
+MACRO V_IF j, past
+    LDA #1 << j : BIT transform_object.want : BEQ past
+ENDMACRO
+
 .transform_object
 {
     ZA_ENTRY
@@ -483,6 +528,9 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     V_ADD 3, 0, 2
     RTS
 .cuboid
+    LDA mat_tilt : BNE tilted
+    JMP level
+.tilted
     \ The vertices wanted and those they're built from: 7 from 3, 3 and 5
     \ from 1, 6 from 2, the rest from 0, which is always made.
     LDA want
@@ -503,6 +551,48 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
         V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
     .skip
     NEXT
+    RTS
+.level
+    \ A level camera's: 1, 4 and 5 (5 from 1) by x and z from 0, their y
+    \ 0's; 2 by y from 0; 3, 6 and 7 copies, x and z from 1, 4 and 5, y from
+    \ 2. So 7 wants 5, 5 and 3 want 1, 6 wants 4, and 3, 6 and 7 want 2.
+    LDA want
+    BIT #&80 : BEQ l_no7
+    ORA #&20
+.l_no7
+    BIT #&28 : BEQ l_no35
+    ORA #&02
+.l_no35
+    BIT #&40 : BEQ l_no6
+    ORA #&10
+.l_no6
+    BIT #&C8 : BEQ l_no367
+    ORA #&04
+.l_no367
+    STA want
+    LDX slot
+    V_SUB 0
+    V_IF 1, l_1
+    V_XZ 1, 0, 1
+.l_1
+    V_IF 4, l_4
+    V_XZ 4, 0, 3
+.l_4
+    V_IF 5, l_5
+    V_XZ 5, 1, 3
+.l_5
+    V_IF 2, l_2
+    V_UP 2, 0, 2
+.l_2
+    V_IF 3, l_3
+    V_COPY 3, 1, 2
+.l_3
+    V_IF 6, l_6
+    V_COPY 6, 4, 2
+.l_6
+    V_IF 7, l_7
+    V_COPY 7, 5, 2
+.l_7
     RTS
 }
 
