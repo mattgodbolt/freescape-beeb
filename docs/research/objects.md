@@ -20,6 +20,12 @@ make objects-nocache  # the same with the transform's cache off (the measurement
 node tools/objectcheck.mjs build/objects --entrance --profile   # the entrance views and their
                                                                 # walks, cycles by routine
 node tools/objectcheck.mjs build/objects --entrance --profile-walks   # the walks' steps alone
+node tools/objectcheck.mjs build/objects --entrance --quiet --json NEW.json --compare OLD.json
+                                      # each stage against an earlier run's, view for view
+node tools/objectcheck.mjs build/objects --entrance --profile-walks --fine --top 60
+                                      # by every label, scoped ones too
+.venv/bin/python -I tools/model/render.py --diff clip.SIDE_RECIP build/data/driller.json build/zx/views
+                                      # a model flag's pixels, and the ZX oracle's agreement
 ```
 
 `make objects` needs `make colours` and the maths' tables (`make maths`'s
@@ -212,14 +218,17 @@ M, below). A polygon object's vertices go first, then its faces:
   within 2^(n + 2), n the bit length of z, as two's complement, so a byte or
   two of each coordinate against tables indexed by n (`band_*`), and z's
   top two bytes for the near plane (`ZNEAR` is 256, ASSERTed), inline in the
-  pass (`BAND_TEST`). The band is inside the guard band (the model asserts),
-  so everything decision 17 bought still holds. Then each vertex of a face
-  with no vertex off the band (every vertex used, when none is off) is
-  projected once (`vertex_shared`), in an order for the object's kind
-  (`vp_order`: a cuboid's vertices i and i + 2 share x and z under a level
-  camera, so do a rectangle's along y) that lets `project_y` and
-  `project_z` take a vertex sharing the last one's x and z, or z, with its
-  outcode against the view (a `project_y` vertex's x part the last one's).
+  pass (`BAND_TEST`; from z's middle byte `BAND_MID` up, z's top bytes
+  alone decide, as past 65,536). The band is inside the guard band (the
+  model asserts), so everything decision 17 bought still holds. Then each
+  vertex of a face with no vertex off the band (every vertex used, when none
+  is off) is projected once (`vertex_shared`), in an order for the object's
+  kind, written out (`vp_cuboid`, `vp_rect_x` ..: a cuboid's vertices i and
+  i + 2 share x and z under a level camera, so do a rectangle's along y)
+  that lets `project_y` and `project_z` take a vertex sharing the last one's
+  x and z, or z, with its outcode against the view (a `project_y` vertex's x
+  part the last one's). Under a level camera (`mat_tilt` 0) the upper vertex
+  of such a pair goes by `vertex_up`, `project_y` without the compares.
 - **A face projected whole** (`poly_face`): its vertices go straight into
   the output (`out_v*` from `out_vn`) as they're gathered, with their
   outcodes' AND, which drops it, and OR. Wholly inside, and with no vertex
@@ -246,7 +255,15 @@ M, below). A polygon object's vertices go first, then its faces:
     quarter-square reader once for both (`en_mul`: a signed 24-bit
     coordinate by a byte, its raw top byte's excess taken off), and an entry
     of ±64 is a shift (`en_shl6`; a level camera's column for y is (0, 64,
-    0)). Any other edge's is cut16(A) × cut16(B − A), 16-bit products.
+    0)). Under a level camera (`mat_tilt` 0: M's y row and column (0, 64,
+    0)) the same N comes by the cofactor identity A × M e_k = cof(M) (D ×
+    e_k), D = A's world offset from the eye (A = M D): along y it's (−64 Az,
+    0, 64 Ax); along x (m20 Ay, d dz, −m00 Ay) and along z (m22 Ay, −d dx,
+    −m02 Ay), d = `mat_d` = m00 m22 − m02 m20, the y cofactor, which
+    `matrix_build` keeps and patches into `en_dmul` (a shift when it's 4096,
+    a yaw a multiple of 90 degrees). Exact, as the general way's, with two
+    byte products and one of d fewer than the general way's four. Any other
+    edge's is cut16(A) × cut16(B − A), 16-bit products.
   - The normal is shifted right until it fits `LINE_BITS`, N' (one bit
     length for the three components, then their 16-bit windows shifted
     together), and the line is f(x, y) = A x + B y + C, A = −2 N'x, B =
@@ -268,9 +285,14 @@ M, below). A polygon object's vertices go first, then its faces:
     a side of the rectangle, or the kept line it runs along, so a crossing
     knows what it's on. **On a side** it's the line's own crossing with that
     side (`side_cut`, the model's `side_crossing`): from the side's corner
-    inside the line, f there over |A| (or |B| down the sides), rounded half
-    up, by an eleven-step division, the same point whatever piece of the
-    side is being cut. **Along a line** whose edge shares a vertex with the
+    inside the line, f there over |A| (or |B| down the sides), the same
+    point whatever piece of the side is being cut, by the 2D clip's
+    reciprocals (`clip.side_d`, `SIDE_RECIP`: a's nine bits, and a product
+    of sixteen bits by nine, at most the side's length) where it was an
+    eleven-step division rounded half up. A line square to two sides (B zero,
+    a level camera's vertical edge's, or A zero) crosses both at the same
+    point, which `side_cut` keeps for the second (`ln_scl`, `ln_sch`), and
+    the passes add no term for a zero coefficient. **Along a line** whose edge shares a vertex with the
     cutting line's edge, the two lines meet at that vertex's image: if the
     projection takes the vertex, its projected position, clamped to the
     rectangle (projected then if the vertex pass hadn't), the point a face
@@ -314,9 +336,10 @@ M, below). A polygon object's vertices go first, then its faces:
   faces sharing an edge cut it at the same point.
 - **The drawn test** (`clip.drawable`, on the polygon staged in the
   output): three vertices or more, one off the line through the first two,
-  decided by the products' signs and zeros where it can be, then by the
-  sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger, and the
-  other way about), else by two 16 × 16 products.
+  decided by the products' zeros and signs where it can be (from the
+  differences' bytes, no size taken), then by the sizes' order (|dx| > |dy|
+  and |ey| > |ex| make dx ey the larger, and the other way about), else by
+  two 16 × 16 products.
 
 ## Stage 7: the sort (`src/order.6502`)
 
@@ -338,7 +361,9 @@ in a register, and works out the entries' keys only when it doesn't. A turn
 keeps the cells, so a turning frame's compares are remembered; so is every
 repeat of a pair within a frame. `cache_reset` (a new area, or an object
 moved) clears the memory (`sort_forget`); `cache_empty` (a new orientation)
-leaves it.
+leaves it. And a draw list the same as the last sort's, slot for slot,
+under the same generation, has every compare the same, so it takes that
+sort's order (`so_save`, `so_lobj`, `so_lord`; a cleared memory forgets it).
 
 ## The output: what the rasteriser reads
 
@@ -399,8 +424,8 @@ and compares the matrix, the candidates and their masks, every candidate's
 camera-space vertices (read as `transform_object` returns), every
 candidate's drawn faces, the order and the output, exactly; the work no
 output need show, because what it would change can be cut away later (the
-lines the cone makes, `edge_line`'s calls, and the vertices projected,
-`vertex_shared`'s); and that nothing outside the pipeline's memory was
+lines the cone makes, `edge_line`'s calls, and the vertices projected, the
+calls of the projection's three entries); and that nothing outside the pipeline's memory was
 written. It reports each stage's
 cycles (each instruction's to the innermost stage routine running) and the
 arithmetic's calls; `--profile` gives cycles by routine.
@@ -603,6 +628,64 @@ cone, the projected faces' path (vertex pass, projection, faces, drawn
 test) is the frame's largest block; `vertex_shared`'s own copies and
 compares cost about what the projection's arithmetic does.
 
+## The sixth round: the room spent (track V)
+
+Track V took stages 1-7 through another round once the 192-line screen
+had freed room (`docs/research/live.md`, "Room"), each change profiled
+first (`objectcheck.mjs --profile-walks`, now with `--fine` for every label
+and `--compare` against an earlier run's `--json`), and kept only if it
+measured faster; all exact against the model but the last, a proposed
+decision. The figures, before and after, by stage, step and turn, on the
+yaw sweeps as well as the entrances (most of whose cameras face along an
+axis, where a level camera's horizontal edges cost least the old way), and
+the live disc's, are in the journal's entry for track V.
+
+Kept:
+
+- **The sort's last order** (`so_save`): a draw list the same as the last
+  sort's under the same generation takes its order. A step's sort, which
+  the memory had made mostly look-ups, is mostly a compare of the lists.
+- **A level camera's edge planes by the cofactors** (above): fewer
+  products for a horizontal box edge at a general yaw, and none for a
+  vertical one; at a yaw along an axis (the entrances') about even with the
+  general way, whose products there were shifts.
+- **The vertex pass's orders written out**, and `vertex_up` for a level
+  camera's upper vertices (no compares); `vertex_shared` keeps `vs_last`.
+  The orders as calls of a routine that tested the need measured slower,
+  for a few hundred bytes less; the tests stay at the calls.
+- **The band at middle distances** by the top bytes alone.
+- **The drawn test's zeros and signs first**, the sizes only when needed.
+- **Lines square to two sides**: one crossing for both, and no term for a
+  zero coefficient in the passes.
+- **The side crossings by a reciprocal** (proposed below).
+
+Counted and not built:
+
+- **A level camera's transform by copies** (an edge along y adds to y
+  alone, one along x or z leaves y): copies for a third to two thirds of
+  each vertex's adds, for written-out adds of their own, some hundreds of
+  bytes of the bank; the room went to the above.
+- **The side crossings exact by a reciprocal and a correction** (the
+  remainder's sign, a step or two): about half the inexact one's saving by
+  the count, with more code in `ObjMore`, which has least room.
+
+What's left:
+
+- **The lines** (`edge_line`, `edge_normal`) are still the frame's largest
+  block. Most of a cone face's edges have one end the projection takes and
+  the other behind the eye or off the band; such a line is the line through
+  that end's image toward the edge's vanishing point, which needs no 32-bit
+  normal and no window of it (a picture change: the image's accuracy, not
+  the plane's, a proposal to measure). An edge with both ends taken is the
+  line through their images, as a face projected whole has it.
+- **The vertex pass and the projection**: the copies into the projection's
+  arguments (it could read the vertex arrays, but its interface is the
+  maths check's, `tools/mathscheck.6502`), and `pmul`'s calls (written into
+  each block, if the projection's code moved into the front end's bank,
+  which the live disc's map, `src/live.6502`, places).
+- **The faces' gather** (`poly_face`) and the transform's adds, each a few
+  per cent.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -681,6 +764,17 @@ each and the ZX oracle, are in the journal's entry):
 4. **The 2D clip's crossings by a reciprocal** (amending decision 24): t
    from a nine-bit reciprocal of the ends' distance and two byte products,
    within about 2^-8 of the division's, still from the inside end.
+
+From the sixth round (track V; the pixel figures, against the model before
+it and the ZX oracle, are in the journal's entry, by `render.py --diff
+clip.SIDE_RECIP`):
+
+5. **The cone's side crossings by a reciprocal** (amending decision 41's
+   side crossings): a line's crossing with the rectangle's side, f(K) / a,
+   from the 2D clip's nine-bit reciprocal of a and a product of sixteen bits
+   by nine, rounded and at most the side's length (`clip.side_d`), in place
+   of an eleven-step division rounded half up; still the line's own point
+   whatever the polygon. The draw order is unchanged in every view measured.
 
 ## What's left
 
