@@ -667,11 +667,12 @@ ENDMACRO
 ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 
 \ clip2d: the polygon in pa clipped to the view's rectangle, [0, CLIP_W] x
-\ [0, CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges
-\ a vertex is beyond (OC_*): the passes for the others are skipped, as
+\ [0, CLIP_H] (the model's clip2d), then its repeats dropped and staged in
+\ the output (dedupe_stage): C clear if nothing's drawn. A = the edges a
+\ vertex is beyond (OC_*): the passes for the others are skipped, as
 \ they'd change nothing (a crossing lies between its edge's ends, so it
 \ isn't beyond an edge neither of them is). Each pass writes the other half
-\ of the pa and pb arrays; the polygon comes back to pa at the end.
+\ of the pa and pb arrays.
 .clip2d
 {
     ZA_AUTO1 m, i, ip, iq, edges, src, end
@@ -682,6 +683,7 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 .pass1
     CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, 0, FALSE
     BNE pass2
+    CLC
     RTS
 .pass2
     LDA #OC_RIGHT : BIT edges : BNE pass2_do
@@ -689,6 +691,7 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 .pass2_do
     CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
     BNE pass3
+    CLC
     RTS
 .pass3
     LDA #OC_TOP : BIT edges : BNE pass3_do
@@ -696,6 +699,7 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 .pass3_do
     CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, 0, FALSE
     BNE pass4
+    CLC
     RTS
 .pass4
     LDA #OC_BOTTOM : BIT edges : BNE pass4_do
@@ -703,20 +707,11 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 .pass4_do
     CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
     BNE passed
+    CLC
     RTS
 .passed
-    \ in pb: down to pa
-    LDA src : BEQ in_pa
-    LDX p_n
-.down
-    DEX
-    LDA pb_xl,X : STA pa_xl,X
-    LDA pb_xh,X : STA pa_xh,X
-    LDA pb_yl,X : STA pa_yl,X
-    LDA pb_yh,X : STA pa_yh,X
-    TXA : BNE down
-.in_pa
-    JMP dedupe
+    LDY src
+    JMP dedupe_stage
 }
 
 ENDSECTION
@@ -962,6 +957,73 @@ ENDMACRO
     RTS
 }
 
+\ dedupe_stage: the polygon (p_n vertices) in pa, or in pb when Y = NP2,
+\ without repeated vertices next to each other, the last and first included
+\ (the model's dedupe), staged in out_v from out_vn and not yet counted
+\ (stage_pa's): C clear if fewer than three are left, or if they wouldn't
+\ fit (out_over set). Straight into out_v when the polygon as it comes
+\ would fit; else deduped where it is (dedupe) and then staged (stage_pa),
+\ so that only what's left is measured against the room.
+.dedupe_stage
+{
+    ZA_AUTO1 end
+    LDA p_n : CMP #3 : BCC none
+    LDA tf_n : CMP #OUT_FACES : BCS slow
+    LDA out_vn : CLC : ADC p_n : BCC fast
+.slow
+    \ in pb: down to pa first
+    CPY #0 : BEQ in_pa
+    LDX p_n
+.down
+    DEX
+    LDA pb_xl,X : STA pa_xl,X
+    LDA pb_xh,X : STA pa_xh,X
+    LDA pb_yl,X : STA pa_yl,X
+    LDA pb_yh,X : STA pa_yh,X
+    TXA : BNE down
+.in_pa
+    JSR dedupe
+    JMP stage_pa
+.none
+    CLC
+    RTS
+.fast
+    TYA : CLC : ADC p_n : STA end
+    LDX out_vn
+    \ the first vertex, then each unlike the last one kept
+    LDA pa_xl,Y : STA out_vxl,X
+    LDA pa_xh,Y : STA out_vxh,X
+    LDA pa_yl,Y : STA out_vyl,X
+    LDA pa_yh,Y : STA out_vyh,X
+.next
+    INY : CPY end : BEQ wrap
+    LDA pa_xl,Y : CMP out_vxl,X : BNE differ
+    LDA pa_xh,Y : CMP out_vxh,X : BNE differ
+    LDA pa_yl,Y : CMP out_vyl,X : BNE differ
+    LDA pa_yh,Y : CMP out_vyh,X : BEQ next
+.differ
+    INX
+    LDA pa_xl,Y : STA out_vxl,X
+    LDA pa_xh,Y : STA out_vxh,X
+    LDA pa_yl,Y : STA out_vyl,X
+    LDA pa_yh,Y : STA out_vyh,X
+    BRA next
+.wrap
+    \ while more than one and the last is the first, the last dropped
+    LDY out_vn
+.tail
+    CPX out_vn : BEQ counted
+    LDA out_vxl,X : CMP out_vxl,Y : BNE counted
+    LDA out_vxh,X : CMP out_vxh,Y : BNE counted
+    LDA out_vyl,X : CMP out_vyl,Y : BNE counted
+    LDA out_vyh,X : CMP out_vyh,Y : BNE counted
+    DEX : BRA tail
+.counted
+    TXA : SEC : SBC out_vn : INC A : STA p_n
+    CMP #3                              ; (C set: three or more)
+    RTS
+}
+
 \ commit: the polygon staged in out_v (p_n vertices from out_vn) as a drawn
 \ face of colour A: its record into tf_*, its vertices counted.
 .commit
@@ -1147,8 +1209,7 @@ ASSERT VMAX + 5 <= VALL                 ; (a new vertex a plane at most)
     JSR point_square
 .widened
     LDA #OC_LEFT OR OC_RIGHT OR OC_TOP OR OC_BOTTOM
-    JSR clip2d
-    JSR stage_pa : BCC rejected
+    JSR clip2d : BCC rejected
     JSR drawable : BCC rejected
     LDX face : LDA fa_col,X
     JMP commit
@@ -2654,8 +2715,9 @@ ENDMACRO
     RTS
 
 \ cone_face: face X of the object being drawn, the projection unable to
-\ take some vertex of it, as the cone's polygon in pa (p_n vertices, its
-\ repeats dropped): C clear if nothing's left. (render.py's draw_faces and
+\ take some vertex of it, as the cone's polygon, its repeats dropped and
+\ staged in the output (dedupe_stage): C clear if nothing's left, or fewer
+\ than three vertices, or no room. (render.py's draw_faces and
 \ edge_lines, and clip.py's cone_clip.) An edge with both ends at or behind
 \ the eye (z <= 0) has no line; the lines of those with both in front come
 \ first, then those with one, each in the loop's order.
@@ -2745,23 +2807,11 @@ ENDMACRO
     LDA rect_y+4,X : STA pa_yh,X
     DEX : BPL corner
     LDA #4 : STA p_n
-    BRA deduped
+    LDY #0
+    JMP dedupe_stage
 .clipped
-    \ in pb: down to pa
-    LDA cp_src : BEQ in_pa
-    LDX p_n
-.down
-    DEX
-    LDA pb_xl,X : STA pa_xl,X
-    LDA pb_xh,X : STA pa_xh,X
-    LDA pb_yl,X : STA pa_yl,X
-    LDA pb_yh,X : STA pa_yh,X
-    TXA : BNE down
-.in_pa
-    JSR dedupe
-.deduped
-    SEC
-    RTS
+    LDY cp_src
+    JMP dedupe_stage
 .rect_x
     EQUB LO(RECT_X(0..3))
     EQUB HI(RECT_X(0..3))
@@ -3315,9 +3365,9 @@ ENDMACRO
     JSR clip2d
     BRA staged
 .repeats
-    JSR dedupe
+    LDY #0 : JSR dedupe_stage
 .staged
-    JSR stage_pa : BCC rejected
+    BCC rejected
     JSR drawable : BCC rejected
     LDX face : LDA fa_col,X
     JMP commit
@@ -3364,7 +3414,6 @@ ENDMACRO
     BRA next
 .hard
     JSR cone_face : BCC next
-    JSR stage_pa : BCC next
     JSR drawable : BCC next
     LDX face : LDA fa_col,X
     JSR commit
