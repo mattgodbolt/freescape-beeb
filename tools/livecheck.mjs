@@ -63,16 +63,23 @@
 //
 // - every flip shows the buffer of the one frame handed over since the last,
 //   after it was shown whole; at every flip both buffers hold the same
-//   outside the view (decision 21), and at every eighth the text there is
-//   text_shown's in the widened font and its lines' inks;
-// - every frame handed over wants its area's lines (its name, and the
-//   entrance, or the game's end) and they're drawn;
+//   outside the view (decision 21), and that is the panel's picture with
+//   the cells panel_shown has drawn over it, as the model renders them
+//   (src/panel.6502, tools/model/panel.py: through tools/mkpanel.py
+//   --check, after the run);
+// - every time the disc sets the panel's values (panel_values: after each
+//   pass, with the logic), the cells it wants are the model's for the
+//   original's variables (the transcription's state, with the logic; with
+//   the free camera, its camera and the variables as the game starts), but
+//   the frames a second; and settled, the panel is drawn as wanted within
+//   PANEL_FIELDS fields;
+// - every frame handed over wants its area's name and message (with the
+//   free camera, its entrance), and they're drawn;
 // - every write to the view comes between frame_begin and frame_end, into
 //   the buffer not shown; outside the view, a write to the buffer shown
 //   comes with the beam above the written character row;
-// - the BBC's own timing of each half (clock_to's span_us, from User VIA T2),
-//   which its figures show, is within CLOCK_SLACK cycles of the harness's
-//   count of the same call;
+// - the BBC's own timing of each half (clock_to's span_us, from User VIA T2)
+//   is within CLOCK_SLACK cycles of the harness's count of the same call;
 // - the idle loop (docs/research/live.md): every loop that draws nothing
 //   (live_idle) finds the inputs of the frame last handed over, all its view
 //   is made from (the area and its entries, the camera, the objects' hidden
@@ -191,8 +198,8 @@ const LV_CAM = sym("lv_cam"), LV_AREA = sym("lv_area");
 const SPAN_US = sym("span_us"), T_FRONT = sym("T_FRONT"), T_FILL = sym("T_FILL");
 const CLOCK_TO = sym("clock_to"), CLOCK_READ = sym("clock.again");
 let lastClock = null;
-const TEXT_WAITING = sym("text_catch_up.waiting");
-let textWaits = 0; // frames that waited for the beam to catch the text up
+const PANEL_WAITING = sym("panel_catch_up.waiting");
+let panelWaits = 0; // frames that waited for the beam to catch the panel up
 // The idle loop (docs/research/live.md): live_idle is where live_loop finds the
 // frame's inputs as the last frame handed over had them and draws nothing.
 // (A disc without it draws every frame: then "settled" means a standing
@@ -268,8 +275,10 @@ cpu.debugInstruction.add((addr, opcode) => {
         onPassed(cpu.a);
     } else if (!FREE && addr === LV_TAKING) {
         lastTaking = now();
-    } else if (addr === TEXT_WAITING) {
-        textWaits++;
+    } else if (addr === PANEL_WAITING && bank === BANK_DATA) {
+        panelWaits++;
+    } else if (addr === PANEL_VALUED && bank === BANK_DATA) {
+        onValued();
     } else if (addr === IDLE) {
         onIdle();
     } else if (addr === CLOCK_READ) {
@@ -342,7 +351,7 @@ cpu.debugInstruction.add((addr, opcode) => {
                 fail(`frame ${current.n}: the BBC timed ${half} at ${2 * us} cycles, the harness ${span}`);
             else clockChecked++;
         }
-        checkText(current);
+        checkLines(current);
         frames.push(current);
         pending.push(current);
         if (pending.length > 1) fail(`frame ${current.n} handed over before frame ${pending[0].n} was shown`);
@@ -350,49 +359,92 @@ cpu.debugInstruction.add((addr, opcode) => {
     return false;
 });
 
-// The text (src/text.6502).
-const TEXT_WANT = sym("text_want"), TEXT_SHOWN = sym("text_shown"), TEXT_CELLS = sym("TEXT_CELLS");
-const TEXT_COLS = sym("TEXT_COLS"), GLYPH = sym("GLYPH"), TEXT_FIRST = sym("TEXT_FIRST"), TEXT_LAST = sym("TEXT_LAST");
-const TEXT_FONT = sym("text_font"), TEXT_INK = sym("text_ink"), TEXT_ROW = sym("text_row");
-const latin = (a, n) => Buffer.from(ram.subarray(a, a + n)).toString("latin1");
-const cellAt = (cell) => (ram[TEXT_ROW + Math.floor(cell / TEXT_COLS)] << 8) + (cell % TEXT_COLS) * GLYPH;
-const centred = (s) => {
-    const pad = TEXT_COLS - s.length;
+// The panel (src/panel.6502, tools/model/panel.py). Its cells (panel_want,
+// panel_shown) are the model's flat() order; tools/mkpanel.py --check gives
+// what the model makes of them, after the run (checkPanel).
+const BANK_DATA = sym("BANK_DATA");
+const PANEL_WANT = sym("panel_want"), PANEL_SHOWN = sym("panel_shown"), PANEL_CELLS = sym("PANEL_CELLS");
+const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALUED = sym("panel_values.valued");
+const PF = (f) => [sym(`PF_${f}`), sym(`PN_${f}`)];
+const [PF_NAME, PN_NAME] = PF("NAME"), [PF_MESSAGE, PN_MESSAGE] = PF("MESSAGE"), [PF_FPS, PN_FPS] = PF("FPS");
+const panelBuild = JSON.parse(fs.readFileSync(path.join(root, "build/panel/panel.json"), "utf8"));
+const charset = panelBuild.charset;
+const cellsOf = (s) => [...s.toUpperCase()].map((ch) => charset.indexOf(ch));
+const centred = (s, n) => {
+    s = s.trim();
+    const pad = n - s.length;
     return " ".repeat(pad >> 1) + s + " ".repeat(pad - (pad >> 1));
 };
-let textChecked = 0;
-function checkText(frame) {
-    const name = centred(live.areas[frame.area].name);
-    let second;
+const panelCells = (a) => [...ram.subarray(a, a + PANEL_CELLS)];
+// the free camera's message (tools/model/panel.py's entrance_message)
+const entranceMessage = (id, demo) => ` ${demo ? "    DEMO" : "ENTRANCE"} ${id >= 10 ? Math.floor(id / 10) : " "}${id % 10}  `;
+// Every frame handed over wants its area's name, and shows it, and its
+// message: with the free camera, its entrance (and the demo); with the
+// logic, what the panel's values set (checked against the model's, below).
+let linesChecked = 0;
+function checkLines(frame) {
+    const want = panelCells(PANEL_WANT), shown = panelCells(PANEL_SHOWN);
+    const name = cellsOf(centred(live.areas[frame.area].name, PN_NAME)).join();
+    const range = (cells, f, n) => cells.slice(f, f + n).join();
+    if (range(want, PF_NAME, PN_NAME) !== name || range(shown, PF_NAME, PN_NAME) !== name)
+        fail(`frame ${frame.n} (area ${frame.area}) doesn't want and show its name: ${range(want, PF_NAME, PN_NAME)} and ${range(shown, PF_NAME, PN_NAME)}, not ${name}`);
+    if (range(want, PF_MESSAGE, PN_MESSAGE) !== range(shown, PF_MESSAGE, PN_MESSAGE))
+        fail(`frame ${frame.n} (area ${frame.area}) handed over without its message drawn`);
     if (FREE) {
         const e = live.entrances[frame.entrance];
-        second = `entrance ${String(e.entrance).padStart(2)} ${frame.demo ? "demo" : "    "}`;
+        const message = cellsOf(entranceMessage(e.entrance, frame.demo)).join();
+        if (range(want, PF_MESSAGE, PN_MESSAGE) !== message)
+            fail(`frame ${frame.n}: the message's cells ${range(want, PF_MESSAGE, PN_MESSAGE)}, not ${message} (${e.name}${frame.demo ? ", demo" : ""})`);
         if (e.area !== frame.area) fail(`frame ${frame.n}: entrance ${e.name} in area ${frame.area}`);
-    } else second = frame.over ? centred("game over") : " ".repeat(TEXT_COLS);
-    const lines = name + second;
-    if (latin(TEXT_WANT, lines.length) !== lines)
-        fail(`frame ${frame.n} (area ${frame.area}) wants the text ${JSON.stringify(latin(TEXT_WANT, lines.length))}, not ${JSON.stringify(lines)}`);
-    if (latin(TEXT_SHOWN, lines.length) !== lines)
-        fail(`frame ${frame.n} (area ${frame.area}) handed over showing ${JSON.stringify(latin(TEXT_SHOWN, lines.length))}`);
-    textChecked++;
+    }
+    linesChecked++;
 }
-let glyphsChecked = 0;
-function checkGlyphs(buffer, what) {
-    glyphsChecked++;
-    for (let cell = 0; cell < TEXT_CELLS; cell++) {
-        let ch = ram[TEXT_SHOWN + cell];
-        if (ch < TEXT_FIRST || ch > TEXT_LAST) ch = 32;
-        const ink = ram[TEXT_INK + Math.floor(cell / TEXT_COLS)];
-        // (the font is in BANK_DATA, after LiveData)
-        const font = fontByte(TEXT_FONT + (ch - TEXT_FIRST) * GLYPH);
-        const at = cellAt(cell);
-        for (let i = 0; i < GLYPH; i++)
-            if (bufferByte(buffer, at + i) !== (font(i) & ink))
-                return fail(`${what}: cell ${cell}'s ${hex(at + i, 4)} isn't ${JSON.stringify(String.fromCharCode(ch))}'s`);
+// Each flip: the cells shown and the screen outside the view (both buffers
+// alike, as flipped() checks): each different set of cells shown is
+// rendered by the model after the run, and a set seen again must have the
+// same screen.
+const shownStates = new Map(); // cells shown, joined -> {index, screen, flip}
+let panelFlips = 0;
+function recordPanel(buffer, flip) {
+    const cells = panelCells(PANEL_SHOWN);
+    const key = cells.join();
+    const screen = Uint8Array.from(ram.subarray(SCREEN + (buffer ? 0x8000 : 0), 0x8000 + (buffer ? 0x8000 : 0)));
+    panelFlips++;
+    const was = shownStates.get(key);
+    if (!was) shownStates.set(key, { index: shownStates.size, cells, screen, flip });
+    else {
+        for (let i = 0; i < SCREEN_BYTES; i++)
+            if (!viewMask[i] && was.screen[i] !== screen[i])
+                return fail(`flip ${flip}: ${hex(SCREEN + i, 4)} isn't as at flip ${was.flip}, with the same cells shown`);
     }
 }
-const BANK_DATA = sym("BANK_DATA");
-const fontByte = (a) => (i) => ram[bankAt(BANK_DATA, a + i)];
+// Each time the disc sets the panel's values (panel_values): the cells it
+// wants, and what they're from: the original's variables (with the logic
+// the transcription's, panelMem; with the free camera its own, which stay
+// as the game starts), the area whose name shows, the game's end, and with
+// the free camera its position, yaw and pitch.
+const ZXV_ = sym("zxv");
+const PANEL_ZX = { Score: [0x8872, 3], Energy: [0x8875, 1], Shield: [0x8878, 1], Step: [0x876a, 1], Turn: [0x876f, 1],
+    Player: [0x8762, 6], Pitch: [0x876c, 2], InJet: [0x877a, 1], ExtLevel: [0x8772, 1], AreaScale: [0x8779, 1],
+    AreaId: [0x8862, 1], CrossOn: [0x88a2, 1], ShootMode: [0x88ac, 1] };
+const RIG_PLACED = 0x877b;
+const memOf = (byte) => {
+    const out = [];
+    for (const [a, n] of Object.values(PANEL_ZX)) for (let i = 0; i < n; i++) out.push([a + i, byte(a + i)]);
+    const rig = RIG_PLACED + ((byte(0x8862) - 1) & 0xff);
+    out.push([rig, byte(rig)]);
+    return out;
+};
+let panelMem = () => memOf((a) => ram[ZXV_ + a - sym("ZXV_ORG")]);
+const valued = [];
+function onValued() {
+    const v = { want: panelCells(PANEL_WANT), mem: panelMem(), area: ram[PANEL_AREA], over: ram[PANEL_OVER], script };
+    if (FREE) {
+        const c = camera();
+        v.cam = [c[0], c[1], c[2], c[3], c[4]];
+    }
+    valued.push(v);
+}
 
 // The view's bytes, by offset from SCREEN.
 const SCREEN_BYTES = 0x8000 - SCREEN;
@@ -407,7 +459,7 @@ function flipped(to) {
     for (let i = 0; i < SCREEN_BYTES; i++)
         if (!viewMask[i] && ram[SCREEN + i] !== ram[SCREEN + i + 0x8000] && bad++ < 2)
             fail(`flip ${flips}: ${hex(SCREEN + i, 4)}, outside the view, differs between the buffers`);
-    if (flips % 8 === 1) checkGlyphs(to, `flip ${flips}`);
+    recordPanel(to, flips);
     const frame = pending.shift();
     if (!frame && !frames.length) return; // (handed over before the hooks went in)
     if (!frame) return fail(`flip ${flips} with no frame handed over`);
@@ -484,6 +536,18 @@ const standing = () => {
 };
 const settledNow = () => settledExtra() && (IDLE ? idleSeen : standing());
 const settle = (what) => until(settledNow, `${what}: settling`);
+// Settled, every cell of the panel is drawn as wanted within PANEL_FIELDS
+// fields: the loops that draw nothing find the beam's window once a field.
+const PANEL_FIELDS = 8;
+let panelSettled = 0;
+async function panelDrawn(what) {
+    const drawn = () => panelCells(PANEL_WANT).join() === panelCells(PANEL_SHOWN).join();
+    for (let i = 0; !drawn(); i++) {
+        if (i >= PANEL_FIELDS) return fail(`${what}: the panel isn't drawn as wanted ${PANEL_FIELDS} fields on`);
+        await session.runFor(FIELD);
+    }
+    panelSettled++;
+}
 // ... then on to a point in the field from a fixed pseudo-random sequence,
 // so keys go down at any point of a field, as a player's do, the same
 // points on any disc
@@ -499,8 +563,8 @@ async function settleAndPress(what) {
 // A key pressed while idle is taken by a pass within KEY_FIELDS: it's
 // read at the next vertical sync (a field at most), and the next loop's
 // pass takes it, after the loop going round then, which may be drawing
-// the text below the view (text_sync, the beam's window at most) or
-// working out the figures (live_figures).
+// the panel (panel_sync, the beam's window at most) or working out the
+// figures (live_figures).
 const KEY_FIELDS = 2;
 const probes = [];
 let probe = null;
@@ -602,6 +666,8 @@ async function logicScript() {
 
     const exp = new Uint8Array(0x10000);
     for (const [a, v] of trace.start) exp[a] = v;
+    // the panel's values are the transcription's state's (onValued)
+    panelMem = () => memOf((a) => exp[a]);
     // The game's start, as the disc booted: its state now must be the
     // transcription's start; it's written back before each run.
     let diffs = compare();
@@ -818,6 +884,7 @@ async function logicScript() {
         if (waited) waiting();
         const d = compare();
         if (d.length) report(`${run.name}: the end`, d);
+        await panelDrawn(`${run.name}: the end`);
         if (failures === before) runsOk++;
     }
 
@@ -1028,6 +1095,7 @@ async function freeScript() {
     script = "still";
     await settle("after the demo");
     if (frames.at(-1).demo) fail("a key didn't stop the demo");
+    await panelDrawn("after the demo");
     await session.runFor(20 * FIELD);
     summary = `${ENTRANCES} entrances (${spaceOk} by SPACE), walks at ${walkAt.length} (${holdsOk} of ` +
         `${walkAt.length * HOLDS.length} holds as asked), the demo (${demoOk} steps)`;
@@ -1073,6 +1141,55 @@ for (const { frame, rows } of shown) {
         }
 }
 
+// --- The panel against the model (tools/mkpanel.py --check): every set of
+// cells a flip showed, rendered, is what the screen held outside the view
+// (the picture, and the cells' bytes); every time the disc set the
+// panel's values, the cells it wanted are the model's for the original's
+// variables then (the transcription's, with the logic), but the frames a
+// second (the disc's own measure) and with the free camera the message
+// (checkLines holds it to the entrance).
+const states = [...shownStates.values()];
+const pyPanel = spawnSync(path.join(root, ".venv/bin/python"), ["-I", path.join(root, "tools/mkpanel.py"), "--check"], {
+    input: JSON.stringify({ shown: states.map((s) => s.cells), valued }),
+    env: { ...process.env, FREESCAPE_DISPLAY: live.display },
+    maxBuffer: 1 << 30,
+});
+if (pyPanel.status !== 0) throw new Error(`the panel's model failed: ${pyPanel.stderr}`);
+const panelModel = JSON.parse(pyPanel.stdout);
+const picture = Buffer.from(panelModel.picture, "hex");
+const cellOffset = new Map(panelModel.offsets.map((o, k) => [o, k]));
+let statesOk = 0, valuedOk = 0;
+const fieldOf = (i) => {
+    for (let f = 0, at = 0; f < panelModel.fields.length; at += panelModel.fields[f][1], f++)
+        if (i < at + panelModel.fields[f][1]) return `${panelModel.fields[f][0]} ${i - at}`;
+    return `cell ${i}`;
+};
+for (const s of states) {
+    const cells = Buffer.from(panelModel.shown[s.index], "hex");
+    let bad = null;
+    for (let i = 0; i < SCREEN_BYTES && !bad; i++) {
+        if (viewMask[i]) continue;
+        const k = cellOffset.get(i);
+        const want = k === undefined ? picture[i] : cells[k];
+        if (s.screen[i] !== want) bad = `${hex(SCREEN + i, 4)} is &${s.screen[i].toString(16)}, the model's &${want.toString(16)}`;
+    }
+    if (bad) fail(`flip ${s.flip}: the panel ${bad}`);
+    else statesOk++;
+}
+const skipped = new Set();
+for (let i = PF_FPS; i < PF_FPS + PN_FPS; i++) skipped.add(i);
+if (FREE) for (let i = PF_MESSAGE; i < PF_MESSAGE + PN_MESSAGE; i++) skipped.add(i);
+valued.forEach((v, n) => {
+    const want = panelModel.valued[n];
+    const i = v.want.findIndex((g, i) => !skipped.has(i) && g !== want[i]);
+    if (i >= 0) fail(`the panel's values ${n} (${v.script}): ${fieldOf(i)} wants ${v.want[i]}, the model's ${want[i]} ` +
+        `(the cells ${v.want.join(",")}; the model's ${want.join(",")}; from ${JSON.stringify(v.mem)})`);
+    else valuedOk++;
+});
+console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} sets of cells, ${statesOk} the model's ` +
+    `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's; drawn as wanted when settled ` +
+    `${panelSettled} times; ${linesChecked} frames with their area's name and message; ${panelWaits} waits for the beam`);
+
 // --- The figures, by what each frame did: an area's first frame, the
 // angles changed (the transform's cache refilled), the camera moved (the
 // cache kept), nothing changed, or the free camera's demo.
@@ -1109,10 +1226,9 @@ const row = (label, fs) => {
     console.log(`  ${label.padEnd(10)} ${String(fs.length).padStart(4)}  ${cols.map((c) => stats(c).padEnd(20)).join(" ")}`);
 };
 console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
-    `${compared - wrong} the model's view byte for byte (${requests.length} views); ${textChecked} with their lines; ` +
-    `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ${glyphsChecked} flips' text ` +
-    `checked against the font; the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times; ` +
-    `${textWaits} waits for the beam to catch the text up`);
+    `${compared - wrong} the model's view byte for byte (${requests.length} views); ` +
+    `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ` +
+    `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times`);
 // --- The keys pressed while settled: each one's pass (within KEY_FIELDS,
 // with the idle loop) and the first view it changed, by what changed.
 const kinds = { walking: [], turning: [], other: [] };

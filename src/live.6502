@@ -28,12 +28,14 @@
 \ the next entrance; with no key for DEMO_FIELDS fields the camera turns on
 \ the spot and goes on to the next entrance after a whole turn.
 \
-\ Below the view, drawn into both buffers (src/text.6502): the area (and
-\ the entrance, or the game's end); the frames a second and the fields a
-\ frame; the cycles a frame of stages 1-7 (objects_frame's call) and of
-\ stages 8-10 (raster_frame's), timed by User VIA T2 (clock); the keys and
-\ the credit. Each figure is the mean over the frames since the figures
-\ were last drawn, every FIGURE_FIELDS fields, or once the frames stop.
+\ Around the view, drawn into both buffers: Driller's panel (src/panel.6502,
+\ docs/research/panel.md), the ST's console redrawn, its instruments the
+\ logic's (or with the free camera, the camera's), the area's name and its
+\ message (or the entrance), the frames a second, and the credit. The
+\ frames a second is the mean over the frames since it was last drawn,
+\ every FIGURE_FIELDS fields, or once the frames stop; the cycles a frame
+\ of stages 1-7 (objects_frame's call) and of stages 8-10 (raster_frame's)
+\ are timed by User VIA T2 (clock), for the check.
 \ A frame is drawn only when something it's made from has changed since
 \ the frame last handed over (the camera, the area, the objects'
 \ visibility, the crosshair: docs/research/live.md, "The idle loop"), and
@@ -75,10 +77,10 @@ ENDIF
 \                glue (LiveGlue: the animation and the crosshair, or the
 \                free camera)
 \   BANK_DATA    the logic's LOGIC_CODE_BANK: the rest of the logic's code
-\                (LogicCode), then LiveData (the areas' names and patterns:
-\                tools/mklive.py, LDATA; and the figures' code), the text's
-\                font (TextRAM), and the working copy's conversion
-\                (AreaConv, ACONV: src/area.6502)
+\                (LogicCode), then LiveData (the areas' patterns:
+\                tools/mklive.py, LDATA; and the lines' code), the panel's
+\                code and tables (PanelData, PDATA: src/panel.6502), and the
+\                working copy's conversion (AreaConv, ACONV: src/area.6502)
 \   BANK_OBJ     the object pipeline's code (ObjCode)
 \   BANK_RASTER  the rasteriser's row runs, code and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
@@ -102,7 +104,9 @@ ENDIF
 \   (ObjConst) and the area's working copy (ObjArea); so live_loop clears
 \   ACCCON's X before objects_frame (frame_begin sets X for the buffer
 \   drawn, after), and lv_enter_area before area_enter. The rest, to
-\   SCREEN, is the front end's room for more of the same.
+\   SCREEN, is the front end's room for more of the same. Until clear_work
+\   clears the cache at the start, the panel's packed picture is there
+\   (PanelPack, PANEL: !BOOT loads it, panel_init unpacks it).
 \ Shadow RAM's &3000 up to SCREEN: the logic's lists by face (LogicFaces),
 \   which only its passes read and write, so lv_pass sets ACCCON's X round
 \   each
@@ -194,9 +198,9 @@ SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
 ENDSECTION
-SECTION TextRAM, org = live_data_end, guard = &C000, virtual = TRUE
+SECTION PanelData, org = live_data_end, guard = &C000, filename = "PDATA", cmos = TRUE
 ENDSECTION
-SECTION AreaConv, org = text_ram_end, guard = &C000, filename = "ACONV", cmos = TRUE
+SECTION AreaConv, org = panel_data_end, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE", cmos = TRUE
 ENDSECTION
@@ -246,6 +250,13 @@ SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
 SECTION ObjOut, org = rs_fn - 2, guard = rs_pat, virtual = TRUE
 ENDSECTION
+\ The panel's packed picture, loaded by !BOOT into the transform's cache,
+\ which nothing uses until clear_work clears it after panel_init; and the
+\ page panel_init copies the picture through, RasterIn's, likewise.
+PANEL_LOAD = OBJ_CACHE_ORG
+SECTION PanelPack, org = PANEL_LOAD, load = &FFFF0000 OR PANEL_LOAD, filename = "PANEL", guard = SCREEN
+ENDSECTION
+PANEL_BOUNCE = RASTER_IN_ORG
 
 \ The records, the pipeline and the rasteriser.
 INCLUDE "../build/gen/areas.6502"
@@ -279,7 +290,8 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*SRLOAD LGLUE ", ~logic_db_code_end, " ", AS_STRING(BANK_DB), " Q", 13
     EQUS "*SRLOAD LOGICC 8000 ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD LDATA ", ~logic_code_end, " ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD ACONV ", ~text_ram_end, " ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD PDATA ", ~live_data_end, " ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD ACONV ", ~panel_data_end, " ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD OCODE ", ~OBJ_CODE_ORG, " ", AS_STRING(BANK_OBJ), " Q", 13
     EQUS "*SRLOAD RRUNS 8000 ", AS_STRING(BANK_RASTER), " Q", 13
     EQUS "*SRLOAD RCODE ", ~raster_runs_end, " ", AS_STRING(BANK_RASTER), " Q", 13
@@ -289,6 +301,7 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*LOAD LAREA", 13
     EQUS "*LOAD LOGICW", 13
     EQUS "*LOAD OMORE", 13
+    EQUS "*LOAD PANEL", 13                      ; (after the banks: *SRLOAD's Q passes through this memory)
     EQUS "*RUN LIVE", 13
 ENDSECTION
 
@@ -300,53 +313,25 @@ SECTION Live, org = raster_state_end, load = &FFFF0000 OR raster_state_end, exec
 usrvia_t2cl = &FE68
 usrvia_t2ch = &FE69
 
-\ The text's lines: {character row, logical colour}, the rows below the view
-\ one after another to the screen's last (the panel's, later).
-TL_NAME     = 0
-TL_ENTRANCE = 1                 ; (the entrance, or with the logic the game's end)
-TL_RATE     = 2                 ; frames a second, then fields a frame
-TL_CYCLES   = 3                 ; cycles a frame: stages 1-7's, then 8-10's
-TEXT_LAYOUT = {{14, 3}, {15, 7}, {16, 2}, {17, 6}, {18, 5}, {19, 5}, {20, 7}, {21, 7}, {22, 7}, {23, 7}}
-ASSERT TEXT_LAYOUT[0, 0] = VIEW_ROW0 + VIEW_H DIV 8 AND TEXT_LAYOUT[LEN(TEXT_LAYOUT) - 1, 0] = SCREEN_ROWS - 1
-\ Each figure's four characters, in its line's fixed text: "dd.dfps  dd.d
-\ f/f" and "cycles dddk dddk", a space before each figure but the first.
-FPS_CELL    = TL_RATE * TEXT_COLS
-FPF_CELL    = TL_RATE * TEXT_COLS + 8
-FRONT_CELL  = TL_CYCLES * TEXT_COLS + 7
-FILL_CELL   = TL_CYCLES * TEXT_COLS + 12
-DEMO_COL    = 12                ; "demo" on the entrance's line
-FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(REPEATED(TEXT_COLS - LEN(s) - (TEXT_COLS - LEN(s)) DIV 2, ' '))
-FIXED_FROM  = TL_RATE           ; the fixed lines, from here to the end
+\ The panel's values (src/panel.6502): the logic's, or with the free camera
+\ the camera's position, heading and pitch, the rest as the logic starts,
+\ and the entrance where the logic's message goes.
 IF LIVE_LOGIC
-    KEYS_TEXT = {centred("Z X : / P L N M"), centred("R F U B f0-f3")}
+    PANEL_FREE  = FALSE
+    PANEL_POS   = PlayerX
+    PANEL_YAW   = Yaw
+    PANEL_PITCH = Pitch
 ELSE
-    KEYS_TEXT = {centred("cursors P L N M"), centred("SPACE: next")}
+    PANEL_FREE  = TRUE
+    PANEL_POS   = lv_x
+    PANEL_YAW   = lv_yaw
+    PANEL_PITCH = lv_pitch
 ENDIF
-FIXED_TEXT = {
-    "    fps      f/f",
-    "cycles          ",
-    KEYS_TEXT[0],
-    KEYS_TEXT[1],
-    centred("Driller (c)"),
-    centred("Incentive"),
-    centred("Software 1987,"),
-    centred("a tech demo")
-}
-ASSERT LEN(FIXED_TEXT) = LEN(TEXT_LAYOUT) - FIXED_FROM
-ASSERT TL_CYCLES = TL_RATE + 1
-FOR i = 0..<LEN(FIXED_TEXT)
-    ASSERT LEN(FIXED_TEXT[i]) = TEXT_COLS
-NEXT
-\ (each figure's cells blank in the fixed text, and inside its line)
-FIGURE_CELLS = {FPS_CELL, FPF_CELL, FRONT_CELL, FILL_CELL}
-FOR i = 0..<LEN(FIGURE_CELLS)
-    c = FIGURE_CELLS[i] - FIXED_FROM * TEXT_COLS
-    ASSERT SUM(FIXED_TEXT)[c..c + 3] = "    " AND (c + 3) DIV TEXT_COLS = c DIV TEXT_COLS
-NEXT
-ASSERT LIVE_TEXT_COLS = TEXT_COLS
-ENTRANCE_TEXT = "entrance "
-ASSERT LEN(ENTRANCE_TEXT) + 2 < DEMO_COL AND DEMO_COL + 4 = TEXT_COLS
-OVER_TEXT = centred("game over")
+INCLUDE "panel.6502"
+\ The free camera's message: " ENTRANCE nn  " or "     DEMO nn  ".
+ENTRANCE_CELL = PF_MESSAGE + 1  ; "ENTRANCE" or "    DEMO" ...
+ENTRANCE_ID   = PF_MESSAGE + 10 ; ... the entrance's id, two digits, the first blank if 0
+ASSERT ENTRANCE_ID + 2 < PF_MESSAGE + PN_MESSAGE
 
 DEMO_FIELDS   = 500             ; fields without a key before the demo
 FIGURE_FIELDS = 100             ; fields between the figures' updates
@@ -363,18 +348,19 @@ PASS_FIELDS   = 44
 MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a frame of its
 ASSERT PASS_FIELDS < 128
 
-\ start: the font read while the OS is there, the machine taken, HAZEL
-\ filled, everything set up, then the frames, for ever.
+\ start: the machine taken, HAZEL filled, the panel's picture unpacked
+\ into both buffers before clear_work clears where it was loaded,
+\ everything set up, then the frames, for ever.
 .start
     ZA_ENTRY
-    PAGE_IN BANK_DATA                              ; (the font goes after LiveData)
-    JSR text_init
     SEI
     LDX #&FF : TXS                              ; (nothing returns to the OS)
     LDA #ACCCON_D OR ACCCON_X OR ACCCON_E : TRB acccon
     LDA #ACCCON_Y : TSB acccon                  ; HAZEL, for good
     JSR hazel_fill
     JSR screen_init
+    PAGE_IN BANK_DATA
+    JSR panel_init
     JSR clear_work
     PAGE_IN BANK_RASTER
     JSR raster_init
@@ -390,7 +376,7 @@ ELSE
     JSR live_first                              ; the first entrance
 ENDIF
     PAGE_IN BANK_DATA
-    JSR text_flush                              ; (both buffers, before anything is shown)
+    JSR panel_flush                             ; (both buffers, before anything is shown)
     JSR input_init
     JSR irq_install
     JSR clock_init
@@ -420,17 +406,20 @@ ELSE
 ENDIF
     JSR lv_inputs                               ; (vw_new: whether there's anything new to draw)
     PAGE_IN BANK_DATA
-    JSR text_sync
+    JSR panel_sync
     LDA vw_new : BNE live_draw
     \ Nothing new since the frame last handed over, so nothing is drawn
     \ (docs/research/live.md, "The idle loop"): the keys and passes go on,
-    \ so the next frame starts as soon as anything changes. (The text needs
-    \ no waiting for here: text_sync, every loop, finds the beam's window.)
+    \ so the next frame starts as soon as anything changes. (The panel needs
+    \ no waiting for here: panel_sync, every loop, finds the beam's window.)
 .live_idle                                      ; (tools/livecheck.mjs: the loop drew nothing)
     PAGE_IN BANK_GLUE
     JSR live_idle_measure
     JMP live_loop
 .live_draw
+IF NOT(LIVE_LOGIC)
+    JSR panel_values                            ; (the camera's moved, or the area's changed)
+ENDIF
     \ stages 1-7
     LDX #LV_CAM_BYTES - 1
 .camera
@@ -447,7 +436,7 @@ ENDIF
     LDA out_nf : STA rs_nfaces
     \ stages 8-10
     PAGE_IN BANK_DATA
-    JSR text_sync
+    JSR panel_sync
     JSR frame_begin
 IF LIVE_LOGIC
     PAGE_IN BANK_GLUE
@@ -466,18 +455,19 @@ ENDIF
     JSR live_measure
     PAGE_IN BANK_DATA
     LDA lv_named : BNE named
-    LDA #(TL_ENTRANCE + 1) * TEXT_COLS : JSR text_wait    ; a new area's lines with its first frame
+    LDA #NAMED_CELLS : JSR panel_wait           ; a new area's name and message with its first frame
     INC lv_named
 .named
-    JSR text_catch_up
+    JSR panel_catch_up
 .live_frame_done                                ; (tools/livecheck.mjs: the frame's made)
     JSR frame_end
     JMP live_loop
+NAMED_CELLS = PF_NAME + PN_NAME                 ; (the cells before the name's end: the message's in them)
+ASSERT PF_MESSAGE < PF_NAME
 
 INCLUDE "screen.6502"
 INCLUDE "irq.6502"
 INCLUDE "input.6502"
-INCLUDE "text.6502"
 INCLUDE "logic/call.6502"
 INCLUDE "logic/hooks.6502"
 
@@ -637,7 +627,7 @@ ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll
 
 \ lv_switched: the area the logic has loaded entered (AreaId's: unless
 \ it's none of the records'), the screen's colours as its redraw would
-\ take them, the objects' flags; its camera from the next frame.
+\ take them, the objects' flags, the panel; its camera from the next frame.
 .lv_switched
 {
     STZ lv_switch : STZ an_on
@@ -649,7 +639,9 @@ ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll
     LDA AreaChanged : BEQ shown
     JSR logic_go_colours
 .shown
-    JMP logic_go_shown
+    JSR logic_go_shown
+    PAGE_IN BANK_DATA
+    JMP panel_values
 }
 ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 
@@ -721,6 +713,8 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 .waits
     LDA lv_loaded : BNE away
     JSR logic_go_shown                          ; (with an area's change, once it's entered)
+    PAGE_IN BANK_DATA
+    JSR panel_values                            ; (likewise)
 .away
     PAGE_IN BANK_GLUE
     JMP lv_setup
@@ -795,7 +789,6 @@ SECTION Work
 .clk_f          SKIP 2      ; ... and the fields, counting a sync flagged and not yet taken
 .span_t         SKIP 8      ; each span's start, then its length in microseconds (low 16 bits)
 .span_us        SKIP 8      ; each span's length: microseconds, 24-bit, then a spare byte
-.win_us         SKIP 8      ; each span's lengths added up since the figures, 32-bit
 .win_n          SKIP 1      ; frames since the figures
 .win_f0         SKIP 2      ; fields and frames shown when the figures were last drawn
 .win_s0         SKIP 2
@@ -834,8 +827,8 @@ ENDSECTION
     RTS
 
 \ clock_to: span X ends now: its length in microseconds into span_us,X
-\ (24 bits), and added to win_us,X. With n the fields seen and d the T2
-\ difference, the length is lo + ((d - lo) AND &FFFF), lo = (n - 1) FIELD_US.
+\ (24 bits). With n the fields seen and d the T2 difference, the length is
+\ lo + ((d - lo) AND &FFFF), lo = (n - 1) FIELD_US.
 \ In BANK_GLUE (main RAM is the front end's): called with it paged, after
 \ the clock's read in main RAM.
 ASSERT FIELD_US = 78 * 256      ; ((n - 1) FIELD_US: (n - 1) 78, a byte up)
@@ -860,11 +853,6 @@ SECTION LiveGlue
     LDA lo : CLC : ADC d : STA span_us,X
     LDA lo+1 : ADC d+1 : STA span_us+1,X
     LDA lo+2 : ADC #0 : STA span_us+2,X
-    \ and the window's sum
-    LDA win_us,X : CLC : ADC span_us,X : STA win_us,X
-    LDA win_us+1,X : ADC span_us+1,X : STA win_us+1,X
-    LDA win_us+2,X : ADC span_us+2,X : STA win_us+2,X
-    LDA win_us+3,X : ADC #0 : STA win_us+3,X
     RTS
 \ times78: lo+1..lo+2, a signed 16-bit count of fields, times 78 in place.
 .times78
@@ -902,74 +890,24 @@ ENDSECTION
 \ paging nothing.
 SECTION LiveData
 
-\ live_init: the fixed lines, and the background; no area yet.
+\ live_init: the background; no area yet, the game not over, no figures.
 .live_init
-{
-    LDX #FIXED_FROM * TEXT_COLS
-    LDY #0
-.fixed
-    LDA fixed_text,Y : JSR text_set
-    INX : INY : CPY #FIXED_BYTES : BNE fixed
     STZ rs_sky : STZ rs_ground : STZ rs_horizon
-    LDA #&FF : STA lv_area : STA vw_none
-    STZ lv_entered
-    JMP figures_blank
-.fixed_text
-    EQUS SUM(FIXED_TEXT)
-FIXED_BYTES = P% - fixed_text
-}
+    LDA #&FF : STA lv_area : STA vw_none : STA panel_area
+    STZ lv_entered : STZ panel_over
+    JMP panel_blank
 
-\ live_lines: the area's name (lv_area's: ld_names + TEXT_COLS area), and
-\ with the logic "game over" below it once it is; drawn before the next
-\ frame is handed over (lv_named). (The free camera's entrance_text draws
-\ the line below.)
+\ live_lines: the area whose name the panel shows (lv_area's), and with the
+\ logic whether the game's over (its message then says so); drawn, with
+\ the panel's next values, before the next frame is handed over
+\ (lv_named). (The free camera's entrance_text sets the message.)
 .live_lines
-{
-    ZA_AUTO2 p
-    ASSERT TEXT_COLS = 16
-    LDA lv_area : STZ p+1
-    ASL A : ASL A : ASL A : ROL p+1 : ASL A : ROL p+1
-    CLC : ADC #LO(ld_names) : STA p
-    LDA p+1 : ADC #HI(ld_names) : STA p+1
-    LDX #TL_NAME * TEXT_COLS
-    LDY #0
-.name
-    LDA (p),Y : JSR text_set
-    INX : INY : CPY #TEXT_COLS : BNE name
+    LDA lv_area : STA panel_area
 IF LIVE_LOGIC
-    LDY #0
-.over
-    LDA lv_over : BEQ blank
-    LDA over_text,Y
-    BRA put
-.blank
-    LDA #' '
-.put
-    JSR text_set
-    INX : INY : CPY #TEXT_COLS : BNE over
+    LDA lv_over : STA panel_over
     STZ lv_named
 ENDIF
     RTS
-IF LIVE_LOGIC
-.over_text
-    EQUS OVER_TEXT
-ENDIF
-}
-ASSERT TL_ENTRANCE = TL_NAME + 1 AND LEN(OVER_TEXT) = TEXT_COLS
-
-\ figures_blank: the figures as blanks, until there are some.
-.figures_blank
-{
-    LDY #0
-.line
-    LDX blank_cells,Y
-    LDA #' '
-    JSR text_set : INX : JSR text_set : INX : JSR text_set : INX : JSR text_set
-    INY : CPY #4 : BNE line
-    RTS
-.blank_cells
-    EQUB FPS_CELL, FPF_CELL, FRONT_CELL, FILL_CELL
-}
 
 ENDSECTION
 
@@ -1080,59 +1018,28 @@ ENDIF
     LDA count_fields+1 : SBC win_f0+1 : STA div_n+1
     RTS
 
-\ live_figures: the figures drawn from the window: frames a second and
-\ fields a frame from the frames shown (flips), and each span's mean
-\ cycles, in thousands; then a new window from read_counters' time.
+\ live_figures: the frames a second drawn from the window, from the frames
+\ shown (flips) and the fields; then a new window from read_counters' time.
 .live_figures
 {
     LDA count_frames : SEC : SBC win_s0 : STA mul_b
     LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
     ORA mul_b : BEQ restart                     ; (no flip yet: none to measure)
-    \ fields a frame, tenths: (10 df + dn / 2) / dn
-    LDA mul_b : STA div_d : LDA mul_b+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
-    LDA #10 : STA mul_a : STZ mul_a+1
-    LDA div_n : STA mul_b : LDA div_n+1 : STA mul_b+1
-    JSR fig_ratio
-    LDX #FPF_CELL
-    JSR tenths
     \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
-    LDA count_frames : SEC : SBC win_s0 : STA mul_b
-    LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
     LDA #LO(FIELDS_100S) : STA mul_a : LDA #HI(FIELDS_100S) : STA mul_a+1
     LDA div_n : STA div_d : LDA div_n+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
     LDA #10 : JSR div_times
     JSR fig_ratio
-    LDX #FPS_CELL
     JSR tenths
-    \ each span's mean cycles in thousands: 2 us / (1000 n) = us / (500 n)
-    LDY #T_FRONT : LDX #FRONT_CELL : JSR kilo
-    LDY #T_FILL : LDX #FILL_CELL : JSR kilo
 .restart
-    JMP fig_restart
-\ kilo: span Y's window as thousands of cycles a frame, into cell X on.
-.kilo
-    PHX
-    LDA win_us,Y : STA quot : LDA win_us+1,Y : STA quot+1
-    LDA win_us+2,Y : STA quot+2 : LDA win_us+3,Y : STA quot+3
-    LDA win_n : STA div_d : STZ div_d+1 : STZ div_d+2 : STZ div_d+3
-    LDA #250 : JSR div_times                    ; 500 n: 250 n, then twice
-    ASL div_d : ROL div_d+1 : ROL div_d+2
-    JSR fig_divide
-    PLX
-    JMP thousands
+    \ (on into fig_restart)
 }
 \ fig_restart: a new window, from read_counters' time.
 .fig_restart
-{
     LDA count_fields : STA win_f0 : LDA count_fields+1 : STA win_f0+1
     LDA count_frames : STA win_s0 : LDA count_frames+1 : STA win_s0+1
     STZ win_n
-    LDX #7
-.zero
-    STZ win_us,X
-    DEX : BPL zero
     RTS
-}
 
 \ ---------------------------------------------------------------------------
 \ The arithmetic for the figures, which runs once in FIGURE_FIELDS.
@@ -1241,46 +1148,24 @@ ENDSECTION
     RTS
 }
 
-\ tenths: quot as "dd.d" (the first blank if it's 0) from cell X.
+\ tenths: quot as "dd.d" (the first blank if it's 0) in the panel's frames
+\ a second.
 .tenths
 {
     JSR digits
+    LDX #PF_FPS
     LDA dg : BEQ blank
-    ORA #'0'
+    CLC : ADC #PC_DIGIT0
     BRA first
 .blank
-    LDA #' '
+    LDA #PC_SPACE
 .first
-    JSR text_set : INX
-    LDA dg+1 : ORA #'0' : JSR text_set : INX
-    LDA #'.' : JSR text_set : INX
-    LDA dg+2 : ORA #'0' : JMP text_set
+    JSR panel_set : INX
+    LDA dg+1 : CLC : ADC #PC_DIGIT0 : JSR panel_set : INX
+    LDA #PC_DOT : JSR panel_set : INX
+    LDA dg+2 : CLC : ADC #PC_DIGIT0 : JMP panel_set
 }
-
-\ thousands: quot as "dddk", leading zeros blank, from cell X.
-.thousands
-{
-    JSR digits
-    LDY #0
-.digit
-    LDA dg,Y : BNE some
-    CPY #2 : BEQ some                           ; (the units' digit always)
-    LDA #' '
-    BRA put
-.some
-    LDA dg,Y : ORA #'0'
-    \ once a digit shows, so do those after it
-    PHA : LDA #&FF : STA dg,Y : PLA
-.put
-    JSR text_set : INX
-    INY : CPY #3 : BNE next
-    LDA #'k' : JMP text_set
-.next
-    LDA dg-1,Y : CMP #&FF : BNE digit
-    LDA dg,Y : ORA #'0'
-    PHA : LDA #&FF : STA dg,Y : PLA
-    BRA put
-}
+ASSERT PN_FPS = 4
 
 IF LIVE_LOGIC
 \ lv_setup (lv_pass's, after a pass that ran): the frames that show it,
@@ -1614,18 +1499,29 @@ ENDSECTION
     \ (on into entrance_text)
 }
 
-\ entrance_text: the entrance's line: its id, and "demo" if it's on; drawn
-\ before the next frame is handed over (lv_named).
+\ entrance_text: the panel's message: the entrance's id, after "ENTRANCE",
+\ or "DEMO" while the demo's on; drawn before the next frame is handed over
+\ (lv_named).
 .entrance_text
 {
     STZ lv_named
-    LDX #TL_ENTRANCE * TEXT_COLS
+    LDX #PF_MESSAGE
+    LDA #PC_SPACE
+.blank
+    JSR panel_set
+    INX : CPX #PF_MESSAGE + PN_MESSAGE : BNE blank
+    LDX #ENTRANCE_CELL
     LDY #0
 .label
-    LDA entrance_label,Y : JSR text_set
-    INX : INY : CPY #LEN(ENTRANCE_TEXT) : BNE label
+    LDA entrance_label,Y
+    BIT lv_demo : BPL plain
+    LDA demo_label,Y
+.plain
+    JSR panel_set
+    INX : INY : CPY #LEN(PANEL_ENTRANCE) : BNE label
     LDY lv_entrance
     LDA en_id,Y
+    LDX #ENTRANCE_ID
     LDY #0
 .tens
     CMP #10 : BCC units
@@ -1633,32 +1529,20 @@ ENDSECTION
     BRA tens
 .units
     PHA
-    TYA : BEQ blank
-    ORA #'0'
+    TYA : BEQ blank_tens
+    CLC : ADC #PC_DIGIT0
     BRA tens_digit
-.blank
-    LDA #' '
+.blank_tens
+    LDA #PC_SPACE
 .tens_digit
-    JSR text_set : INX
-    PLA : ORA #'0' : JSR text_set : INX
-    LDA #' '
-.gap
-    JSR text_set : INX
-    CPX #TL_ENTRANCE * TEXT_COLS + DEMO_COL : BNE gap
-    LDY #0
-.demo
-    LDA #' '
-    BIT lv_demo : BPL plain
-    LDA demo_label,Y
-.plain
-    JSR text_set : INX
-    INY : CPY #4 : BNE demo
-    RTS
+    JSR panel_set : INX
+    PLA : CLC : ADC #PC_DIGIT0 : JMP panel_set
 .entrance_label
-    EQUS ENTRANCE_TEXT
+    EQUB PANEL_ENTRANCE
 .demo_label
-    EQUS "demo"
+    EQUB PANEL_DEMO
 }
+ASSERT LEN(PANEL_ENTRANCE) = LEN(PANEL_DEMO) AND ENTRANCE_CELL + LEN(PANEL_ENTRANCE) < ENTRANCE_ID
 
 \ live_keys: the camera moved by the keys held, or by the demo; SPACE (or
 \ the demo, after a turn) to the next entrance. Turns before looks, rolls
@@ -1883,8 +1767,11 @@ ENDSECTION
 SECTION ObjOut
 .obj_out_end
 ENDSECTION
-SECTION TextRAM
-.text_ram_end
+SECTION PanelData
+.panel_data_end
+ENDSECTION
+SECTION PanelPack
+.panel_pack_end
 ENDSECTION
 SECTION LiveData
 .live_data_end
@@ -1910,7 +1797,13 @@ ASSERT obj_work_end <= &E000
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
 \ The banks: each section after the last in its bank, below &C000.
 ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= &C000
-ASSERT live_data_end <= text_ram_end AND text_ram_end <= area_conv_end AND area_conv_end <= &C000
+ASSERT live_data_end <= panel_data_end AND panel_data_end <= area_conv_end AND area_conv_end <= &C000
+\ The panel's packed picture where nothing is till clear_work clears it,
+\ after panel_init: the transform's cache (which is virtual: !BOOT loads
+\ nothing else there); and the page panel_init copies through, RasterIn's
+\ (cleared after it too).
+ASSERT PANEL_LOAD >= OBJ_CACHE_ORG AND panel_pack_end <= obj_cache_end
+ASSERT PANEL_BOUNCE >= RASTER_IN_ORG AND PANEL_BOUNCE + 256 <= raster_in_end
 ASSERT logic_code_end <= live_data_end
 ASSERT logic_db_code_end <= live_glue_end AND live_glue_end <= LOGIC_DB
 ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
