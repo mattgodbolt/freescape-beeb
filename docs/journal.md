@@ -541,3 +541,16 @@ vertices projected, and runs the crossing routine alone on 3,189 of the
 model's crossings. The front end's code now nearly fills its room on the
 live disc (bank 7 and `ObjMore`), so the next rounds need room found
 first.
+
+## 2026-10-31: the idle loop, and the fill's round 4 (track S)
+
+Standing still now draws nothing (decision 42): an idle loop is a median
+3,558 cycles. Measured from a key going down with nothing left to draw
+(fields, median): its logic pass 0.68 against 3.31 before; the first
+changed view 8.41 walking and 7.61 turning, against 16.96 and 15.44. A
+fault where one tap made two passes is fixed. The fill's round 4 (a fast
+path for fresh lines with both edges vertical, exact) took its mean on
+Driller's views drawn fresh from 122,247 to 119,638 cycles, the median
+unchanged at about 110K; grouping faces by object measured at under 2K a
+view, so it wasn't built. The round's account of what's left: about 45
+cycles a piece, about 70 a face-line, and 27K of byte stores.

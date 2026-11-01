@@ -92,6 +92,12 @@ includes.)
   (`.keys` hid `keys`).
 - Anything that touches the sort's memory (`ObjMemo`, main RAM at `&3000`)
   needs ACCCON X clear, or it writes shadow RAM instead.
+- Labels inside a baron macro's expansion stay private, even when a named
+  label comes just before the macro's call.
+- `ZA_AUTO` zero page is shared between routines: read a routine's variable
+  while it's live, not after it returns.
+- A harness that releases keys at the end of a routine may be too late: the
+  vertical sync can read them while the routine runs.
 
 - Baron: fail on any warning (`tools/asm.sh`); `ASSERT` is built in;
   `FOR n = 0..15` is inclusive; put `ZA_UNREACHABLE` after an

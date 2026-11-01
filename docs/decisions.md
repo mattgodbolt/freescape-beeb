@@ -496,3 +496,15 @@ meet. Together, against the model before them (journal 2026-10-31): 333 of
 3,515,200 pixels differ over the entrance views and walks, 8,961 of
 35,314,240 over every check view, single pixels along long edges; against
 the ZX oracle, 1,389,703 of 1,406,080 pixels agree (1,389,643 before).
+
+## 42. The idle loop (2026-10-31, autonomous; amends 30, 36 and 37)
+
+When the camera, the areas entered, the crosshair and every object's
+visibility are the same as the frame last handed over, the live disc draws
+nothing and flips nothing; keys, passes and the text go on, so a key starts
+the next frame at once (`docs/research/live.md`). Comparing against the
+last frame handed over is enough: the other buffer is never shown without
+a frame drawn into it first. Each logic pass waits for a key reading made
+after the last pass ended, a turn shows its first 5° step one field into
+its pass, and a tap acts once (an earlier fault took one tap twice). Frame
+figures are now taken over the frames drawn.

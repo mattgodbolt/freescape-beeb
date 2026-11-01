@@ -45,14 +45,14 @@ turn. The figures on the screen are the BBC's own timing of the whole
 frame and of its two halves: stages 1-7 (objects to clipped polygons) and
 8-10 (the fill). Driller is Incentive Software's.*
 
-**How fast:** measured on the disc's check (journal, 2026-10-31), at the
-entrances a frame takes a median of about 8 fields standing and 13
-turning, between about six and four frames a second; up close to walls
-it's quicker. The original redrew about once every two-thirds of a second
-on the Spectrum. Every stage matches the model exactly, so the work from
-here is speed, on a stock Master: the front end's clipping is in
-optimisation rounds now, and the fill has its next structural changes
-lined up. Driller's game itself (the drilling rigs, the laser, the
+**How fast:** measured on the disc's check (journal, 2026-10-31), walking
+through Driller's areas a frame takes a median of about 3 fields (about
+16 frames a second) and turning about 4.4 (about 11); wide open views,
+like the entrances, take longer, up to about 12 fields. Standing still
+draws nothing, so a key starts the next frame at once. The original
+redrew about once every two-thirds of a second on the Spectrum. Every
+stage matches the model exactly, so the work from here is speed, on a
+stock Master. Driller's game itself (the drilling rigs, the laser, the
 sensors, the panel and the sound) comes after. `docs/journal.md` has the
 story as it goes.
 
