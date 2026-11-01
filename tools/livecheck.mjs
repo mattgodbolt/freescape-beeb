@@ -284,9 +284,16 @@ cpu.debugInstruction.add((addr, opcode) => {
         valuesFrom = null;
         onValued();
     } else if (addr === PANEL_DRAW && bank === BANK_DATA) {
-        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS };
+        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS, line: beamLine(), field: word(sym("fields")) };
     } else if (addr === PANEL_DRAWN && bank === BANK_DATA && drawFrom) {
         (drawFrom.tile ? tileCycles : glyphCycles).push(now() - drawFrom.t);
+        // each cell drawn wholly in the beam's window: begun and done in one
+        // field, before the flip's line, so neither a flip nor the beam
+        // finds it half drawn
+        const line = beamLine();
+        if (drawFrom.field !== word(sym("fields")) || drawFrom.line >= FLIP_LINE_ || line >= FLIP_LINE_)
+            fail(`a cell of the panel drawn from line ${drawFrom.line} to ${line}${drawFrom.field !== word(sym("fields")) ? " of the next field" : ""}, not inside the window before line ${FLIP_LINE_}`);
+        else cellsInWindow++;
         drawFrom = null;
     } else if (addr === IDLE) {
         onIdle();
@@ -379,7 +386,8 @@ const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALU
 const PANEL_VALUES = sym("panel_values"), PANEL_DRAW = sym("panel_draw"), PANEL_DRAWN = sym("panel_sync.drawn");
 const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_CELL_US = sym("PANEL_CELL_US");
 const valuesCycles = [], glyphCycles = [], tileCycles = [];
-let valuesFrom = null, drawFrom = null;
+let valuesFrom = null, drawFrom = null, cellsInWindow = 0;
+const FLIP_LINE_ = sym("FLIP_LINE");
 const PF = (f) => [sym(`PF_${f}`), sym(`PN_${f}`)];
 const [PF_NAME, PN_NAME] = PF("NAME"), [PF_MESSAGE, PN_MESSAGE] = PF("MESSAGE"), [PF_FPS, PN_FPS] = PF("FPS");
 const panelBuild = JSON.parse(fs.readFileSync(path.join(root, "build/panel/panel.json"), "utf8"));
@@ -1231,7 +1239,8 @@ console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} set
     `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's; drawn as wanted when settled ` +
     `${panelSettled} times; ${linesChecked} frames with their area's name and message; ${panelWaits} waits for the beam`);
 console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${cyc(valuesCycles)} (${valuesCycles.length}); ` +
-    `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length})`);
+    `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length}); ` +
+    `${cellsInWindow} cells drawn inside the beam's window`);
 
 // --- The figures, by what each frame did: an area's first frame, the
 // angles changed (the transform's cache refilled), the camera moved (the

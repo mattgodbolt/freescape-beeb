@@ -5,11 +5,14 @@
 #                    (tools/mkpanel.py, from the ST's console and the ZX's
 #                    data; tools/model/panel.py is the specification), with
 #                    previews: picture.png, sample.png and sample4x.png
+#   make panel       the panel's values on the live disc (panel_values)
+#                    against the model's, over edge values and a fuzz
+#                    (tools/panelcheck.mjs). One of make check's
 #   make panel-shots the live disc's panel in play, on an RGB monitor and
 #                    through PAL (tools/pal.py): shots/panel_*.png
 #
 # The live discs' check (make live, tools/livecheck.mjs) holds the panel on
-# the screen to the model after every pass.
+# the screen to the model at every flip, and its values after every pass.
 #
 # Everything here derives from the originals (decision 6): built, never
 # committed.
@@ -20,8 +23,13 @@ PANEL_GEN  = $(PANEL_DIR)/panel.6502 $(PANEL_DIR)/panel.json
 AREAS_JSON ?= build/gen/areas.json
 ZXSNAP     ?= build/zx/driller.z80
 
-.PHONY: panel-data panel-shots
+.PHONY: panel panel-data panel-shots
+CHECKS += panel
 panel-data: $(PANEL_GEN)
+
+# (mk/live.mk's disc)
+panel: build/live.ssd $(PANEL_GEN) tools/panelcheck.mjs
+	node tools/panelcheck.mjs --disc build/live.ssd
 
 $(PANEL_GEN) &: tools/mkpanel.py tools/model/panel.py tools/model/view.py tools/model/colours.py \
                 src/defs.6502 tools/colour/sources.py tools/colour/images.py \
