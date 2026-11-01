@@ -109,3 +109,18 @@ class Cull(unittest.TestCase):
     def test_hidden(self):
         self.assertFalse(objects.shown({"id": 1, "initially_invisible": True}))
         self.assertTrue(objects.shown({"id": 1, "initially_invisible": True}, {1: True}))
+
+
+@needs_data
+class Windings(unittest.TestCase):
+    def test_loops_anticlockwise(self):
+        """Every face's loop winds anticlockwise about its outward normal
+        (the cone, clip.py, takes it so)."""
+        for area in db()["areas"]:
+            for o in area["objects"] + db()["globals"]:
+                s = objects.shape(o)
+                if s is None or s.line or s.point:
+                    continue
+                for f in s.faces:
+                    n = objects.newell([s.vertices[i] for i in f.loop])
+                    self.assertGreater(sum(a * b for a, b in zip(n, f.normal)), 0, (o["id"], f.loop))

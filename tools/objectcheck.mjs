@@ -116,6 +116,7 @@ const STAGES = [
     ["vertex_pass", "vertices"],
     ["poly_face", "faces"],
     ["draw_face3d", "faces3d"],
+    ["cone_face", "cone"],
     ["clip2d", "clip2d"],
     ["dedupe", "clip2d"],
     ["drawable", "drawable"],
@@ -196,6 +197,7 @@ const sortAt = has("of_sort") ? S("of_sort") : -1;
 // (docs/research/objects.md): each counted as its first instruction runs.
 const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point", "clip_cut", "project",
                  "project_z", "project_y", "band_test", "vertex_shared", "poly_face", "draw_face3d",
+                 "cone_face", "edge_line", "cone_pass", "cone_cut", "smul16", "cone_mul",
                  "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
 for (const c of CALLEES) if (has(c)) callees.set(S(c), c);

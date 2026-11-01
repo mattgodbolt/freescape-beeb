@@ -279,7 +279,7 @@ def drawable(poly):
 # with FY = 2 FX the plane's line is f(x, y) = A x + B y + C, inside where
 # f >= 0, its normal first cut to LINE_BITS bits.
 
-LINE_BITS = 14
+LINE_BITS = 13
 BEHIND = 32                 # code3: z <= 0
 
 
@@ -321,6 +321,34 @@ def projectable(v):
 
 
 assert 2 << BAND_XS <= GUARD_X and 2 << BAND_YS <= GUARD_Y   # (inside the guard band)
+
+
+# A line with an end the projection can't take is clipped in 3D to the near
+# plane, then to the planes beyond the view's sides (beyond()'s, which lie
+# outside the view), each by a crossing from the inside end. What's left is
+# in front of the near plane with |x| and |2y| within z (give or take a
+# crossing's rounding), which the projection takes.
+SEGMENT_PLANES = [
+    (lambda v: v[2] - ZNEAR),
+    (lambda v: v[2] + v[0]),
+    (lambda v: v[2] - v[0]),
+    (lambda v: v[2] - 2 * v[1]),
+    (lambda v: v[2] + 2 * v[1]),
+]
+
+
+def segment_clip(a, b):
+    """The camera-space segment a-b clipped to SEGMENT_PLANES in turn: [a',
+    b'], or [] if nothing's left."""
+    for f in SEGMENT_PLANES:
+        fa, fb = f(a), f(b)
+        if fa < 0 and fb < 0:
+            return []
+        if fa < 0:
+            a = crossing(b, a, fb, fa)
+        elif fb < 0:
+            b = crossing(a, b, fa, fb)
+    return [a, b]
 
 
 def cut16(v):

@@ -49,7 +49,7 @@ class View:
 # A face the projection can't take whole goes through the cone (clip.py);
 # off, the near clip, the guard band and the 2D clip as before (decisions
 # 15, 17 and 24), to measure the one against the other.
-CONE = False
+CONE = True
 
 
 def edge_lines(s, m, loop, cs):
@@ -70,6 +70,50 @@ def edge_lines(s, m, loop, cs):
             normal = clip.edge_normal(cs[i], cs[k])
         lines.append(clip.screen_line(normal))
     return lines
+
+
+def _cone_face(s, m, f, poly, cs, project, tally):
+    """One face with the cone on: (its polygon, whether it went through the
+    cone or a 3D clip, whether it crossed the view's edges), or None if
+    nothing of it is drawn. A polygon the projection takes whole is
+    projected; any other polygon goes through the cone. A line or a point
+    with an end the projection can't take is first clipped in 3D to the
+    near plane and the planes beyond the view's sides (clip.segment_clip),
+    so that it can."""
+    if not (s.line or s.point):
+        if not all(clip.projectable(v) for v in poly):
+            every_code = 0xFF
+            for v in poly:
+                every_code &= clip.code3(v)
+            out = [] if every_code else clip.cone_clip(edge_lines(s, m, f.loop, cs))
+            return (out, True, True) if clip.drawable(out) else None
+    near = not all(clip.projectable(v) for v in poly)
+    if near:
+        if s.point:
+            return None
+        poly = clip.segment_clip(poly[0], poly[1])
+        assert all(clip.projectable(v) for v in poly)
+        if not poly:
+            return None
+    flat = [project(v) for v in poly]
+    # Wholly beyond one of the view's edges, it isn't drawn; beyond any,
+    # it's clipped (clip.outcode2d).
+    every_code = 0xFF
+    any_code = 0
+    for p in flat:
+        k = clip.outcode2d(p)
+        every_code &= k
+        any_code |= k
+    if every_code:
+        return None
+    if s.line:
+        # Widened, a line can reach past the view even when its ends don't.
+        flat = clip.line_quad(flat[0], flat[1])
+    elif s.point:
+        flat = clip.point_square(flat[0])
+    widened = s.line or s.point
+    out = clip.clip2d(flat) if any_code or widened else clip.dedupe(flat)
+    return (out, near, bool(any_code)) if clip.drawable(out) else None
 
 
 def draw_faces(cand, m, c, tally, check=False):
@@ -103,16 +147,17 @@ def draw_faces(cand, m, c, tally, check=False):
     for f in cand.faces:
         tally["faces_seen"] += 1
         poly = [cs[i] for i in f.loop]
-        if CONE and not (s.line or s.point) and not all(clip.projectable(v) for v in poly):
-            every_code = 0xFF
-            for v in poly:
-                every_code &= clip.code3(v)
-            out = [] if every_code else clip.cone_clip(edge_lines(s, m, f.loop, cs))
-            if not clip.drawable(out):
+        if CONE:
+            face = _cone_face(s, m, f, poly, cs, project, tally)
+            if face is None:
                 tally["faces_rejected"] += 1
                 continue
-            tally["faces_near_clipped"] += 1
-            drawn.append(DrawnFace(cand.index, s.id, f.colour, out, True, True))
+            out, near, clipped = face
+            if near:
+                tally["faces_near_clipped"] += 1
+            if clipped:
+                tally["faces_clipped_2d"] += 1
+            drawn.append(DrawnFace(cand.index, s.id, f.colour, out, near, clipped))
             continue
         near = any(v[2] < clip.ZNEAR for v in poly)
         if near:
