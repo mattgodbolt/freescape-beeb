@@ -630,3 +630,38 @@ The logic stays Driller's pass for pass; only when passes come and the
 sizes at the start change. The four constants are in
 `tools/logic/state.py`, Matt's to change. `make logic` keeps the
 original's start; the port's checks start from the port's.
+
+## 49. Two packed files on the disc (2026-11-01; Matt asked)
+
+Matt asked why the disc loaded a dozen and more files ("is there a way to
+avoid all the separate files?"), and pointed at baron's compression. Each
+disc is now two files: `!BOOT`, which the boot option runs into screen
+memory, and one packed file (ZX02, by baron's own compressor,
+`src/zx02.6502`) holding a stream for each place (each sideways bank, main
+RAM, HAZEL), which `src/loader.6502` reads a track at a time by OSWORD &7F
+and unpacks into place (`docs/research/live.md`). `tools/loadcheck.mjs`
+holds every place to the parts' own bytes. Two files rather than one
+because `*RUN` loads a whole file into main RAM, which can't hold the
+packed parts; two passes of the build because a section opened in many
+files can't nest, and a compressed section must be under 64K.
+
+## 50. The fill reads HAZEL's quarter squares (2026-11-01, autonomous)
+
+The fill no longer builds its own quarter-square tables; it reads the
+maths' tables in HAZEL, which hold the same values for every index it
+uses, freeing about 1K of its bank.
+
+## 51. Run-once start-up code in page &0D (2026-11-01, autonomous)
+
+The code that runs once at start-up lives in page &0D (below the
+Master's extended vectors at &0D9F), behind an RTI, and the page is free
+again once it has run.
+
+## 52. ANDY holds the front end's cold code (2026-11-01, Matt)
+
+The Master's ANDY (4K at &8000-&8FFF, paged by ROMSEL's top bit) holds the
+front end's rarely-run code (lines and points, and the routines that run
+under a thousandth of its cycles each), reached through trampolines in
+main RAM, so the front end's own bank has room for faster code on its hot
+paths. Matt chose it over the area conversion's home and over keeping it
+in reserve.
