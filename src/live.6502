@@ -8,13 +8,14 @@
 \ worked out off the BBC. Driller's own data (decision 6: a tech demo,
 \ attributed on the screen) in the engine's records (tools/mkareas.py).
 \
-\ The camera is free (the player's logic is another layer): the cursor keys
-\ (or Driller's Q W O K) turn a step of 5 degrees and walk LIVE_STEP world
-\ units along the view a frame, through anything; P and L look up and down,
-\ N and M roll; SPACE goes on to the next entrance, through all of them in
-\ the database's order, from area to area. With no key for DEMO_FIELDS
-\ fields it turns on the spot, a step a frame, and after a whole turn goes
-\ on to the next entrance.
+\ The camera is free (the player's logic is another layer): cursor left
+\ and right (or Driller's Q and W) turn a step of 5 degrees a frame, cursor
+\ up and down (or O and K) walk LIVE_STEP world units along the view a
+\ frame, through anything; P and L look up and down, N and M roll; SPACE
+\ goes on to the next entrance, through all of them in the database's
+\ order, from area to area. With no key for DEMO_FIELDS fields it turns on
+\ the spot, a step a frame, and after a whole turn goes on to the next
+\ entrance.
 \
 \ Below the view, drawn into both buffers (src/text.6502): the area and the
 \ entrance; the frames a second and the fields a frame; the cycles a frame
@@ -63,8 +64,8 @@ ENDIF
 \   which only objects_frame reads and writes, so live_loop clears ACCCON's
 \   X before it (frame_begin sets X for the buffer drawn, after)
 \
-\ A routine in a bank is called with its bank paged (PAGE); area_enter puts
-\ back the bank in ROMSEL_COPY, so PAGE keeps that too.
+\ A routine in a bank is called with its bank paged (PAGE_IN); area_enter puts
+\ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too.
 
 BANK_RASTER = 6
 BANK_OBJ    = 7
@@ -78,7 +79,7 @@ ASSERT BANK_OBJ <> BANK_RASTER
 \ (ROMSEL_COPY, the OS's copy of romsel, is src/area.6502's, outside
 \ baron's pool)
 
-MACRO PAGE bank
+MACRO PAGE_IN bank
     LDA #bank : STA ROMSEL_COPY : STA romsel
 ENDMACRO
 
@@ -238,7 +239,7 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 \ filled, everything set up, then the frames, for ever.
 .start
     ZA_ENTRY
-    PAGE BANK_DATA                              ; (the font goes after LiveData)
+    PAGE_IN BANK_DATA                              ; (the font goes after LiveData)
     JSR text_init
     SEI
     LDX #&FF : TXS                              ; (nothing returns to the OS)
@@ -247,11 +248,11 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
     JSR hazel_fill
     JSR screen_init
     JSR clear_work
-    PAGE BANK_RASTER
+    PAGE_IN BANK_RASTER
     JSR raster_init
-    PAGE BANK_OBJ
+    PAGE_IN BANK_OBJ
     JSR area_init
-    PAGE BANK_DATA
+    PAGE_IN BANK_DATA
     JSR live_init
     JSR text_flush                              ; (both buffers, before anything is shown)
     JSR frame_init
@@ -265,7 +266,7 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 \ frame_begin and frame_end; the text when the beam allows, and the
 \ figures (live_measure) from the clock round each.
 .live_loop
-    PAGE BANK_DATA
+    PAGE_IN BANK_DATA
     JSR live_keys
     JSR text_sync
     \ stages 1-7
@@ -274,22 +275,22 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
     LDA lv_cam,X : STA cam_x,X
     DEX : BPL camera
     JSR clock : LDX #T_FRONT : JSR clock_from
-    PAGE BANK_OBJ
+    PAGE_IN BANK_OBJ
     LDA #ACCCON_X : TRB acccon                  ; (main RAM's &3000 on: the cache)
     JSR objects_frame
 .live_front_done                                ; (tools/livecheck.mjs times objects_frame to here)
     JSR clock : LDX #T_FRONT : JSR clock_to
     LDA out_nf : STA rs_nfaces
     \ stages 8-10
-    PAGE BANK_DATA
+    PAGE_IN BANK_DATA
     JSR text_sync
-    PAGE BANK_RASTER
+    PAGE_IN BANK_RASTER
     JSR frame_begin
     JSR clock : LDX #T_FILL : JSR clock_from
     JSR raster_frame
 .live_fill_done                                 ; (... and raster_frame to here)
     JSR clock : LDX #T_FILL : JSR clock_to
-    PAGE BANK_DATA
+    PAGE_IN BANK_DATA
     JSR live_measure
     LDA lv_named : BNE named
     LDA #(TL_ENTRANCE + 1) * TEXT_COLS : JSR text_wait    ; a new entrance's lines with its first frame
@@ -421,11 +422,11 @@ FIXED_BYTES = P% - fixed_text
 .pattern
     LDA (p),Y : STA rs_pat,Y
     DEY : BPL pattern
-    PAGE BANK_OBJ
+    PAGE_IN BANK_OBJ
     LDA lv_area : JSR area_enter
-    PAGE BANK_RASTER
+    PAGE_IN BANK_RASTER
     JSR raster_forget
-    PAGE BANK_DATA
+    PAGE_IN BANK_DATA
 .text
     \ the area's name: ld_names + TEXT_COLS area
     ASSERT TEXT_COLS = 16
@@ -586,15 +587,15 @@ STEPS_TURN = 72                 ; a whole turn, in 5-degree steps
 .no_rr
     LDA held : AND #1 << A_ON : BEQ no_on
     LDY lv_yaw
-    LDA st_dx,Y : LDX #lv_x - lv_cam : JSR step
+    LDA st_dx,Y : LDX #lv_x - lv_cam : JSR lv_step
     LDY lv_yaw
-    LDA st_dz,Y : LDX #lv_z - lv_cam : JSR step
+    LDA st_dz,Y : LDX #lv_z - lv_cam : JSR lv_step
 .no_on
     LDA held : AND #1 << A_BACK : BEQ no_back
     LDY lv_yaw
-    LDA #0 : SEC : SBC st_dx,Y : LDX #lv_x - lv_cam : JSR step
+    LDA #0 : SEC : SBC st_dx,Y : LDX #lv_x - lv_cam : JSR lv_step
     LDY lv_yaw
-    LDA #0 : SEC : SBC st_dz,Y : LDX #lv_z - lv_cam : JSR step
+    LDA #0 : SEC : SBC st_dz,Y : LDX #lv_z - lv_cam : JSR lv_step
 .no_back
     RTS
 \ keyed: a key's come: the demo's off, and its wait starts again.
@@ -634,9 +635,9 @@ ASSERT LIVE_STEP < 128 AND STEPS_TURN < 128
     RTS
 }
 
-\ step: the coordinate at lv_cam + X moved by A, a signed byte, kept to
+\ lv_step: the coordinate at lv_cam + X moved by A, a signed byte, kept to
 \ 0 .. &7FFF (objects_frame's range).
-.step
+.lv_step
 {
     CMP #&80 : BCS minus
     CLC : ADC lv_cam,X : STA lv_cam,X
@@ -792,7 +793,7 @@ SECTION LiveData
     LDA mul_b : STA div_d : LDA mul_b+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
     LDA #10 : STA mul_a : STZ mul_a+1
     LDA div_n : STA mul_b : LDA div_n+1 : STA mul_b+1
-    JSR ratio
+    JSR fig_ratio
     LDX #TL_FPF * TEXT_COLS + NUMBER_COL
     JSR tenths
     \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
@@ -801,7 +802,7 @@ SECTION LiveData
     LDA #LO(FIELDS_100S) : STA mul_a : LDA #HI(FIELDS_100S) : STA mul_a+1
     LDA div_n : STA div_d : LDA div_n+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
     LDA #10 : JSR div_times
-    JSR ratio
+    JSR fig_ratio
     LDX #TL_FPS * TEXT_COLS + NUMBER_COL
     JSR tenths
     \ each span's mean cycles in thousands: 2 us / (1000 n) = us / (500 n)
@@ -824,7 +825,7 @@ SECTION LiveData
     LDA win_n : STA div_d : STZ div_d+1 : STZ div_d+2 : STZ div_d+3
     LDA #250 : JSR div_times                    ; 500 n: 250 n, then twice
     ASL div_d : ROL div_d+1 : ROL div_d+2
-    JSR divide
+    JSR fig_divide
     PLX
     JMP thousands
 }
@@ -847,7 +848,7 @@ SECTION LiveData
 \ ---------------------------------------------------------------------------
 \ The arithmetic for the figures, which runs once in FIGURE_FIELDS.
 SECTION Work
-.mul_a          SKIP 2      ; ratio's factors ...
+.mul_a          SKIP 2      ; fig_ratio's factors ...
 .mul_b          SKIP 2
 .div_d          SKIP 4      ; ... the divisor ...
 .div_n          SKIP 2      ; (live_measure's fields)
@@ -874,8 +875,8 @@ ENDSECTION
     RTS
 }
 
-\ ratio: quot = (mul_a mul_b + div_d DIV 2) DIV div_d, rounded; mul_b lost.
-.ratio
+\ fig_ratio: quot = (mul_a mul_b + div_d DIV 2) DIV div_d, rounded; mul_b lost.
+.fig_ratio
 {
     STZ quot : STZ quot+1 : STZ quot+2 : STZ quot+3
     LDX #16
@@ -886,11 +887,11 @@ ENDSECTION
 .mskip
     ROR quot+3 : ROR quot+2 : ROR quot+1 : ROR quot
     DEX : BNE mbit
-    \ (on into divide)
+    \ (on into fig_divide)
 }
-\ divide: quot = (quot + div_d DIV 2) DIV div_d, 32-bit, rounded; div_d
+\ fig_divide: quot = (quot + div_d DIV 2) DIV div_d, 32-bit, rounded; div_d
 \ isn't 0.
-.divide
+.fig_divide
 {
     LDA div_d+3 : LSR A : STA rem+3
     LDA div_d+2 : ROR A : STA rem+2
