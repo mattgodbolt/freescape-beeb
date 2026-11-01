@@ -95,6 +95,9 @@ ENDSECTION
 OBJ_CACHE_ORG = &3000
 SECTION ObjCache, org = OBJ_CACHE_ORG, guard = SCREEN, virtual = TRUE
 ENDSECTION
+\ the sort's memory after it, likewise only objects_frame's (src/order.6502)
+SECTION ObjMemo, org = obj_cache_end, guard = SCREEN, virtual = TRUE
+ENDSECTION
 ASSERT HAZEL_LOAD + (hazel_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
 \ The banks.

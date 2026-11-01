@@ -58,7 +58,7 @@ SECTION ObjCode
     LDA cam_roll : STA mat_angles+2
     LDA #1 : STA mat_valid
     JSR matrix_build
-    JSR cache_reset
+    JSR cache_empty
     SEC
     RTS
 }

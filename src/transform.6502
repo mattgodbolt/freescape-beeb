@@ -22,7 +22,9 @@
 \ 4), read from fq0-fq2 at n + 64, so both indices are bytes.
 \
 \ Entry points:
-\   cache_reset       every object's cache emptied (matrix_update and
+\   cache_reset       every object's cache emptied, and the sort's memory
+\                     (area_enter; and anything that moves an object);
+\                     cache_empty, the cache alone (matrix_update and
 \                     area_enter call it; so must anything that moves an
 \                     object)
 \   transform_setup   M c for the frame (after matrix_update)
@@ -80,8 +82,13 @@ ASSERT cam_y = cam_x + 2 AND cam_z = cam_x + 4
 
 SECTION ObjCode
 
-\ cache_reset: no object's cache is good.
+\ cache_reset: no object's cache is good, and the sort remembers no
+\ compare (sort_forget): for a new area, or an object moved.
 .cache_reset
+    ZA_ENTRY
+    JSR sort_forget
+\ cache_empty: no object's cache is good (a new orientation, or no room).
+.cache_empty
 {
     ZA_ENTRY
     STZ slot_next
@@ -288,7 +295,7 @@ ZA_AUTO 2, fs_v                     ; 64 u, the slow fills' coordinate
 .counted
     STA n
     CLC : ADC slot_next : BCC room
-    JSR cache_reset
+    JSR cache_empty
     LDX obj
 .room
     LDA slot_next : STA slot : STA ob_slot,X

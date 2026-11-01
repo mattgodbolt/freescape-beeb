@@ -41,7 +41,7 @@ INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
 
-SECTION ObjCode, org = &0E00, guard = &5400, filename = "OCODE", cmos = TRUE
+SECTION ObjCode, org = &0E00, guard = &5000, filename = "OCODE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
 \ The check's entry points, each called from the harness's stub.
@@ -96,20 +96,22 @@ ENDMACRO
     EQUB 0
 ENDSECTION
 \ area_enter pages the records' banks, so its code is never in one.
-SECTION AreaCode, org = &5400, guard = &5500, filename = "OAREA", cmos = TRUE
+SECTION AreaCode, org = &5000, guard = &5100, filename = "OAREA", cmos = TRUE
 ENDSECTION
-SECTION ObjConst, org = &5500, guard = &6000, filename = "OCONST"
+SECTION ObjConst, org = &5100, guard = &5C00, filename = "OCONST"
 ENDSECTION
-SECTION ObjArea, org = &6000, guard = &6A00, virtual = TRUE
+SECTION ObjArea, org = &5C00, guard = &6600, virtual = TRUE
 ENDSECTION
-SECTION ObjWork, org = &6A00, guard = &7800, virtual = TRUE
+SECTION ObjWork, org = &6600, guard = &7000, virtual = TRUE
 ENDSECTION
 SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
 ENDSECTION
 SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
-SECTION ObjOut, org = &7800, guard = &8000, virtual = TRUE
+SECTION ObjOut, org = &7000, guard = &7600, virtual = TRUE
+ENDSECTION
+SECTION ObjMemo, org = &7600, guard = &7C00, virtual = TRUE
 ENDSECTION
 
 INCLUDE "../gen/areas.6502"

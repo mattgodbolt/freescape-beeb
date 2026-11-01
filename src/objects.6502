@@ -281,7 +281,7 @@ ASSERT CULL_K > 0 AND CULL_K < 128
     JSR matrix_update
     IF DEFINED(OBJ_NOCACHE)
         \ (the measurement's variant: no cache, every object filled afresh)
-        JSR cache_reset
+        JSR cache_empty
     ENDIF
     JSR transform_setup
     JSR camera_setup

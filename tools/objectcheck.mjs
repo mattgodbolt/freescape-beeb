@@ -88,7 +88,7 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]);
-for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjCode"]) {
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjCode", "ObjMemo"]) {
     const a = sections[name];
     allowed.push([a.org, a.guard]);
 }

@@ -1427,17 +1427,32 @@ ENDMACRO
     LDA cn_n+3,Y : ASL A : SEXT         ; (past the fourth byte: the sign)
 .got3
     STA t+2
+    \ the 16 bits from bit s MOD 8 of t's 24: right that many, or left 8
+    \ less and a byte down, whichever's fewer (the bits past them don't
+    \ count, so neither shift minds the sign)
     LDA s : AND #7 : BEQ shifted
+    CMP #5 : BCS left
     TAX
-.bit
-    LDA t+2 : CMP #&80 : ROR t+2
-    ROR t+1 : ROR t
-    DEX : BNE bit
+.right
+    LSR t+2 : ROR t+1 : ROR t
+    DEX : BNE right
 .shifted
     TYA : LSR A : TAX                   ; (Y = 0, 4, 8: X = 0, 2, 4)
     LDA t : STA cl_np,X : ZA_INDEXEDBY 0..4
     LDA t+1 : STA cl_np+1,X : ZA_INDEXEDBY 0..4
+.next_k
     DEY : DEY : DEY : DEY : BPL each
+    BRA ab
+.left
+    EOR #7 : TAX : INX                  ; (8 - r)
+.left_bit
+    ASL t : ROL t+1 : ROL t+2
+    DEX : BNE left_bit
+    TYA : LSR A : TAX
+    LDA t+1 : STA cl_np,X : ZA_INDEXEDBY 0..4
+    LDA t+2 : STA cl_np+1,X : ZA_INDEXEDBY 0..4
+    BRA next_k
+.ab
     \ A = -2 N'x, B = N'y
     LDX slot
     LDA cl_np : ASL A : STA t
