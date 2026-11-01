@@ -411,6 +411,46 @@ def line_f(line, p):
     return a * p[0] + b * p[1] + c
 
 
+# A line from an image (render.IMAGE_LINES): the screen line of an edge's
+# plane through the eye runs through the image of any of the edge's points
+# in front of the eye, so an edge whose end the projection takes has its
+# line through that end's projected image, square to (a, b): through the
+# other end's image too when the projection takes both, as a face projected
+# whole has that edge, or else toward the edge's vanishing point. With A
+# the end's camera-space vertex and d the edge's direction (B - A), N = A x
+# d, and with A at (u, v) = (x - XC, y - YC) on the screen, f's gradient
+# (-2 Nx, Ny) is Az / FX times (FY dy + v dz, FX dx - u dz): no product of
+# 24-bit numbers, and the line passes through the image exactly.
+IMAGE_BITS = 14
+assert 2 * (1 << IMAGE_BITS) * (1 << 15) < 1 << 31     # (f at a corner fits 32 bits signed)
+
+
+def image_line(a, b, p):
+    """The line through view point p square to (a, b), not both 0: (A, B,
+    C) with f(x, y) = A x + B y + C = A (x - px) + B (y - py), A and B a
+    and b shifted right together (rounding down) until both fit IMAGE_BITS
+    bits, signed; or a unit (A or B +-1) when the other is 0, so that a
+    line square to a side crosses it at p exactly."""
+    assert a or b
+    if not b:
+        a, b = (1 if a > 0 else -1), 0
+    elif not a:
+        a, b = 0, (1 if b > 0 else -1)
+    else:
+        s = max(0, max(abs(a), abs(b)).bit_length() - IMAGE_BITS)
+        a, b = a >> s, b >> s
+    x, y = p
+    return (a, b, -(a * x + b * y))
+
+
+def image_gradient(p, d):
+    """(a, b) for the line through the image p of an edge's end toward the
+    edge's vanishing point, d its direction (B - A) in camera space: (FY dy +
+    v dz, FX dx - u dz), (u, v) = p less the view's centre."""
+    u, v = p[0] - XC, p[1] - YC
+    return (FY * d[1] + v * d[2], FX * d[0] - u * d[2])
+
+
 RECT = [(0, 0), (WIDTH, 0), (WIDTH, HEIGHT), (0, HEIGHT)]
 # The rectangle's sides, each from corner k to corner k + 1: the top, the
 # right, the bottom and the left. Each vertex of the polygon the cone clips

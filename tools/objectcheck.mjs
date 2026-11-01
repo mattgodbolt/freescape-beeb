@@ -219,7 +219,8 @@ const sortAt = has("of_sort") ? S("of_sort") : -1;
 // (docs/research/objects.md): each counted as its first instruction runs.
 const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point", "clip_cut", "project",
                  "project_z", "project_y", "band_test", "vertex_shared", "vertex_up", "poly_face", "draw_face3d",
-                 "cone_face", "edge_line", "cone_pass", "cone_cut", "smul16", "cone_mul",
+                 "cone_face", "edge_line", "image_line", "image_line.none", "cone_pass", "cone_cut", "smul16",
+                 "cone_mul",
                  "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
 for (const c of CALLEES) if (has(c)) callees.set(S(c), c);
@@ -389,10 +390,11 @@ for (const view of views) {
         counts.out += on;
         if (JSON.stringify(out) !== JSON.stringify(view.out))
             fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
-        // the work no output need show: the cone's lines, and the vertices
-        // projected, each by one of the projection's entries (by way of
-        // vertex_shared, vertex_up or vertex_shared.full)
-        const lines = made.edge_line || 0;
+        // the work no output need show: the cone's lines (from their planes or
+        // from images: an image_line that found no direction is no line), and
+        // the vertices projected, each by one of the projection's entries (by
+        // way of vertex_shared, vertex_up or vertex_shared.full)
+        const lines = (made.edge_line || 0) + (made.image_line || 0) - (made["image_line.none"] || 0);
         const projected = (made.project || 0) + (made.project_z || 0) + (made.project_y || 0);
         if (lines !== view.work.lines) fail(`${name}: the cone made ${lines} lines, want ${view.work.lines}`);
         if (projected !== view.work.projected)

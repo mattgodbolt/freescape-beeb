@@ -1351,196 +1351,75 @@ ZA_AUTO 12, en_n                        ; N: Nx, Ny, Nz, 32-bit signed
 ZA_AUTO 4, en_p                         ; a term
 ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
 
-\ en_store: en_n's component at X (0, 4, 8) = en_p, or less it if A's bit
-\ 7 is set. Clobbers A.
-.en_store
-{
-    ASL A : BCS less
-    LDA en_p : STA en_n,X : ZA_INDEXEDBY 0,4,8
-    LDA en_p+1 : STA en_n+1,X : ZA_INDEXEDBY 0,4,8
-    LDA en_p+2 : STA en_n+2,X : ZA_INDEXEDBY 0,4,8
-    LDA en_p+3 : STA en_n+3,X : ZA_INDEXEDBY 0,4,8
-    RTS
-.less
-    LDA #0 : SBC en_p : STA en_n,X : ZA_INDEXEDBY 0,4,8      ; (C set)
-    LDA #0 : SBC en_p+1 : STA en_n+1,X : ZA_INDEXEDBY 0,4,8
-    LDA #0 : SBC en_p+2 : STA en_n+2,X : ZA_INDEXEDBY 0,4,8
-    LDA #0 : SBC en_p+3 : STA en_n+3,X : ZA_INDEXEDBY 0,4,8
-    RTS
-}
+ZA_AUTO1 en_vi, en_vk                   ; an edge's vertices, from en_vi to en_vk
+ZA_AUTO1 en_axis, en_down              ; ... a box's: its axis, and &FF going down it
 
-\ en_term: en_n's component at X (0, 8) = c times the coordinate at vx0 + Y
-\ (24-bit signed), c = A, a signed byte within -64..64, negated if en_fl's
-\ bit 7 is set. Clobbers A, X.
-.en_term
+\ edge_axis: for the edge from vertex en_vi to vertex en_vk of the object
+\ being drawn, a box's (C clear): the axis it runs along (en_axis), and
+\ en_down &FF going down it (else 0); C set for a generic object's.
+.edge_axis
 {
-    STX en_k
-    TAX : BEQ zero
-    EOR en_fl : STA en_sg               ; (the term's sign)
-    TXA : BPL positive
-    EOR #&FF : INC A
-.positive
-    CMP #64 : BEQ by64
-    STA en_ca
-    QS_SET
-    JSR en_mul
-    BRA store
-.by64
-    JSR en_shl6
-.store
-    LDX en_k
-    LDA en_sg
-    JMP en_store
-.zero
-    LDX en_k
-    STZ en_n,X : ZA_INDEXEDBY 0,8
-    STZ en_n+1,X : ZA_INDEXEDBY 0,8
-    STZ en_n+2,X : ZA_INDEXEDBY 0,8
-    STZ en_n+3,X : ZA_INDEXEDBY 0,8
-    RTS
-}
-ZA_AUTO1 en_fl, en_sg, en_k
-
-\ en_cell: en_d = 64 times the cell A (its high byte; the caller takes the
-\ camera's coordinate off). Clobbers A.
-.en_cell
-    STA en_d
-    LSR A : LSR A : STA en_d+1
-    LDA en_d : LSR A : ROR A : ROR A : AND #&C0 : STA en_d
-    RTS
-ZA_AUTO 2, en_d                         ; a world offset, 16-bit signed
-
-\ en_dmul: en_p = mat_d times en_d, mat_d's bytes in the quarter squares'
-\ instructions (en_dset, as the matrix is built): the products of en_d's
-\ raw bytes, and mat_d off the top two bytes for a negative en_d (whose high
-\ byte reads 256 more). Clobbers A, X.
-.en_dmul
-{
-    LDA mat_d : BNE bytes
-    \ mat_d = 4096 (the yaw a multiple of 90 degrees): a shift
-    LDA mat_d+1 : CMP #&10 : BNE bytes
-    STZ en_p
-    LDA en_d : ASL A : ASL A : ASL A : ASL A : STA en_p+1
-    LDA en_d+1 : ASL A : ASL A : ASL A : ASL A : STA en_p+2
-    LDA en_d : LSR A : LSR A : LSR A : LSR A : ORA en_p+2 : STA en_p+2
-    LDA en_d+1
-    FOR k = 1..4
-        CMP #&80 : ROR A
-    NEXT
-    STA en_p+3
-    RTS
-.bytes
-    LDX en_d
-    SEC
-.a1 LDA sq_lo,X
-.a2 SBC ng_lo,X
-    STA en_p
-.a3 LDA sq_hi,X
-.a4 SBC ng_hi,X
-    STA en_p+1                          ; lo d0
-    SEC
-.b1 LDA sq_lo,X
-.b2 SBC ng_lo,X
-    TAY
-.b3 LDA sq_hi,X
-.b4 SBC ng_hi,X
-    STA en_p+2                          ; lo d1 (under 2^14)
-    TYA : CLC : ADC en_p+1 : STA en_p+1
-    BCC c1
-    INC en_p+2
-.c1
-    LDX en_d+1
-    SEC
-.c1l LDA sq_lo,X
-.c2l SBC ng_lo,X
-    TAY
-.c3l LDA sq_hi,X
-.c4l SBC ng_hi,X
-    STA en_p+3                          ; hi d0, at byte 1
-    TYA : CLC : ADC en_p+1 : STA en_p+1
-    LDA en_p+3 : ADC en_p+2 : STA en_p+2
-    LDA #0 : ROL A : STA en_p+3
-    SEC
-.d1 LDA sq_lo,X
-.d2 SBC ng_lo,X
-    TAY
-.d3 LDA sq_hi,X
-.d4 SBC ng_hi,X
-    TAX                                 ; hi d1, at byte 2
-    TYA : CLC : ADC en_p+2 : STA en_p+2
-    TXA : ADC en_p+3 : STA en_p+3
-    LDA en_d+1 : BPL done
-    LDA en_p+2 : SEC : SBC mat_d : STA en_p+2
-    LDA en_p+3 : SBC mat_d+1 : STA en_p+3
-.done
-    RTS
-}
-
-\ en_dset: mat_d's bytes into en_dmul's instructions (matrix_build).
-.en_dset
-{
-    LDA mat_d
-    STA en_dmul.a1+1 : STA en_dmul.a3+1 : STA en_dmul.c1l+1 : STA en_dmul.c3l+1
-    EOR #&FF
-    STA en_dmul.a2+1 : STA en_dmul.a4+1 : STA en_dmul.c2l+1 : STA en_dmul.c4l+1
-    LDA mat_d+1
-    STA en_dmul.b1+1 : STA en_dmul.b3+1 : STA en_dmul.d1+1 : STA en_dmul.d3+1
-    EOR #&FF
-    STA en_dmul.b2+1 : STA en_dmul.b4+1 : STA en_dmul.d2+1 : STA en_dmul.d4+1
-    RTS
-}
-
-\ edge_normal: en_n (Nx, Ny, Nz, 32-bit each) = the plane through the eye
-\ and the edge from vertex X to vertex Y of the object being drawn: the
-\ model's edge_normal_axis for a box's edge, along a world axis (sign
-\ times A x M's column for it), and edge_normal for any other (cut16(A) x
-\ cut16(B - A)).
-\
-\ A box's: each non-zero entry c of the column (negated going down the
-\ axis) gives two terms of N = A x col: entry r adds A's (r + 2) MOD 3
-\ times c to N's (r + 1) MOD 3, and takes A's (r + 1) MOD 3 times c from
-\ N's (r + 2) MOD 3. A product by 64 is a shift; any other's, three byte
-\ products. Under a level camera (mat_tilt 0), the same N by the cofactors
-\ (level, below), with fewer products.
-.edge_normal
-{
-    ZA_AUTO1 vi, vk, axis, down, r, bits
-    STX vi : STY vk
     LDX of_slot
     LDA ob_flags,X : AND #K_MASK
     CMP #K_RECT : BEQ rect
     BCC cuboid
-    JMP generic
+    RTS                                 ; (C set: a generic object)
 .cuboid
     \ vertex i's bit k is the high side on axis k
-    LDA vi : STA bits
-    EOR vk
+    LDA en_vi : EOR en_vk
     LDX #0
 .which
     LSR A : BCS found
     INX : BRA which
 .found
-    STX axis
-    LDA bit8,X : AND vk                 ; non-zero going up the axis
+    STX en_axis
+    LDA bit8,X : AND en_vk              ; non-zero going up the axis
     BRA column
 .rect
     \ vertex (du, dv) = 0 (0, 0), 1 (1, 0), 2 (1, 1), 3 (0, 1): an edge with
     \ ends differing by 1 runs along u, by 3 along v
     LDY ob_aux,X
-    TYA : ASL A : ASL A : ORA vi : TAX
-    LDA rect_bits,X : STA bits
-    LDA vi : EOR vk : CMP #1 : BNE along_v
-    LDA rect_u,Y : STA axis
-    LDX vk : LDA rect_du,X
+    LDA en_vi : EOR en_vk : CMP #1 : BNE along_v
+    LDA rect_u,Y : STA en_axis
+    LDX en_vk : LDA rect_du,X
     BRA column
 .along_v
-    LDA rect_v,Y : STA axis
-    LDX vk : LDA rect_dv,X
+    LDA rect_v,Y : STA en_axis
+    LDX en_vk : LDA rect_dv,X
 .column
-    \ down = &FF going down the axis, else 0: c = (m EOR down) - down
-    CMP #1 : LDA #0 : SBC #0 : STA down
-    LDA mat_tilt : BNE general
-    JMP level
+    \ en_down = &FF going down the axis, else 0: c = (m EOR down) - down
+    CMP #1 : LDA #0 : SBC #0 : STA en_down
+    CLC
+    RTS
+.rect_u
+    EQUB 1, 0, 0                        ; u for the zero axis x, y, z
+.rect_v
+    EQUB 2, 2, 1                        ; and v
+.rect_du
+    EQUB 0, 1, 1, 0                     ; each vertex's du
+.rect_dv
+    EQUB 0, 0, 1, 1                     ; ... and dv
+}
+ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2
+
+\ edge_normal: en_n (Nx, Ny, Nz, 32-bit each) = the plane through the eye
+\ and the edge from vertex en_vi to vertex en_vk of the object being drawn:
+\ the model's edge_normal_axis for a box's edge, along a world axis (sign
+\ times A x M's column for it), and edge_normal for any other (cut16(A) x
+\ cut16(B - A)); for an edge whose line image_edge couldn't make.
+\
+\ A box's: each non-zero entry c of the column (negated going down the
+\ axis) gives two terms of N = A x col: entry r adds A's (r + 2) MOD 3
+\ times c to N's (r + 1) MOD 3, and takes A's (r + 1) MOD 3 times c from
+\ N's (r + 2) MOD 3. A product by 64 is a shift; any other's, three byte
+\ products. (A level camera's planes had closed forms here, by M's
+\ cofactors, until the lines from images left this way rare.)
+.edge_normal
+{
+    vi = en_vi : vk = en_vk : axis = en_axis : down = en_down
+    ZA_AUTO1 r
+    JSR edge_axis : BCC general
+    JMP generic
 .general
     FOR k = 0..11
         STZ en_n + k
@@ -1583,56 +1462,6 @@ ZA_AUTO 2, en_d                         ; a world offset, 16-bit signed
     JMP entry
 .entries
     RTS
-.level
-    \ A level camera's box edge: M = [[m00, 0, m02], [0, 64, 0], [m20, 0,
-    \ m22]]. Along y, A x (0, 64, 0) = (-64 Az, 0, 64 Ax). Along x or z, A x
-    \ M e_k = cof(M) (D x e_k), D = A's world offset from the eye (A = M D),
-    \ so along x N = (m20 Ay, d dz, -m00 Ay) and along z N = (m22 Ay, -d dx,
-    \ -m02 Ay), d = mat_d, the y cofactor. All exact, as the general way's.
-    LDX axis : CPX #1 : BNE flat
-    LDA vi : CLC : ADC #2 * 3 * VALL : TAY
-    JSR en_shl6
-    LDA down : EOR #&80 : LDX #0 : JSR en_store
-    LDY vi
-    JSR en_shl6
-    LDA down : LDX #8 : JSR en_store
-    STZ en_n+4 : STZ en_n+5 : STZ en_n+6 : STZ en_n+7
-    RTS
-.flat
-    LDA down : STA en_fl
-    LDA vi : CLC : ADC #3 * VALL : STA r          ; (Ay's offset)
-    LDA mat + 6,X : LDY r : LDX #0 : JSR en_term  ; Nx: m20 (m22) Ay
-    LDA down : EOR #&80 : STA en_fl
-    LDX axis : LDA mat,X : LDY r : LDX #8 : JSR en_term   ; Nz: -m00 (-m02) Ay
-    \ Ny: d times the world offset on the other horizontal axis, z along x
-    \ and -x along z
-    LDX of_slot
-    LDA axis : BNE along_z
-    LDA bits : AND #4 : BEQ low_z
-    LDA ob_hz,X : BRA cell_z
-.low_z
-    LDA ob_lz,X
-.cell_z
-    JSR en_cell
-    LDA en_d : SEC : SBC cam_z : STA en_d
-    LDA en_d+1 : SBC cam_z+1 : STA en_d+1
-    JSR en_dmul
-    LDA down
-    BRA ny
-.along_z
-    LDA bits : AND #1 : BEQ low_x
-    LDA ob_hx,X : BRA cell_x
-.low_x
-    LDA ob_lx,X
-.cell_x
-    JSR en_cell
-    LDA en_d : SEC : SBC cam_x : STA en_d
-    LDA en_d+1 : SBC cam_x+1 : STA en_d+1
-    JSR en_dmul
-    LDA down : EOR #&80
-.ny
-    LDX #4
-    JMP en_store
 .generic
     LDX vi
     CN_COORD 0
@@ -1695,20 +1524,6 @@ ZA_AUTO 2, en_d                         ; a world offset, 16-bit signed
     EQUB 2, 0, 4, 0, 0
 .cr_q
     EQUB 4, 0, 0, 0, 2
-.rect_u
-    EQUB 1, 0, 0                        ; u for the zero axis x, y, z
-.rect_v
-    EQUB 2, 2, 1                        ; and v
-.rect_du
-    EQUB 0, 1, 1, 0                     ; each vertex's du
-.rect_dv
-    EQUB 0, 0, 1, 1                     ; ... and dv
-.rect_bits
-    \ by 4 (the zero axis) + the vertex: its high sides, a bit an axis, as a
-    \ cuboid's vertex's index has them
-    EQUB 0, 2, 6, 4                     ; across x: u is y, v is z
-    EQUB 0, 1, 5, 4                     ; across y: x, z
-    EQUB 0, 1, 3, 2                     ; across z: x, y
 }
 ASSERT vx1 = vx0 + VALL AND vx2 = vx1 + VALL AND vy0 = vx0 + 3 * VALL
 ASSERT vy1 = vy0 + VALL AND vy2 = vy1 + VALL AND vz0 = vy0 + 3 * VALL
@@ -1999,6 +1814,442 @@ ZA_AUTO1 el_r
 ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (A W = -2P, B H = 2Q)
 ASSERT 2 * PROJ_XC = 128 * 13 AND PROJ_YC = 64 * 13 AND 2 * VIEW_FX = 8 * 317
 ASSERT LINE_BITS = 13                   ; (|N'| at most 2^13: 13 |N'| fits 24 bits, 317 |N'| 23, and A 16)
+
+\ ===========================================================================
+\ The cone's lines from images (the model's render._image_line and
+\ clip.image_line): an edge's line runs through the image of either end the
+\ projection takes, so with both taken it's the line through their images,
+\ and a box's edge with one taken is the line through its image toward the
+\ edge's vanishing point, square to (FY dy + v dz, FX dx - u dz), d M's
+\ column for the edge's axis and (u, v) the image less the view's centre.
+
+\ im_vertex: vertex X projected, if it isn't yet (vp_done). X is kept.
+.im_vertex
+    LDA bit8,X : BIT vp_done : BNE im_done
+    TSB vp_done
+    JMP vertex_shared
+.im_done
+    RTS
+
+\ IM_EXT: A = the sign of a 16-bit difference just taken, extended to a
+\ byte (&FF or 0), from its high byte in A and N EOR V
+MACRO IM_EXT
+    BVC signed
+    EOR #&80
+.signed
+    ASL A : SEXT
+ENDMACRO
+
+\ IM_MUL v: im_t (24-bit) = v (16-bit signed, zero page) times im_dm (|d|,
+\ patched into cone_qs): the raw bytes' products, |d| off the top byte for
+\ a negative v
+MACRO IM_MUL v
+    LDX v : JSR cone_qs : STA im_t+1
+    LDA cq_lo : STA im_t
+    LDX v+1 : JSR cone_qs : STA im_t+2
+    LDA cq_lo : CLC : ADC im_t+1 : STA im_t+1
+    BCC carried
+    INC im_t+2
+.carried
+    LDA v+1 : BPL positive
+    LDA im_t+2 : SEC : SBC im_dm : STA im_t+2
+.positive
+ENDMACRO
+
+\ ADD3 dst, src / SUB3 dst, src: 24-bit dst plus or less src
+MACRO ADD3 dst, src
+    LDA dst : CLC : ADC src : STA dst
+    LDA dst+1 : ADC src+1 : STA dst+1
+    LDA dst+2 : ADC src+2 : STA dst+2
+ENDMACRO
+MACRO SUB3 dst, src
+    LDA dst : SEC : SBC src : STA dst
+    LDA dst+1 : SBC src+1 : STA dst+1
+    LDA dst+2 : SBC src+2 : STA dst+2
+ENDMACRO
+
+\ image_edge: line slot X from the images of the edge en_vi -> en_vk's
+\ ends, where the projection takes them (vp_off; each projected now if it
+\ wasn't): C clear and A the corners outside it if it's made (image_line);
+\ C set if the plane's own line is wanted, when the projection takes
+\ neither end, or one of a generic object's edge, or the images give no
+\ direction.
+.image_edge
+{
+    ZA_AUTO1 slot
+    STX slot
+    LDX en_vi : LDA bit8,X : BIT vp_off : BNE i_off
+    LDX en_vk : LDA bit8,X : BIT vp_off : BNE one_i
+    \ both: (a, b) = (yi - yk, xk - xi), 17 bits signed each
+    LDX en_vi : JSR im_vertex
+    LDX en_vk : JSR im_vertex
+    LDY en_vi : STY im_p
+    LDA vsyl,Y : SEC : SBC vsyl,X : STA im_a
+    LDA vsyh,Y : SBC vsyh,X : STA im_a+1
+    IM_EXT : STA im_a+2
+    LDA vsxl,X : SEC : SBC vsxl,Y : STA im_b
+    LDA vsxh,X : SBC vsxh,Y : STA im_b+1
+    IM_EXT : STA im_b+2
+    LDX slot
+    JMP image_line
+.plane
+    SEC
+    RTS
+.i_off
+    LDX en_vk : LDA bit8,X : BIT vp_off : BNE plane     ; (neither)
+    BRA one
+.one_i
+    LDX en_vi
+.one
+    STX im_p
+    JSR edge_axis : BCS plane                           ; (a generic object's)
+    LDX im_p : JSR im_vertex
+    \ (u, v): the image less the view's centre
+    LDA vsxl,X : SEC : SBC #LO(PROJ_XC) : STA im_u
+    LDA vsxh,X : SBC #HI(PROJ_XC) : STA im_u+1
+    LDA vsyl,X : SEC : SBC #LO(PROJ_YC) : STA im_v
+    LDA vsyh,X : SBC #HI(PROJ_YC) : STA im_v+1
+    \ a = FY d1 + v d2, b = FX d0 - u d2, d the axis's column
+    LDX en_axis
+    LDA im_fy0,X : STA im_a
+    LDA im_fy1,X : STA im_a+1
+    LDA im_fy2,X : STA im_a+2
+    LDA im_fx0,X : STA im_b
+    LDA im_fx1,X : STA im_b+1
+    LDA im_fx2,X : STA im_b+2
+    LDA mat+6,X : BNE products
+    JMP down                            ; (d2 zero: no products)
+.products
+    STA im_d2
+    BPL d_pos
+    EOR #&FF : INC A
+.d_pos
+    STA im_dm
+    QS_SET
+    IM_MUL im_v
+    BIT im_d2 : BMI a_less
+    ADD3 im_a, im_t
+    BRA a_done
+.a_less
+    SUB3 im_a, im_t
+.a_done
+    IM_MUL im_u
+    BIT im_d2 : BMI b_more
+    SUB3 im_b, im_t
+    BRA down
+.b_more
+    ADD3 im_b, im_t
+.down
+    \ going down the axis, d is the column negated
+    BIT en_down : BPL directed
+    LDA #0 : SEC : SBC im_a : STA im_a
+    LDA #0 : SBC im_a+1 : STA im_a+1
+    LDA #0 : SBC im_a+2 : STA im_a+2
+    LDA #0 : SEC : SBC im_b : STA im_b
+    LDA #0 : SBC im_b+1 : STA im_b+1
+    LDA #0 : SBC im_b+2 : STA im_b+2
+.directed
+    LDX slot
+    JMP image_line
+}
+ZA_AUTO 3, im_a, im_b                   ; a line's direction's normal (a, b), 24-bit signed
+ZA_AUTO2 im_u, im_v                     ; an image less the view's centre
+ZA_AUTO1 im_p, im_d2, im_dm             ; the image's vertex; d2 and |d2|
+\ Inside the band, |u| and |v| are under 16 FX and 8 FY (and a projection's
+\ error, a few sixteenths), so they fit 16 bits; and an entry of M is within
+\ 65, so a and b have at most 21 bits (image_line's shifts).
+IM_UV = (VIEW_FX << (BAND_XS + 1)) + 16
+ASSERT (VIEW_FY << (BAND_YS + 1)) + 16 = IM_UV AND PROJ_XC + IM_UV < &8000
+ASSERT IM_UV * 65 + VIEW_FY * 65 < &200000 AND IM_UV * 65 + VIEW_FX * 65 < &200000
+
+\ IM_RIGHT / IM_LEFT: im_a and im_b shifted a bit right (arithmetic), or left
+MACRO IM_RIGHT
+    LDA im_a+2 : CMP #&80 : ROR im_a+2 : ROR im_a+1 : ROR im_a
+    LDA im_b+2 : CMP #&80 : ROR im_b+2 : ROR im_b+1 : ROR im_b
+ENDMACRO
+MACRO IM_LEFT
+    ASL im_a : ROL im_a+1 : ROL im_a+2
+    ASL im_b : ROL im_b+1 : ROL im_b+2
+ENDMACRO
+
+\ im_term: im_cf (32-bit) less c v, c = im_c and v = im_x (16-bit signed
+\ each): |c|'s bytes patched into its quarter squares' instructions, then
+\ the products of v's raw bytes, |c| 2^16 off for a negative v, taken from
+\ im_cf or added by c's sign.
+.im_term
+{
+    ZA_AUTO1 sg
+    LDA im_c+1 : STA sg : BPL positive
+    LDA #0 : SEC : SBC im_c : STA im_c
+    LDA #0 : SBC im_c+1 : STA im_c+1
+.positive
+    LDA im_c
+    STA a1+1 : STA a3+1 : STA c1+1 : STA c3+1
+    EOR #&FF
+    STA a2+1 : STA a4+1 : STA c2+1 : STA c4+1
+    LDA im_c+1
+    STA b1+1 : STA b3+1 : STA d1+1 : STA d3+1
+    EOR #&FF
+    STA b2+1 : STA b4+1 : STA d2+1 : STA d4+1
+    LDX im_x
+    SEC
+.a1 LDA sq_lo,X
+.a2 SBC ng_lo,X
+    STA im_t                            ; v0 c0
+.a3 LDA sq_hi,X
+.a4 SBC ng_hi,X
+    STA im_t+1
+    SEC
+.b1 LDA sq_lo,X
+.b2 SBC ng_lo,X
+    TAY                                 ; v0 c1
+.b3 LDA sq_hi,X
+.b4 SBC ng_hi,X
+    STA im_t+2
+    TYA : CLC : ADC im_t+1 : STA im_t+1
+    BCC carried
+    INC im_t+2
+.carried
+    LDX im_x+1
+    SEC
+.c1 LDA sq_lo,X
+.c2 SBC ng_lo,X
+    TAY                                 ; v1 c0
+.c3 LDA sq_hi,X
+.c4 SBC ng_hi,X
+    STA im_t+3
+    TYA : CLC : ADC im_t+1 : STA im_t+1
+    LDA im_t+3 : ADC im_t+2 : STA im_t+2
+    LDA #0 : ROL A : STA im_t+3
+    SEC
+.d1 LDA sq_lo,X
+.d2 SBC ng_lo,X
+    TAY                                 ; v1 c1
+.d3 LDA sq_hi,X
+.d4 SBC ng_hi,X
+    TAX
+    TYA : CLC : ADC im_t+2 : STA im_t+2
+    TXA : ADC im_t+3 : STA im_t+3
+    LDA im_x+1 : BPL sized
+    LDA im_t+2 : SEC : SBC im_c : STA im_t+2
+    LDA im_t+3 : SBC im_c+1 : STA im_t+3
+.sized
+    BIT sg : BMI more
+    SEC
+    LDA im_cf : SBC im_t : STA im_cf
+    LDA im_cf+1 : SBC im_t+1 : STA im_cf+1
+    LDA im_cf+2 : SBC im_t+2 : STA im_cf+2
+    LDA im_cf+3 : SBC im_t+3 : STA im_cf+3
+    RTS
+.more
+    CLC
+    LDA im_cf : ADC im_t : STA im_cf
+    LDA im_cf+1 : ADC im_t+1 : STA im_cf+1
+    LDA im_cf+2 : ADC im_t+2 : STA im_cf+2
+    LDA im_cf+3 : ADC im_t+3 : STA im_cf+3
+    RTS
+}
+
+\ im_w: im_aw + X (X = 0, or 4 for im_bh: 32-bit) = im_c (16-bit signed)
+\ times W = 128 (13 c), as edge_line's P. Clobbers A, Y.
+.im_w
+{
+    PHX
+    MULK im_c, 13, im_t
+    PLX
+    LDA im_c+1 : BPL positive
+    LDA im_t+2 : SEC : SBC #13 : STA im_t+2
+.positive
+    LDA im_t+2 : CMP #&80 : ROR A : STA im_aw+3,X : ZA_INDEXEDBY 0,4
+    LDA im_t+1 : ROR A : STA im_aw+2,X : ZA_INDEXEDBY 0,4
+    LDA im_t : ROR A : STA im_aw+1,X : ZA_INDEXEDBY 0,4
+    LDA #0 : ROR A : STA im_aw,X : ZA_INDEXEDBY 0,4
+    RTS
+}
+
+\ image_line: line slot X through vertex im_p's image (vsx, vsy) square to
+\ (im_a, im_b), each 24-bit signed (the model's clip.image_line): A and B
+\ those shifted right together until both fit IMAGE_BITS bits, or a unit
+\ (+-1) when the other is 0; and f at the rectangle's corners, C = f(0, 0)
+\ = -(A px + B py), C + A W, C + A W + B H and C + B H. C clear and A the
+\ corners outside (f < 0); C set, and no line, if a and b are both 0.
+.image_line
+{
+    ZA_AUTO1 slot, s
+    STX slot
+    LDA #&FF : STA ln_sch,X             ; (no side crossing kept)
+    LDY im_p
+    LDA im_b : ORA im_b+1 : ORA im_b+2 : BNE b_some
+    LDA im_a : ORA im_a+1 : ORA im_a+2 : BNE a_unit
+.none                                   ; (no direction: tools/objectcheck.mjs counts it)
+    SEC
+    RTS
+.a_unit
+    \ A = +-1, B = 0: C = -+px, A W = +-W
+    STZ lnb0,X : STZ lnb1,X
+    STZ im_bh : STZ im_bh+1 : STZ im_bh+2 : STZ im_bh+3
+    LDA im_a+2 : BMI a_minus
+    LDA #1 : STA lna0,X
+    LDA #0 : STA lna1,X
+    LDA #0 : SEC : SBC vsxl,Y : STA im_cf
+    LDA #0 : SBC vsxh,Y : STA im_cf+1
+    LDA #LO(CLIP_W) : STA im_aw
+    LDA #HI(CLIP_W) : STA im_aw+1
+    LDA #0
+    BRA a_ext
+.a_minus
+    LDA #&FF : STA lna0,X : STA lna1,X
+    LDA vsxl,Y : STA im_cf
+    LDA vsxh,Y : STA im_cf+1
+    LDA #LO(-CLIP_W) : STA im_aw
+    LDA #HI(-CLIP_W) : STA im_aw+1
+    LDA #&FF
+.a_ext
+    STA im_aw+2 : STA im_aw+3
+    LDA im_cf+1 : ASL A : SEXT : STA im_cf+2 : STA im_cf+3
+    JMP corners
+.b_some
+    LDA im_a : ORA im_a+1 : ORA im_a+2 : BNE general
+    \ A = 0, B = +-1: C = -+py, B H = +-H
+    STZ lna0,X : STZ lna1,X
+    STZ im_aw : STZ im_aw+1 : STZ im_aw+2 : STZ im_aw+3
+    LDA im_b+2 : BMI b_minus
+    LDA #1 : STA lnb0,X
+    LDA #0 : STA lnb1,X
+    LDA #0 : SEC : SBC vsyl,Y : STA im_cf
+    LDA #0 : SBC vsyh,Y : STA im_cf+1
+    LDA #LO(CLIP_H) : STA im_bh
+    LDA #HI(CLIP_H) : STA im_bh+1
+    LDA #0
+    BRA b_ext
+.b_minus
+    LDA #&FF : STA lnb0,X : STA lnb1,X
+    LDA vsyl,Y : STA im_cf
+    LDA vsyh,Y : STA im_cf+1
+    LDA #LO(-CLIP_H) : STA im_bh
+    LDA #HI(-CLIP_H) : STA im_bh+1
+    LDA #&FF
+.b_ext
+    STA im_bh+2 : STA im_bh+3
+    LDA im_cf+1 : ASL A : SEXT : STA im_cf+2 : STA im_cf+3
+    JMP corners
+.general
+    \ s = bitlen(|a| OR |b|) - IMAGE_BITS, from their top two bytes (a and
+    \ b have at most 21 bits: s is 0 to 7)
+    LDA im_a+2 : BPL a_pos
+    LDA #0 : SEC : SBC im_a : LDA #0 : SBC im_a+1 : STA s
+    LDA #0 : SBC im_a+2
+    BRA a_got
+.a_pos
+    LDY im_a+1 : STY s
+.a_got
+    STA im_t                            ; (|a|'s top two bytes: im_t, s)
+    LDA im_b+2 : BPL b_pos
+    LDA #0 : SEC : SBC im_b : LDA #0 : SBC im_b+1 : ORA s : STA s
+    LDA #0 : SBC im_b+2
+    BRA b_got
+.b_pos
+    LDA im_b+1 : ORA s : STA s
+    LDA im_b+2
+.b_got
+    ORA im_t : BEQ low
+    TAY : LDA proj_bl2,Y                ; 2 bitlen(the top byte)
+    CLC : ADC #2 * (16 - IMAGE_BITS)
+    BRA shift
+.low
+    LDY s : LDA proj_bl2,Y              ; 2 bitlen(the middle byte)
+    SEC : SBC #2 * (IMAGE_BITS - 8) : BCS shift
+    LDA #0
+.shift
+    TAX                                 ; 2 s
+    JMP (im_shift,X)
+    ZA_CANJUMP IM_SHIFTS
+.r3 IM_RIGHT
+.r2 IM_RIGHT
+.r1 IM_RIGHT
+.r0
+    LDX slot
+    LDA im_a : STA lna0,X : STA im_ab
+    LDA im_a+1 : STA lna1,X : STA im_ab+1
+    LDA im_b : STA lnb0,X : STA im_bb
+    LDA im_b+1 : STA lnb1,X : STA im_bb+1
+    BRA have
+.l4 IM_LEFT
+.l3 IM_LEFT
+.l2 IM_LEFT
+.l1 IM_LEFT
+    LDX slot
+    LDA im_a+1 : STA lna0,X : STA im_ab
+    LDA im_a+2 : STA lna1,X : STA im_ab+1
+    LDA im_b+1 : STA lnb0,X : STA im_bb
+    LDA im_b+2 : STA lnb1,X : STA im_bb+1
+.have
+    \ C = -(A px + B py), then A W and B H
+    STZ im_cf : STZ im_cf+1 : STZ im_cf+2 : STZ im_cf+3
+    LDY im_p
+    LDA vsxl,Y : STA im_x
+    LDA vsxh,Y : STA im_x+1
+    LDA im_ab : STA im_c
+    LDA im_ab+1 : STA im_c+1
+    JSR im_term
+    LDY im_p
+    LDA vsyl,Y : STA im_x
+    LDA vsyh,Y : STA im_x+1
+    LDA im_bb : STA im_c
+    LDA im_bb+1 : STA im_c+1
+    JSR im_term
+    LDA im_ab : STA im_c
+    LDA im_ab+1 : STA im_c+1
+    LDX #0 : JSR im_w
+    LDA im_bb : STA im_c
+    LDA im_bb+1 : STA im_c+1
+    LDX #4 : JSR im_w                   ; (im_bh)
+.corners
+    \ f at (0, 0), (W, 0), (W, H) and (0, H): C, C + A W, C + A W + B H, C + B H
+    LDX slot
+    LDA im_cf : STA lfc,X
+    CLC : ADC im_aw : STA im_t : STA lfc + 32,X
+    LDA im_cf+1 : STA lfc + 8,X
+    ADC im_aw+1 : STA im_t+1 : STA lfc + 32 + 8,X
+    LDA im_cf+2 : STA lfc + 16,X
+    ADC im_aw+2 : STA im_t+2 : STA lfc + 32 + 16,X
+    LDA im_cf+3 : STA lfc + 24,X
+    ADC im_aw+3 : STA im_t+3 : STA lfc + 32 + 24,X
+    CLC
+    LDA im_t : ADC im_bh : STA lfc + 64,X
+    LDA im_t+1 : ADC im_bh+1 : STA lfc + 64 + 8,X
+    LDA im_t+2 : ADC im_bh+2 : STA lfc + 64 + 16,X
+    LDA im_t+3 : ADC im_bh+3 : STA lfc + 64 + 24,X
+    CLC
+    LDA im_cf : ADC im_bh : STA lfc + 96,X
+    LDA im_cf+1 : ADC im_bh+1 : STA lfc + 96 + 8,X
+    LDA im_cf+2 : ADC im_bh+2 : STA lfc + 96 + 16,X
+    LDA im_cf+3 : ADC im_bh+3 : STA lfc + 96 + 24,X
+    \ how many are outside
+    LDA lfc + 24,X : ASL A
+    LDA #0 : ROL A
+    LDY lfc + 32 + 24,X : BPL c1
+    INC A
+.c1
+    LDY lfc + 64 + 24,X : BPL c2
+    INC A
+.c2
+    LDY lfc + 96 + 24,X : BPL c3
+    INC A
+.c3
+    CLC
+    RTS
+IM_SHIFTS = {r0, r1, r2, r3, l4, l3, l2, l1}
+.im_shift
+    EQUW r0, r1, r2, r3, l4, l3, l2, l1
+}
+ZA_AUTO 4, im_cf                        ; C
+ZA_AUTO 8, im_aw                        ; A W, then B H
+im_bh = im_aw + 4
+ZA_AUTO2 im_ab, im_bb, im_c             ; A, B, and a coefficient (im_term, im_w)
+ZA_AUTO2 im_x                           ; a coordinate of the image (im_term)
+ASSERT IMAGE_LINES AND IMAGE_BITS = 14  ; (A and B to 15 bits signed; s at most 7)
+ASSERT 2 * (1 << IMAGE_BITS) * (PROJ_XC + IM_UV + CLIP_W) < &80000000   ; (f fits 32 bits)
 
 \ The cone's products of a line's A or B by a coordinate: |A| and |B|'s
 \ bytes patched into four quarter-square readers (ce_al, ce_ah, ce_bl,
@@ -2407,7 +2658,7 @@ ENDMACRO
 \ first, then those with one, each in the loop's order.
 .cone_face
 {
-    ZA_AUTO1 face, n, j, every, nl, vi, vk, phase
+    ZA_AUTO1 face, n, j, every, nl, phase
     STX face
     LDA fa_nv,X : STA n
     LDY fa_loop,X
@@ -2449,16 +2700,19 @@ ENDMACRO
 .edge
     LDX j
     LDA fp_bh,X : CLC : ADC fp_bh+1,X : CMP phase : BNE passed
-    LDA fp_idx+1,X : STA vk : TAY
-    LDA fp_idx,X : STA vi : TAX
+    LDA fp_idx+1,X : STA en_vk
+    LDA fp_idx,X : STA en_vi
+    LDX nl
+    JSR image_edge : BCC made_line      ; (from the images, if it can)
     JSR edge_normal
     LDX nl
     JSR edge_line
+.made_line
     CMP #4 : BEQ none                   ; (every corner out)
     CMP #0 : BEQ passed                 ; (every corner in: it cuts nothing)
     LDX nl
-    LDA vi : STA ln_v0,X
-    LDA vk : STA ln_v1,X
+    LDA en_vi : STA ln_v0,X
+    LDA en_vk : STA ln_v1,X
     INC nl
 .passed
     INC j : LDA j : CMP n : BNE edge
@@ -2801,36 +3055,47 @@ ASSERT BAND_XS >= BAND_YS AND 14 + BAND_YS >= 16
     LDA vz2,X : STA proj_z+2
     PHX : JSR project : PLX
 .got
-    \ the outcode (the model's outcode2d)
+    \ the outcode (the model's outcode2d), by the high bytes (oc_x, oc_y),
+    \ but for one each way of the view's far edges, which the low byte decides
     LDA proj_sy : STA vsyl,X
     LDA proj_sy+1 : STA vsyh,X
     LDA proj_sx : STA vsxl,X
-    LDA proj_sx+1 : STA vsxh,X : BPL x_right
-    LDA #OC_LEFT
-    BRA x_done
-.x_right
-    LDA #LO(CLIP_W) : CMP proj_sx
-    LDA #HI(CLIP_W) : SBC proj_sx+1
-    LDA #0
-    BCS x_done                          ; (no borrow: sx <= CLIP_W)
-    LDA #OC_RIGHT
+    LDA proj_sx+1 : STA vsxh,X
+    TAY : LDA oc_x,Y : BMI x_edge
 .x_done
     STX vs_last
-    LDY proj_sy+1 : BPL y_down
-    ORA #OC_TOP
+    LDY proj_sy+1 : ORA oc_y,Y : BMI y_edge
     STA voc,X
     RTS
-.y_down
-    TAY
-    LDA #LO(CLIP_H) : CMP proj_sy
-    LDA #HI(CLIP_H) : SBC proj_sy+1
+.x_edge
+    LDA proj_sx : CMP #LO(CLIP_W) + 1
+    LDA #0
+    BCC x_done                          ; (sx <= CLIP_W)
+    LDA #OC_RIGHT
+    BRA x_done
+.y_edge
+    AND #&7F : TAY
+    LDA proj_sy : CMP #LO(CLIP_H) + 1
     TYA
-    BCS y_done                          ; (no borrow: sy <= CLIP_H)
+    BCC y_done                          ; (sy <= CLIP_H)
     ORA #OC_BOTTOM
 .y_done
     STA voc,X
     RTS
 }
+ENDSECTION
+SECTION ObjConst
+\ the outcodes by a coordinate's high byte (signed): beyond the near edge
+\ (negative), inside, beyond the far one, or &80 for the far edge's own high
+\ byte, where the low byte decides
+OC_HI = 0..255
+.oc_x
+    EQUB WHERE(OC_HI >= 128, OC_LEFT, WHERE(OC_HI > HI(CLIP_W), OC_RIGHT, WHERE(OC_HI = HI(CLIP_W), &80, 0)))
+.oc_y
+    EQUB WHERE(OC_HI >= 128, OC_TOP, WHERE(OC_HI > HI(CLIP_H), OC_BOTTOM, WHERE(OC_HI = HI(CLIP_H), &80, 0)))
+ASSERT LO(CLIP_W) < &FF AND LO(CLIP_H) < &FF
+ENDSECTION
+SECTION ObjCode
 
 \ vertex_pass: the candidate's (of_cand, slot of_slot, a polygon object)
 \ vertices its seen faces use, transformed: vp_off has a bit for each the
