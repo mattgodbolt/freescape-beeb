@@ -107,6 +107,8 @@ SECTION ObjWork
 .cn_v       SKIP 9                  ; three 24-bit, to cut to 16
 .cn_w       SKIP 6                  ; ... cut
 .cn_a16     SKIP 6                  ; an edge's start, cut
+.en_u       SKIP 12                 ; |A| for a box's edge's terms: x, y, z, 4 bytes each
+.en_p       SKIP 4                  ; ... a term
 .lna0       SKIP NLINES             ; A, 16-bit
 .lna1       SKIP NLINES
 .lnb0       SKIP NLINES             ; B, 16-bit
@@ -203,62 +205,15 @@ SECTION ObjCode
     RTS
 }
 
-\ umul32: uu (8 bytes) = ma (4 bytes) * mb (4 bytes), unsigned, a
-\ column at a time: each of mb's bytes patched into cprod's quarter-square
-\ reads once, for every byte of ma; a zero byte of either costs nothing.
-.umul32
-{
-    ZA_AUTO 8, uu
-    ZA_AUTO 4, ma
-    ZA_AUTO 4, mb
-    ZA_AUTO1 lo
-    FOR k = 0..7
-        STZ umul32.uu + k
-    NEXT
-    FOR j = 0..3
-        LDA mb + j : BNE column
-        JMP next
-    .column
-        STA sl+1 : STA sh+1
-        EOR #&FF
-        STA nl+1 : STA nh+1
-        FOR i = 0..3
-            LDX ma + i : BEQ skip
-            JSR cprod
-            TAY
-            LDA umul32.uu + i + j : CLC : ADC lo : STA umul32.uu + i + j
-            TYA : ADC umul32.uu + i + j + 1 : STA umul32.uu + i + j + 1
-            IF i + j + 2 <= 7
-                BCC skip
-                FOR k = i + j + 2..7
-                    INC umul32.uu + k : BNE skip
-                NEXT
-            ENDIF
-        .skip
-        NEXT
-    .next
-    NEXT
-    RTS
-\ cprod: A (high) and lo = X times the patched byte
-.cprod
-    SEC
-.sl LDA sq_lo,X
-.nl SBC ng_lo,X
-    STA lo
-.sh LDA sq_hi,X
-.nh SBC ng_hi,X
-    RTS
-}
-
 \ ===========================================================================
 \ Crossings (the model's crossing_t and lerp).
 
 \ frac16: ft = the model's crossing_t, from fp (4 bytes, at least 0) and fd
 \ (4 bytes, fp less): fp and fd shifted right together until fd fits 16
 \ bits (whole bytes while it's past 24), then floor(2^16 fp / fd) by
-\ sixteen steps of a long division, unrolled, the remainder's high byte in
-\ A. (When the shifts leave fp = fd, every step takes and ft is &FFFF, the
-\ model's clamp.)
+\ sixteen steps of a long division, unrolled; then patched into lerp's
+\ products. (When the shifts leave fp = fd, every step takes and ft is
+\ &FFFF, the model's clamp.)
 .frac16
 {
     ZA_AUTO 4, fp
@@ -293,43 +248,109 @@ SECTION ObjCode
     .bit
         ROL ft : ROL ft+1
     NEXT
+    \ t's bytes into lerp's quarter-square products (lerp.t0, lerp.t1)
+    LDA ft
+    STA lerp.a1+1 : STA lerp.a3+1
+    EOR #&FF
+    STA lerp.a2+1 : STA lerp.a4+1
+    LDA ft+1
+    STA lerp.b1+1 : STA lerp.b3+1
+    EOR #&FF
+    STA lerp.b2+1 : STA lerp.b4+1
     RTS
 }
 
-\ lerp: lr (3 bytes) = round half up of ld (32-bit signed) frac16.ft /
-\ 2^16, modulo 2^24 (the callers add it to a 24-bit coordinate, and the sum
-\ fits).
+\ lerp: lr (3 bytes) = round half up of ld (32-bit signed, its magnitude
+\ within 24 bits) times frac16.ft / 2^16, modulo 2^24 (the model's lerp,
+\ less p: the callers add it to a coordinate, and the sum fits): ld's
+\ magnitude by t's two bytes, which frac16 patched into t0 and t1.
 .lerp
 {
     ZA_AUTO 4, ld
     ZA_AUTO 3, lr
-    ZA_AUTO1 neg
-    LDA ld+3 : STA neg : BPL positive
-    NEG4 ld
+    ZA_AUTO 3, u
+    ZA_AUTO 5, p
+    LDA ld+3 : BPL positive
+    LDA #0 : SEC : SBC ld : STA u
+    LDA #0 : SBC ld+1 : STA u+1
+    LDA #0 : SBC ld+2 : STA u+2
+    BRA sized
 .positive
-    FOR k = 0..3
-        LDA ld + k : STA umul32.ma + k
-    NEXT
-    LDA frac16.ft : STA umul32.mb
-    LDA frac16.ft+1 : STA umul32.mb+1
-    STZ umul32.mb+2 : STZ umul32.mb+3
-    JSR umul32
+    LDA ld : STA u
+    LDA ld+1 : STA u+1
+    LDA ld+2 : STA u+2
+.sized
+    STZ p+3 : STZ p+4
+    \ u0 t0 at byte 0, u0 t1 at 1
+    LDX u
+    JSR t0 : STA p+1
+    LDA lerp_lo : STA p
+    JSR t1 : STA p+2
+    LDA lerp_lo : CLC : ADC p+1 : STA p+1
+    BCC u1
+    INC p+2
+.u1
+    \ u1 t0 at 1, u1 t1 at 2
+    LDX u+1 : BEQ u2
+    JSR t0 : TAY
+    LDA lerp_lo : CLC : ADC p+1 : STA p+1
+    TYA : ADC p+2 : STA p+2
+    BCC u1_hi
+    INC p+3
+.u1_hi
+    JSR t1 : TAY
+    LDA lerp_lo : CLC : ADC p+2 : STA p+2
+    TYA : ADC p+3 : STA p+3
+    BCC u2
+    INC p+4
+.u2
+    \ u2 t0 at 2, u2 t1 at 3
+    LDX u+2 : BEQ rounded
+    JSR t0 : TAY
+    LDA lerp_lo : CLC : ADC p+2 : STA p+2
+    TYA : ADC p+3 : STA p+3
+    BCC u2_hi
+    INC p+4
+.u2_hi
+    JSR t1 : TAY
+    LDA lerp_lo : CLC : ADC p+3 : STA p+3
+    TYA : ADC p+4 : STA p+4
+.rounded
     \ (|product| + 2^15) >> 16 rounds a positive one half up; for a negative
     \ one it's -((|product| + 2^15 - 1) >> 16). So &7FFF plus C, with C set
     \ for a positive product, then >> 16.
-    LDA neg : EOR #&80 : ASL A
-    LDA umul32.uu+0 : ADC #&FF
-    LDA umul32.uu+1 : ADC #&7F
-    LDA umul32.uu+2 : ADC #0 : STA lr+0
-    LDA umul32.uu+3 : ADC #0 : STA lr+1
-    LDA umul32.uu+4 : ADC #0 : STA lr+2
-    BIT neg : BPL done
-    LDA #0 : SEC : SBC lr+0 : STA lr+0
+    LDA ld+3 : EOR #&80 : ASL A
+    LDA p : ADC #&FF
+    LDA p+1 : ADC #&7F
+    LDA p+2 : ADC #0 : STA lr
+    LDA p+3 : ADC #0 : STA lr+1
+    LDA p+4 : ADC #0 : STA lr+2
+    BIT ld+3 : BPL done
+    LDA #0 : SEC : SBC lr : STA lr
     LDA #0 : SBC lr+1 : STA lr+1
     LDA #0 : SBC lr+2 : STA lr+2
 .done
     RTS
+\ t0, t1: X times t's low or high byte: the product's low byte in lerp_lo, its
+\ high byte in A
+.t0
+    SEC
+.a1 LDA sq_lo,X
+.a2 SBC ng_lo,X
+    STA lerp_lo
+.a3 LDA sq_hi,X
+.a4 SBC ng_hi,X
+    RTS
+.t1
+    SEC
+.b1 LDA sq_lo,X
+.b2 SBC ng_lo,X
+    STA lerp_lo
+.b3 LDA sq_hi,X
+.b4 SBC ng_hi,X
+    RTS
 }
+ZA_AUTO1 lerp_lo
 
 
 \ ===========================================================================
@@ -981,51 +1002,6 @@ ENDMACRO
 }
 ZA_AUTO1 cq_lo
 
-\ cone_mul: cm_p (4 bytes) = cm_a (3 bytes, signed) times the signed byte
-\ in A (at most 128 either way).
-.cone_mul
-{
-    ZA_AUTO1 neg
-    ZA_AUTO 3, u
-    TAX : BNE some
-    STZ cm_p : STZ cm_p+1 : STZ cm_p+2 : STZ cm_p+3
-    RTS
-.some
-    EOR cm_a+2 : STA neg            ; (bit 7: the product's sign)
-    TXA : BPL c_pos
-    EOR #&FF : INC A
-.c_pos
-    QS_SET
-    LDA cm_a+2 : BPL a_pos
-    LDA #0 : SEC : SBC cm_a : STA u
-    LDA #0 : SBC cm_a+1 : STA u+1
-    LDA #0 : SBC cm_a+2 : STA u+2
-    BRA got
-.a_pos
-    STA u+2
-    LDA cm_a+1 : STA u+1
-    LDA cm_a : STA u
-.got
-    LDX u : JSR cone_qs : STA cm_p+1
-    LDA cq_lo : STA cm_p
-    LDX u+1 : JSR cone_qs : STA cm_p+2
-    LDA cq_lo : CLC : ADC cm_p+1 : STA cm_p+1
-    BCC c1
-    INC cm_p+2
-.c1
-    LDX u+2 : JSR cone_qs : STA cm_p+3
-    LDA cq_lo : CLC : ADC cm_p+2 : STA cm_p+2
-    BCC c2
-    INC cm_p+3
-.c2
-    BIT neg : BPL done
-    NEG4 cm_p
-.done
-    RTS
-}
-ZA_AUTO 3, cm_a
-ZA_AUTO 4, cm_p
-
 \ smul16: sm_p (4 bytes) = sm_a times sm_b, each signed 16-bit (umul16 on
 \ their sizes).
 .smul16
@@ -1118,37 +1094,19 @@ OC_BEHIND = 32
 ASSERT OC_BEHIND <> OC_LEFT AND OC_BEHIND <> OC_RIGHT AND OC_BEHIND <> OC_TOP
 ASSERT OC_BEHIND <> OC_BOTTOM
 
-\ CN_TERM arr, c, dst, first: cn_n's 32-bit dst = (first) or less (not
-\ first) vertex X's coordinate in arr (arr, arr + VALL, arr + 2 VALL) times
-\ the signed byte c. X is kept.
-MACRO CN_TERM arr, c, dst, first
-    LDA arr,X : STA cm_a
-    LDA arr+VALL,X : STA cm_a+1
-    LDA arr+2*VALL,X : STA cm_a+2
-    LDA c : JSR cone_mul
-    LDX edge_normal.vi
-    IF first
-        COPY4 cn_n+dst, cm_p
-    ELSE
-        SUB4 cn_n+dst, cm_p
-    ENDIF
-ENDMACRO
-
-\ CN_CROSS p, q, dst: cn_n's 32-bit dst = a_p d_q - a_q d_p (cn_a16 and
-\ cn_w, three signed 16-bit each)
-MACRO CN_CROSS p, q, dst
-    LDA cn_a16 + 2 * p : STA sm_a
-    LDA cn_a16 + 2 * p + 1 : STA sm_a+1
-    LDA cn_w + 2 * q : STA sm_b
-    LDA cn_w + 2 * q + 1 : STA sm_b+1
-    JSR smul16
-    COPY4 cn_n+dst, sm_p
-    LDA cn_a16 + 2 * q : STA sm_a
-    LDA cn_a16 + 2 * q + 1 : STA sm_a+1
-    LDA cn_w + 2 * p : STA sm_b
-    LDA cn_w + 2 * p + 1 : STA sm_b+1
-    JSR smul16
-    SUB4 cn_n+dst, sm_p
+\ EN_MAG k: en_u's coordinate k (at 4 k: |v| in three bytes, then v's top
+\ byte, whose bit 7 is its sign) from vertex Y's
+MACRO EN_MAG k
+    LDA vx2 + 3 * VALL * k,Y : STA en_u + 4 * k + 3 : BPL positive
+    LDA #0 : SEC : SBC vx0 + 3 * VALL * k,Y : STA en_u + 4 * k
+    LDA #0 : SBC vx1 + 3 * VALL * k,Y : STA en_u + 4 * k + 1
+    LDA #0 : SBC vx2 + 3 * VALL * k,Y : STA en_u + 4 * k + 2
+    BRA done
+.positive
+    STA en_u + 4 * k + 2
+    LDA vx1 + 3 * VALL * k,Y : STA en_u + 4 * k + 1
+    LDA vx0 + 3 * VALL * k,Y : STA en_u + 4 * k
+.done
 ENDMACRO
 
 \ CN_COORD k: cn_v's coordinate k = vertex X's (24-bit)
@@ -1171,7 +1129,7 @@ ENDMACRO
 \ cut16(B - A)).
 .edge_normal
 {
-    ZA_AUTO1 vi, vk, axis
+    ZA_AUTO1 vi, vk, axis, e, c, sg
     ZA_AUTO 3, col
     STX vi : STY vk
     LDX of_slot
@@ -1215,14 +1173,60 @@ ENDMACRO
     STA col,X : ZA_INDEXEDBY 0..2
     DEX : BPL negate
 .up
-    \ N = A x col: Nx = Ay cz - Az cy, Ny = Az cx - Ax cz, Nz = Ax cy - Ay cx
-    LDX vi
-    CN_TERM vy0, col+2, 0, TRUE
-    CN_TERM vz0, col+1, 0, FALSE
-    CN_TERM vz0, col+0, 4, TRUE
-    CN_TERM vx0, col+2, 4, FALSE
-    CN_TERM vx0, col+1, 8, TRUE
-    CN_TERM vy0, col+0, 8, FALSE
+    \ N = A x col: Nx = Ay cz - Az cy, Ny = Az cx - Ax cz, Nz = Ax cy - Ay cx,
+    \ six terms (en_*), each a coordinate's size times a column entry's,
+    \ added or taken by their signs and the term's; none for a zero entry
+    LDY vi
+    EN_MAG 0
+    EN_MAG 1
+    EN_MAG 2
+    LDX #11
+.clear
+    STZ cn_n,X
+    DEX : BPL clear
+    LDX #5
+.term
+    STX e
+    LDY en_col,X
+    LDA col,Y : ZA_INDEXEDBY 0..2
+    BNE nonzero
+    JMP next
+.nonzero
+    STA c
+    BPL c_pos
+    EOR #&FF : INC A
+.c_pos
+    QS_SET
+    LDY en_src,X
+    LDA c : EOR en_u+3,Y : EOR en_op,X : STA sg
+    LDX en_u,Y : JSR cone_qs : STA en_p+1
+    LDA cq_lo : STA en_p
+    LDX en_u+1,Y : JSR cone_qs : STA en_p+2
+    LDA cq_lo : CLC : ADC en_p+1 : STA en_p+1
+    BCC c1
+    INC en_p+2
+.c1
+    LDX en_u+2,Y : JSR cone_qs : STA en_p+3
+    LDA cq_lo : CLC : ADC en_p+2 : STA en_p+2
+    BCC c2
+    INC en_p+3
+.c2
+    LDX e : LDY en_dst,X
+    BIT sg : BMI less
+    LDA cn_n,Y : CLC : ADC en_p : STA cn_n,Y
+    LDA cn_n+1,Y : ADC en_p+1 : STA cn_n+1,Y
+    LDA cn_n+2,Y : ADC en_p+2 : STA cn_n+2,Y
+    LDA cn_n+3,Y : ADC en_p+3 : STA cn_n+3,Y
+    BRA next
+.less
+    LDA cn_n,Y : SEC : SBC en_p : STA cn_n,Y
+    LDA cn_n+1,Y : SBC en_p+1 : STA cn_n+1,Y
+    LDA cn_n+2,Y : SBC en_p+2 : STA cn_n+2,Y
+    LDA cn_n+3,Y : SBC en_p+3 : STA cn_n+3,Y
+.next
+    LDX e : DEX : BMI done
+    JMP term
+.done
     RTS
 .generic
     LDX vi
@@ -1238,11 +1242,46 @@ ENDMACRO
     CN_DIFF 1
     CN_DIFF 2
     JSR cut16
-    \ N = cn_a16 x cn_w
-    CN_CROSS 1, 2, 0
-    CN_CROSS 2, 0, 4
-    CN_CROSS 0, 1, 8
+    \ N = cn_a16 x cn_w: N's k = a_p d_q - a_q d_p, (p, q) = (1, 2), (2, 0), (0, 1)
+    LDX #4
+.cross
+    STX e
+    LDY cr_p,X : LDA cn_a16,Y : STA sm_a : LDA cn_a16+1,Y : STA sm_a+1
+    LDY cr_q,X : LDA cn_w,Y : STA sm_b : LDA cn_w+1,Y : STA sm_b+1
+    JSR smul16
+    LDA e : ASL A : TAY
+    LDA sm_p : STA cn_n,Y
+    LDA sm_p+1 : STA cn_n+1,Y
+    LDA sm_p+2 : STA cn_n+2,Y
+    LDA sm_p+3 : STA cn_n+3,Y
+    LDX e
+    LDY cr_q,X : LDA cn_a16,Y : STA sm_a : LDA cn_a16+1,Y : STA sm_a+1
+    LDY cr_p,X : LDA cn_w,Y : STA sm_b : LDA cn_w+1,Y : STA sm_b+1
+    JSR smul16
+    LDA e : ASL A : TAY
+    LDA cn_n,Y : SEC : SBC sm_p : STA cn_n,Y
+    LDA cn_n+1,Y : SBC sm_p+1 : STA cn_n+1,Y
+    LDA cn_n+2,Y : SBC sm_p+2 : STA cn_n+2,Y
+    LDA cn_n+3,Y : SBC sm_p+3 : STA cn_n+3,Y
+    LDX e : DEX : DEX : BMI crossed
+    JMP cross
+.crossed
     RTS
+\ the box's six terms: col's entry, the coordinate (en_u's offset), N's
+\ component (cn_n's offset), and &80 to take it
+.en_col
+    EQUB 0, 0, 1, 1, 2, 2
+.en_src
+    EQUB 8, 4, 8, 0, 4, 0
+.en_dst
+    EQUB 4, 8, 0, 8, 0, 4
+.en_op
+    EQUB 0, &80, &80, 0, 0, &80
+\ the cross product's (p, q), by N's component's offset in 16-bit words
+.cr_p
+    EQUB 2, 0, 4, 0, 0
+.cr_q
+    EQUB 4, 0, 0, 0, 2
 .rect_u
     EQUB 1, 0, 0                        ; u for the zero axis x, y, z
 .rect_v
@@ -1307,111 +1346,147 @@ ASSERT vz1 = vz0 + VALL AND vz2 = vz1 + VALL
     RTS
 }
 
+\ MULK v, k, out: out (3 bytes) = v (2 bytes, unsigned) times the constant
+\ byte k, by quarter squares with k in the instructions
+MACRO MULK v, k, out
+    LDX v
+    SEC
+    LDA sq_lo + k,X : SBC ng_lo + 255 - k,X : STA out
+    LDA sq_hi + k,X : SBC ng_hi + 255 - k,X : STA out+1
+    LDX v+1
+    SEC
+    LDA sq_lo + k,X : SBC ng_lo + 255 - k,X : TAY
+    LDA sq_hi + k,X : SBC ng_hi + 255 - k,X : STA out+2
+    TYA : CLC : ADC out+1 : STA out+1
+    BCC done
+    INC out+2
+.done
+ENDMACRO
+
 \ edge_line: line slot X = cn_n's plane on the screen (the model's
-\ screen_line): its normal shifted right, rounding down, until the
+\ screen_line): the normal shifted right, rounding down, until the
 \ largest magnitude fits LINE_BITS bits, N'; then f(x, y) = A x + B y + C
-\ with A = -2 N'x, B = N'y, C = P - Q - R, P = 2 XC N'x, Q = YC N'y, R =
-\ 2 FX N'z; and A W = -2P, B H = 2Q for the rectangle's sides. Returns A =
-\ how many of the rectangle's corners are outside it (f < 0). X is kept.
+\ with A = -2 N'x, B = N'y, C = P - Q - R, P = 2 XC N'x = 128 (13 N'x), Q =
+\ YC N'y = 64 (13 N'y), R = 2 FX N'z = 8 (317 N'z), and A W = -2P and B H =
+\ 2Q along the rectangle's sides. Returns A = how many of the rectangle's
+\ corners are outside it (f < 0). X is kept.
 .edge_line
 {
-    ZA_AUTO1 slot, s, out
+    ZA_AUTO1 slot, s, k, neg
     ZA_AUTO 4, or
-    ZA_AUTO 4, f
+    ZA_AUTO 4, t
+    ZA_AUTO 3, m
     STX slot
     \ the magnitudes, ORed
     STZ or : STZ or+1 : STZ or+2 : STZ or+3
-    LDX #8
+    LDY #8
 .size
-    LDA cn_n+3,X : BPL positive
+    LDA cn_n+3,Y : BPL positive
     SEC
-    FOR k = 0..3
-        LDA #0 : SBC cn_n+k,X : ORA or+k : STA or+k
-    NEXT
+    LDA #0 : SBC cn_n,Y : ORA or : STA or
+    LDA #0 : SBC cn_n+1,Y : ORA or+1 : STA or+1
+    LDA #0 : SBC cn_n+2,Y : ORA or+2 : STA or+2
+    LDA #0 : SBC cn_n+3,Y : ORA or+3 : STA or+3
     BRA next
 .positive
-    FOR k = 0..3
-        LDA cn_n+k,X : ORA or+k : STA or+k
-    NEXT
+    ORA or+3 : STA or+3
+    LDA cn_n+2,Y : ORA or+2 : STA or+2
+    LDA cn_n+1,Y : ORA or+1 : STA or+1
+    LDA cn_n,Y : ORA or : STA or
 .next
-    DEX : DEX : DEX : DEX : BPL size
+    DEY : DEY : DEY : DEY : BPL size
     \ s = bitlen - LINE_BITS, at least 0
     LDX #3
 .top
     LDA or,X : ZA_INDEXEDBY 0..3
     BNE topped
     DEX : BPL top
-    LDX #0                              ; (all zero: no shift)
+    INX                                 ; (all zero: no shift)
 .topped
     TAY : LDA proj_bl2,Y : LSR A        ; the byte's bit length
-    CLC : ADC byte_bits,X               ; + 8 X
+    CLC : ADC eight,X
     SEC : SBC #LINE_BITS : BCS shift
     LDA #0
 .shift
     STA s
-    \ N' = N >> s for each, two bytes: whole bytes, then bits
-    LDX #8
+    \ each component's N' (cl_np, three 16-bit): its bytes from s DIV 8,
+    \ then s MOD 8 bits
+    LDY #8
 .each
-    LDA s : LSR A : LSR A : LSR A : TAY     ; (s DIV 8 whole bytes)
-    STX cl_k
-    TXA : CLC : ADC byte_bits_k,Y : TAX     ; X = this component's byte s DIV 8
-    LDA cn_n,X : STA cl_t
-    LDA cn_n+1,X : STA cl_t+1
-    \ the byte above: the next, or the sign past the fourth
-    TYA : CLC : ADC #2 : CMP #4 : BCS sign
+    STY k
+    LDA s : LSR A : LSR A : LSR A
+    CLC : ADC k : TAX                   ; the byte s DIV 8 of this component
+    LDA cn_n,X : STA t
+    LDA cn_n+1,X : STA t+1
+    CPX k : BEQ third                   ; (s DIV 8 = 0: the third byte's there)
+    TXA : SEC : SBC k : CMP #2 : BCS sign
+.third
     LDA cn_n+2,X
     BRA got3
 .sign
-    LDX cl_k : LDA cn_n+3,X : ASL A : SEXT
+    LDA cn_n+3,Y : ASL A : SEXT         ; (past the fourth byte: the sign)
 .got3
-    STA cl_t+2
+    STA t+2
     LDA s : AND #7 : BEQ shifted
-    TAY
+    TAX
 .bit
-    LDA cl_t+2 : CMP #&80 : ROR cl_t+2
-    ROR cl_t+1 : ROR cl_t
-    DEY : BNE bit
+    LDA t+2 : CMP #&80 : ROR t+2
+    ROR t+1 : ROR t
+    DEX : BNE bit
 .shifted
-    LDX cl_k
-    TXA : LSR A : TAY                   ; (X = 0, 4, 8: Y = 0, 2, 4)
-    LDA cl_t : STA cl_np,Y : ZA_INDEXEDBY 0..4
-    LDA cl_t+1 : STA cl_np+1,Y : ZA_INDEXEDBY 0..4
-    DEX : DEX : DEX : DEX : BPL each
+    TYA : LSR A : TAX                   ; (Y = 0, 4, 8: X = 0, 2, 4)
+    LDA t : STA cl_np,X : ZA_INDEXEDBY 0..4
+    LDA t+1 : STA cl_np+1,X : ZA_INDEXEDBY 0..4
+    DEY : DEY : DEY : DEY : BPL each
     \ A = -2 N'x, B = N'y
     LDX slot
-    LDA cl_np : ASL A : STA cl_t
-    LDA cl_np+1 : ROL A : STA cl_t+1
-    LDA #0 : SEC : SBC cl_t : STA lna0,X
-    LDA #0 : SBC cl_t+1 : STA lna1,X
+    LDA cl_np : ASL A : STA t
+    LDA cl_np+1 : ROL A : STA t+1
+    LDA #0 : SEC : SBC t : STA lna0,X
+    LDA #0 : SBC t+1 : STA lna1,X
     LDA cl_np+2 : STA lnb0,X
     LDA cl_np+3 : STA lnb1,X
-    \ P, Q, R
-    LDA cl_np : STA sm_a
-    LDA cl_np+1 : STA sm_a+1
-    LDA #LO(2 * PROJ_XC) : STA sm_b
-    LDA #HI(2 * PROJ_XC) : STA sm_b+1
-    JSR smul16
-    COPY4 cl_p, sm_p
-    LDA cl_np+2 : STA sm_a
-    LDA cl_np+3 : STA sm_a+1
-    LDA #LO(PROJ_YC) : STA sm_b
-    LDA #HI(PROJ_YC) : STA sm_b+1
-    JSR smul16
-    COPY4 cl_q, sm_p
-    LDA cl_np+4 : STA sm_a
-    LDA cl_np+5 : STA sm_a+1
-    LDA #LO(2 * VIEW_FX) : STA sm_b
-    LDA #HI(2 * VIEW_FX) : STA sm_b+1
-    JSR smul16
+    \ P = 128 (13 |N'x|), signed
+    LDY #0 : JSR magnitude
+    MULK m, 13, t
+    LDA #0 : LSR t+2 : ROR t+1 : ROR t : ROR A
+    STA cl_p : LDA t : STA cl_p+1
+    LDA t+1 : STA cl_p+2 : LDA t+2 : STA cl_p+3
+    BIT neg : BPL p_pos
+    NEG4 cl_p
+.p_pos
+    \ Q = 64 (13 |N'y|)
+    LDY #2 : JSR magnitude
+    MULK m, 13, t
+    LDA #0 : LSR t+2 : ROR t+1 : ROR t : ROR A
+    LSR t+2 : ROR t+1 : ROR t : ROR A
+    STA cl_q : LDA t : STA cl_q+1
+    LDA t+1 : STA cl_q+2 : LDA t+2 : STA cl_q+3
+    BIT neg : BPL q_pos
+    NEG4 cl_q
+.q_pos
+    \ R = 8 (317 |N'z|) = 8 (256 |N'z| + 61 |N'z|)
+    LDY #4 : JSR magnitude
+    MULK m, 61, t
+    LDA t+1 : CLC : ADC m : STA t+1
+    LDA t+2 : ADC m+1 : STA t+2
+    LDA #0 : ROL A : STA t+3            ; (the carry: 317 |N'z| < 2^23)
+    ASL t : ROL t+1 : ROL t+2 : ROL t+3
+    ASL t : ROL t+1 : ROL t+2 : ROL t+3
+    ASL t : ROL t+1 : ROL t+2 : ROL t+3
+    BIT neg : BPL r_pos
+    NEG4 t
+.r_pos
     \ C = P - Q - R
-    COPY4 f, cl_p
-    SUB4 f, cl_q
-    SUB4 f, sm_p
     LDX slot
-    LDA f : STA lnc0,X
-    LDA f+1 : STA lnc1,X
-    LDA f+2 : STA lnc2,X
-    LDA f+3 : STA lnc3,X
+    LDA cl_p : SEC : SBC cl_q : STA cl_f
+    LDA cl_p+1 : SBC cl_q+1 : STA cl_f+1
+    LDA cl_p+2 : SBC cl_q+2 : STA cl_f+2
+    LDA cl_p+3 : SBC cl_q+3 : STA cl_f+3
+    LDA cl_f : SEC : SBC t : STA cl_f : STA lnc0,X
+    LDA cl_f+1 : SBC t+1 : STA cl_f+1 : STA lnc1,X
+    LDA cl_f+2 : SBC t+2 : STA cl_f+2 : STA lnc2,X
+    LDA cl_f+3 : SBC t+3 : STA cl_f+3 : STA lnc3,X
     \ A W = -2P, B H = 2Q
     ASL cl_p : ROL cl_p+1 : ROL cl_p+2 : ROL cl_p+3
     LDA #0 : SEC : SBC cl_p : STA lnw0,X
@@ -1424,41 +1499,181 @@ ASSERT vz1 = vz0 + VALL AND vz2 = vz1 + VALL
     LDA cl_q+2 : STA lnh2,X
     LDA cl_q+3 : STA lnh3,X
     \ the corners: (0, 0) C, (W, 0) C + AW, (W, H) C + AW + BH, (0, H) C + BH
-    STZ out
-    LDA f+3 : ASL A : ROL out           ; (f < 0: one out)
-    LDA f : CLC : ADC lnw0,X : STA f
-    LDA f+1 : ADC lnw1,X : STA f+1
-    LDA f+2 : ADC lnw2,X : STA f+2
-    LDA f+3 : ADC lnw3,X : STA f+3
-    ASL A : LDA out : ADC #0 : STA out
-    LDA f : CLC : ADC lnh0,X : STA f
-    LDA f+1 : ADC lnh1,X : STA f+1
-    LDA f+2 : ADC lnh2,X : STA f+2
-    LDA f+3 : ADC lnh3,X : STA f+3
-    ASL A : LDA out : ADC #0 : STA out
-    LDA f : SEC : SBC lnw0,X
-    LDA f+1 : SBC lnw1,X
-    LDA f+2 : SBC lnw2,X
-    LDA f+3 : SBC lnw3,X
-    ASL A : LDA out : ADC #0
+    LDA cl_f+3 : ASL A                  ; (C: f < 0)
+    LDA #0 : ROL A : STA k
+    LDA cl_f : CLC : ADC lnw0,X : STA cl_f
+    LDA cl_f+1 : ADC lnw1,X : STA cl_f+1
+    LDA cl_f+2 : ADC lnw2,X : STA cl_f+2
+    LDA cl_f+3 : ADC lnw3,X : STA cl_f+3
+    ASL A : LDA k : ADC #0 : STA k
+    LDA cl_f : CLC : ADC lnh0,X : STA cl_f
+    LDA cl_f+1 : ADC lnh1,X : STA cl_f+1
+    LDA cl_f+2 : ADC lnh2,X : STA cl_f+2
+    LDA cl_f+3 : ADC lnh3,X : STA cl_f+3
+    ASL A : LDA k : ADC #0 : STA k
+    LDA cl_f : SEC : SBC lnw0,X
+    LDA cl_f+1 : SBC lnw1,X
+    LDA cl_f+2 : SBC lnw2,X
+    LDA cl_f+3 : SBC lnw3,X
+    ASL A : LDA k : ADC #0
     RTS
-.byte_bits
+\ magnitude: m = |cl_np's 16-bit at Y|, neg its sign
+.magnitude
+    LDA cl_np+1,Y : ZA_INDEXEDBY 0..4
+    STA neg : BPL m_pos
+    LDA #0 : SEC : SBC cl_np,Y : ZA_INDEXEDBY 0..4
+    STA m
+    LDA #0 : SBC cl_np+1,Y : ZA_INDEXEDBY 0..4
+    STA m+1
+    RTS
+.m_pos
+    STA m+1
+    LDA cl_np,Y : ZA_INDEXEDBY 0..4
+    STA m
+    RTS
+.eight
     EQUB 0, 8, 16, 24
-.byte_bits_k
-    EQUB 0, 1, 2, 3
 }
-ZA_AUTO1 cl_k
-ZA_AUTO 3, cl_t
 ZA_AUTO 6, cl_np                        ; N' (three signed 16-bit)
 ZA_AUTO 4, cl_p
 ZA_AUTO 4, cl_q
+ZA_AUTO 4, cl_f
 ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (A W = -2P, B H = 2Q)
+ASSERT 2 * PROJ_XC = 128 * 13 AND PROJ_YC = 64 * 13 AND 2 * VIEW_FX = 8 * 317
+ASSERT LINE_BITS <= 13                  ; (|N'| at most 2^13: 13 |N'| fits 24 bits, and A 16)
+
+\ The cone's products of a line's A or B by a coordinate: |A| and |B|'s
+\ bytes patched into four quarter-square readers (ce_al, ce_ah, ce_bl,
+\ ce_bh: X times the byte, the product's low byte in ce_lo and its high in
+\ A) once a pass (cone_line), each vertex's coordinate's bytes in X.
+.ce_al
+{
+    SEC
+.p1 LDA sq_lo,X
+.p2 SBC ng_lo,X
+    STA ce_lo
+.p3 LDA sq_hi,X
+.p4 SBC ng_hi,X
+    RTS
+}
+.ce_ah
+{
+    SEC
+.p1 LDA sq_lo,X
+.p2 SBC ng_lo,X
+    STA ce_lo
+.p3 LDA sq_hi,X
+.p4 SBC ng_hi,X
+    RTS
+}
+.ce_bl
+{
+    SEC
+.p1 LDA sq_lo,X
+.p2 SBC ng_lo,X
+    STA ce_lo
+.p3 LDA sq_hi,X
+.p4 SBC ng_hi,X
+    RTS
+}
+.ce_bh
+{
+    SEC
+.p1 LDA sq_lo,X
+.p2 SBC ng_lo,X
+    STA ce_lo
+.p3 LDA sq_hi,X
+.p4 SBC ng_hi,X
+    RTS
+}
+ZA_AUTO1 ce_lo
+
+\ cone_line: line X's |A| and |B| patched into the readers, their signs in
+\ ce_as and ce_bs (bit 7). X is kept.
+.cone_line
+{
+    LDA lna1,X : STA ce_as : BPL a_pos
+    LDA #0 : SEC : SBC lna0,X : PHA
+    LDA #0 : SBC lna1,X
+    BRA a_got
+.a_pos
+    LDA lna0,X : PHA
+    LDA lna1,X
+.a_got
+    STA ce_ah.p1+1 : STA ce_ah.p3+1
+    EOR #&FF
+    STA ce_ah.p2+1 : STA ce_ah.p4+1
+    PLA
+    STA ce_al.p1+1 : STA ce_al.p3+1
+    EOR #&FF
+    STA ce_al.p2+1 : STA ce_al.p4+1
+    LDA lnb1,X : STA ce_bs : BPL b_pos
+    LDA #0 : SEC : SBC lnb0,X : PHA
+    LDA #0 : SBC lnb1,X
+    BRA b_got
+.b_pos
+    LDA lnb0,X : PHA
+    LDA lnb1,X
+.b_got
+    STA ce_bh.p1+1 : STA ce_bh.p3+1
+    EOR #&FF
+    STA ce_bh.p2+1 : STA ce_bh.p4+1
+    PLA
+    STA ce_bl.p1+1 : STA ce_bl.p3+1
+    EOR #&FF
+    STA ce_bl.p2+1 : STA ce_bl.p4+1
+    RTS
+}
+ZA_AUTO1 ce_as
+ZA_AUTO1 ce_bs
+
+\ CE_TERM lo, hi, rl, rh, sign: ce_t (4 bytes) = |a| v, v = pa's coordinate
+\ (lo, hi at Y, under 2^11), |a| in the readers rl (its low byte) and rh
+\ (its high), then added to cf*,Y or taken from it by sign's bit 7
+MACRO CE_TERM lo, hi, rl, rh, sign
+    LDX lo,Y
+    JSR rl : STA ce_t+1                 ; v0 a0
+    LDA ce_lo : STA ce_t
+    JSR rh : STA ce_t+2                 ; v0 a1
+    LDA ce_lo : CLC : ADC ce_t+1 : STA ce_t+1
+    BCC c1
+    INC ce_t+2
+.c1
+    STZ ce_t+3
+    LDX hi,Y : BEQ summed               ; (v's high byte: under 8)
+    JSR rl : TAX                        ; v1 a0
+    LDA ce_lo : CLC : ADC ce_t+1 : STA ce_t+1
+    TXA : ADC ce_t+2 : STA ce_t+2
+    BCC c2
+    INC ce_t+3
+.c2
+    LDX hi,Y
+    JSR rh : TAX                        ; v1 a1
+    LDA ce_lo : CLC : ADC ce_t+2 : STA ce_t+2
+    TXA : ADC ce_t+3 : STA ce_t+3
+.summed
+    BIT sign : BMI less
+    LDA cf0,Y : CLC : ADC ce_t : STA cf0,Y
+    LDA cf1,Y : ADC ce_t+1 : STA cf1,Y
+    LDA cf2,Y : ADC ce_t+2 : STA cf2,Y
+    LDA cf3,Y : ADC ce_t+3 : STA cf3,Y
+    BRA done
+.less
+    LDA cf0,Y : SEC : SBC ce_t : STA cf0,Y
+    LDA cf1,Y : SBC ce_t+1 : STA cf1,Y
+    LDA cf2,Y : SBC ce_t+2 : STA cf2,Y
+    LDA cf3,Y : SBC ce_t+3 : STA cf3,Y
+.done
+ENDMACRO
+ASSERT CLIP_W < 2048 AND CLIP_H < 2048   ; (v's high byte under 8)
 
 \ cone_eval: cf*,Y = line X's f at pa's vertex Y (A x + B y + C, with A W
-\ and B H for a vertex on the rectangle's right or bottom side). X and Y
-\ are kept.
+\ and B H for a vertex on the rectangle's right or bottom side), its A and B
+\ in the readers (cone_line). X and Y are kept.
 .cone_eval
 {
+    ZA_AUTO1 line
+    STX line
     LDA lnc0,X : STA cf0,Y
     LDA lnc1,X : STA cf1,Y
     LDA lnc2,X : STA cf2,Y
@@ -1473,12 +1688,9 @@ ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (A W = -2P, B H = 2Q)
     LDA cf3,Y : ADC lnw3,X : STA cf3,Y
     BRA y_term
 .x_mul
-    LDA lna0,X : STA sm_a
-    LDA lna1,X : STA sm_a+1
-    LDA pa_xl,Y : STA sm_b
-    LDA pa_xh,Y : STA sm_b+1
-    JSR ce_add
+    JSR x_product
 .y_term
+    LDX line
     LDA pa_yl,Y : ORA pa_yh,Y : BEQ done
     LDA pa_yl,Y : CMP #LO(CLIP_H) : BNE y_mul
     LDA pa_yh,Y : CMP #HI(CLIP_H) : BNE y_mul
@@ -1487,23 +1699,21 @@ ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (A W = -2P, B H = 2Q)
     LDA cf2,Y : ADC lnh2,X : STA cf2,Y
     LDA cf3,Y : ADC lnh3,X : STA cf3,Y
 .done
+    LDX line
     RTS
 .y_mul
-    LDA lnb0,X : STA sm_a
-    LDA lnb1,X : STA sm_a+1
-    LDA pa_yl,Y : STA sm_b
-    LDA pa_yh,Y : STA sm_b+1
-\ ce_add: cf*,Y += sm_a sm_b; X and Y kept
-.ce_add
-    PHX : PHY
-    JSR smul16
-    PLY : PLX
-    LDA cf0,Y : CLC : ADC sm_p : STA cf0,Y
-    LDA cf1,Y : ADC sm_p+1 : STA cf1,Y
-    LDA cf2,Y : ADC sm_p+2 : STA cf2,Y
-    LDA cf3,Y : ADC sm_p+3 : STA cf3,Y
+    JSR y_product
+    LDX line
+    RTS
+.x_product
+    CE_TERM pa_xl, pa_xh, ce_al, ce_ah, ce_as
+    RTS
+.y_product
+    CE_TERM pa_yl, pa_yh, ce_bl, ce_bh, ce_bs
     RTS
 }
+ZA_AUTO 4, ce_t
+
 
 \ CC_AXIS sl, sh, dl, dh: cone_cut's new vertex on one axis: P + lerp(Q -
 \ P), straight across when they're the same
@@ -1552,6 +1762,7 @@ ENDMACRO
 {
     ZA_AUTO1 line, m, i
     STX line
+    JSR cone_line
     LDY #0
 .f
     JSR cone_eval

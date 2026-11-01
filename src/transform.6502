@@ -226,66 +226,55 @@ ENDMACRO
 
 ZA_AUTO 2, fs_v                     ; 64 u, the slow fills' coordinate
 
-\ FS_TERM acc, m, first: acc (3 bytes) += the maths' product of fs_v (64 u)
-\ and M's entry m, or = it if first
-MACRO FS_TERM acc, m, first
-    LDA m : JSR mul_set
+\ fill_slow_point: fill_point's, slot in Y: a column at a time, each
+\ product by the maths' mul.
+.fill_slow_point
+{
+    ZA_AUTO1 slot, k, i
+    STY slot
+    LDX #8
+.zero
+    STZ fill_point.acc,X : ZA_INDEXEDBY 0..8
+    DEX : BPL zero
+    STZ k
+.column
+    LDX k
+    LDA fill_point.p,X : ZA_INDEXEDBY 0..2
+    LSR A : LSR A : STA fs_v+1          ; fs_v = 64 u
+    LDA fill_point.p,X : ZA_INDEXEDBY 0..2
+    LSR A : ROR A : ROR A : AND #&C0 : STA fs_v
+    STX i                               ; i = 3 r + k, row r
+.row
+    LDX i : LDA mat,X : BEQ next_row
+    JSR mul_set
     LDA fs_v : STA mv0
     LDA fs_v+1 : STA mv0+1
     JSR mul
-    IF first
-        LDA macc : STA acc
-        LDA macc+1 : STA acc+1
-        LDA macc+2 : STA acc+2
-    ELSE
-        LDA acc : CLC : ADC macc : STA acc
-        LDA acc+1 : ADC macc+1 : STA acc+1
-        LDA acc+2 : ADC macc+2 : STA acc+2
-    ENDIF
-ENDMACRO
-
-\ FS_V u: fs_v = 64 u, u a cell
-MACRO FS_V u
-    LDA u : LSR A : LSR A : STA fs_v+1
-    LDA u : LSR A : ROR A : ROR A : AND #&C0 : STA fs_v
-ENDMACRO
-
-\ fill_slow_point: fill_point's, slot in Y
-.fill_slow_point
-{
-    ZA_AUTO1 slot
-    STY slot
-    FS_V fill_point.px
-    FOR r = 0..2
-        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 0, TRUE
-    NEXT
-    FS_V fill_point.py
-    FOR r = 0..2
-        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 1, FALSE
-    NEXT
-    FS_V fill_point.pz
-    FOR r = 0..2
-        FS_TERM fill_point.acc + 3 * r, mat + 3 * r + 2, FALSE
-    NEXT
+    LDA i : SEC : SBC k : TAX           ; 3 r
+    LDA fill_point.acc,X : ZA_INDEXEDBY 0..6
+    CLC : ADC macc
+    STA fill_point.acc,X : ZA_INDEXEDBY 0..6
+    LDA fill_point.acc+1,X : ZA_INDEXEDBY 0..6
+    ADC macc+1
+    STA fill_point.acc+1,X : ZA_INDEXEDBY 0..6
+    LDA fill_point.acc+2,X : ZA_INDEXEDBY 0..6
+    ADC macc+2
+    STA fill_point.acc+2,X : ZA_INDEXEDBY 0..6
+.next_row
+    LDA i : CLC : ADC #3 : STA i
+    CMP #9 : BCC row
+    INC k : LDA k : CMP #3 : BNE column
     LDY slot
     JMP fill_point.store
 }
 
-\ fill_slow_edge: fill_edge's, A cells along axis X, slot in Y
+\ fill_slow_edge: fill_edge's, A cells along axis X, slot in Y: the point
+\ with those cells on that axis and none on the others.
 .fill_slow_edge
 {
-    ZA_AUTO1 slot, cell
-    STY slot
-    STA cell
-    FS_V cell
-    LDA mat + 0,X : STA fill_edge.col
-    LDA mat + 3,X : STA fill_edge.col+1
-    LDA mat + 6,X : STA fill_edge.col+2
-    FOR r = 0..2
-        FS_TERM fill_point.acc + 3 * r, fill_edge.col + r, TRUE
-    NEXT
-    LDY slot
-    JMP fill_point.store
+    STZ fill_point.px : STZ fill_point.py : STZ fill_point.pz
+    STA fill_point.p,X : ZA_INDEXEDBY 0..2
+    JMP fill_slow_point
 }
 
 \ transform_fill: object X's cache, from fresh slots.
