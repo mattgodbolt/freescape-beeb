@@ -367,3 +367,47 @@ view. The BBC's own timing of each half, which it shows, agreed with the
 emulator's count within 8 cycles on all 1,228. Merging main's larger
 projection tables pushed the transform's cache out of HAZEL into main
 RAM's `&3000` (decision 31).
+
+## 2026-10-31: area records from the logic's database
+
+The per-area records (`AREAS4`, `AREAS5`) are gone: `area_enter` builds an
+area's working copy on the BBC from Driller's database in the player
+logic's bank (`docs/research/objects.md`, "The records"), and
+`tools/mkareas.py` became the model of that, checked against it byte for
+byte by `tools/areacheck.mjs`. Measured that day (`make objects`, `make
+live`):
+
+- **The check**: the globals and all 29 areas exact, in both builds, the
+  plain one and `OBJ_LOGIC`'s; a corrupted expectation (one plane's
+  normal) and a corrupted conversion (`ob_ix` left unwritten) each failed
+  it. The prototype in Python of the 6502's way (the first corner's cross
+  product, the shrunk apex edges) matched `mkareas.py` on every object
+  before any 6502 was written.
+- **The working copy** (`ObjArea`) is 2,542 bytes: the objects' 19 arrays
+  of 38 (722), the faces' 6 of 128 (768), the planes' 8 of 66 (528), the
+  vertices' 3 of 168 (504), the sensors' 3 of 5 (15), and the 5 counts.
+  `ob_ix` (38) is new.
+- **The conversion** (`AreaConv`, in a sideways bank) is 4,405 bytes:
+  2,655 of code, 175 of its tables, 1,440 of colour streams (the ST's face
+  colours, decision 8, with each area's pointer) and the tape's 135 bytes
+  of globals. Its main RAM part (`AreaCode`: the entry points, the
+  record's reader and the fixed parts' lengths) is 116 bytes.
+- **Its cycles**: `area_init` 68,888; `area_enter` a median of 53,169 over
+  the 29 areas, at most 157,168 (Ketar Hangar, 41 planes). With
+  `OBJ_LOGIC`, which builds the globals again each time, a median of
+  122,077 and at most 226,197. Most of it is the slanted faces' planes
+  and reading the records through main RAM; dividing by shifts and reading
+  only each record's fixed part took the median from 66,272 and the most
+  from 203,717.
+- **The live disc's main RAM**: what it uses below `&3000` now ends at
+  `&269D`, not `&2DB3`, 1,814 bytes freed (2,403 now free): the globals'
+  record, the area directory and the copy's descriptors left `ObjConst`,
+  the f64 table (768 bytes) went to HAZEL after the maths' tables (on a
+  page there; `ObjWork` after it still fits), and `AreaCode` shrank by 90
+  bytes; `ObjArea` grew by `ob_ix`'s 38. The logic's `LOGIC` is bank 4;
+  bank 5 has `LiveData`, the font and `AreaConv`, with 4,968 bytes left.
+- **The object check** still matches the model on all 2,485 views; the
+  page-aligned f64 table took the median view from 204,478 cycles to
+  203,826. `make live` still shows all 614 frames as the model's; an
+  entrance's first frame now spends a median 0.90 fields outside the two
+  halves (most 5.58), against 0.82 (2.78) when the area was copied.
