@@ -170,6 +170,9 @@ ENDSECTION
 LOGIC_WORK_ORG    = area_code_end
 LOGIC_WORK_GUARD  = &3000
 LOGIC_SQUARES     = sq_lo
+\ The fill's quarter squares the same (src/raster.6502's RASTER_SQUARES):
+\ HAZEL is paged whenever it runs.
+RASTER_SQUARES    = sq_lo
 IF LIVE_LOGIC
     LOGIC_KEYS        = lv_lkeys
     LOGIC_HOOK_WAIT   = lv_hook_wait
