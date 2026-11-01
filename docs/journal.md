@@ -615,3 +615,19 @@ the face loop than it saved). The front end's bank has little room left
 again; about a quarter of the candidates are transformed and projected
 for nothing, and a per-object test from the transform's cache is the next
 lever.
+
+## 2026-11-01: Driller's instrument panel (track X)
+
+Matt chose the panel as the next layer. `tools/mkpanel.py` cuts the ST's
+console out of its program and converts it; `src/panel.6502` draws its
+fields from the logic's variables after each pass (decision 47). Measured
+on the logic disc's check: `panel_values` a median 4,510 cycles a pass
+(p90 6,612, most 9,255), each changed cell 826-1,097 more to draw into both
+buffers; nothing measurable a frame. `make panel` checks `panel_values`
+against `tools/model/panel.py` over 656 value sets, and `make live` checks
+every flip's screen outside the view against the model's render of the
+panel; the first run caught a real fault (the position's divide
+overwrote the score). Extra live scenarios showed two faults not the
+panel's: with the jet, one view byte differs from the model; with the
+clock's ticks, the logic differs from the transcription. Both are being
+looked into.

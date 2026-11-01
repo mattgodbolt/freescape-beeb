@@ -554,3 +554,22 @@ the entrance views and walks (at most 43 in one view), no draw order
 changes there; 11,753 of 35,314,240 over every check view, the order
 different in 6; against the ZX oracle away from edges, 1,294,081 of
 1,294,700 pixels agree (1,293,937 of 1,294,548 before).
+
+## 47. Driller's panel (2026-11-01, Matt chose it as the next layer)
+
+The panel is the Atari ST version's console (taken from its program at
+build time, never committed: decision 6), cut rather than scaled to
+MODE 2's 128 pixels: one MODE 2 pixel is two of the ST's, each the
+brighter of its pair, each ST colour a pattern from the colour study
+(decision 8); the mouse's buttons (arrows, information, save and load)
+are dropped to fit, with X, Y and Z where save and load were. Its fields
+are the original's (`$B72B`, `docs/research/panel.md`) but for the clock,
+the seismograph and the rigs' animation, which wait for those layers; the
+vehicle is the ST's jet or probe picture with its name. The numbers are a
+3 × 5 font of the port's own, the labels white (the ST's red blurs away
+through PAL). Every field is redrawn after a pass when its value changed,
+into both buffers inside the beam's window (decision 21). The frames a
+second stay on the screen beside "tech demo", with the credit to Incentive
+above the view (decision 6); the cycle figures and key lines are gone. The
+packed picture is loaded once into the transform's cache before it's
+needed, and the panel's data takes the MOS font's place.

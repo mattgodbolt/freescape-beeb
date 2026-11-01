@@ -38,12 +38,14 @@ order) and fills it into MODE 2, double-buffered, flipping as soon as the
 beam leaves the view. Every frame the disc's check sees matches the
 Python model's render of the same camera, byte for byte.
 
-![The disc: walking from Driller's start in Amethyst, through PAL](docs/images/disc_live.png)
+![The disc: Driller's start in Amethyst, with Driller's instrument panel, through PAL](docs/images/disc_live.png)
 
-*The disc in jsbeeb through PAL: Driller's start, then a step, then a
-turn. The figures on the screen are the BBC's own timing of the whole
-frame and of its two halves: stages 1-7 (objects to clipped polygons) and
-8-10 (the fill). Driller is Incentive Software's.*
+*The disc in jsbeeb through PAL: Driller's start, a step, and the jet.
+The panel is Driller's own, the Atari ST version's console cut down to
+MODE 2's 128 pixels, with its score, shield and energy, heading and pitch,
+step and turn, position, vehicle, area and messages, driven by Driller's
+logic; the frames a second beside "tech demo" are the BBC's own timing of
+the whole frame. Driller is Incentive Software's.*
 
 **How fast:** measured on the disc's check (journal, 2026-10-31), walking
 through Driller's areas a frame takes a median of about 3 fields (about
@@ -53,7 +55,7 @@ draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
 stock Master. Driller's game itself (the drilling rigs, the laser, the
-sensors, the panel and the sound) comes after. `docs/journal.md` has the
+sensors and the sound) comes after. `docs/journal.md` has the
 story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
