@@ -505,3 +505,24 @@ against walls in the scenarios, standing 2.00, walking 3.32, turning
 5.39. A bug the merge exposed: `area_enter`'s `cache_reset` cleared the
 sort's memory in shadow RAM when ACCCON X was set; fixed. It became
 `freescape.ssd`, and Driller's own start is now the disc's.
+
+## 2026-10-31: the front end's optimisation rounds (track O), and the keys
+
+Five exact rounds on stages 1-7 (`docs/research/objects.md`), no pixel
+moved: the cone's lines and passes and `frac16`'s normalisation, projected
+faces gathered straight into the output, the sort's memory kept across
+cells, `M·c` updated by the step, the unrolled 2D clip moved to `ObjMore`.
+Measured with `objectcheck.mjs --entrance` (median / p90 / max): a step
+frame from 184,419 / 247,910 / 305,945 cycles to 153,950 / 210,662 /
+252,158; a turn from 216,847 / 287,068 / 356,276 to 195,229 / 258,319 /
+323,343. By stage on a step, at the median: the cone 66.9K to 52.1K, the
+vertex pass 18.4K to 16.2K, the transform 13.9K to 10.2K, the 2D clip 14.7K
+to 12.8K, the sort 8.8K to 6.2K. The check now also strafes four steps
+along each axis from every entrance (3,265 cases), which caught mutants
+the walks didn't.
+
+Matt asked for the BBC's traditional keys for motion (decision 10): Z and
+X turn, : and / walk; Driller's sizes moved to f0-f3. On the live disc's
+check with both (fields a frame, median / p90 / max, mostly close to
+walls): walking 3.09 / 6.30 / 16.26, turning 4.97 / 12.50 / 15.86,
+standing 1.86 / 6.25 / 16.94.
