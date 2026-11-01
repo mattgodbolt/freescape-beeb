@@ -308,8 +308,11 @@ def emit(db, loops, globals_rec, areas, out6502, outjson):
     for name, slope in (("GUARD_XS", clip.GUARD_X), ("GUARD_YS", clip.GUARD_Y)):
         assert slope & (slope - 1) == 0, "the guard band's slopes are shifts"
         w("%-11s = %d" % (name, slope.bit_length() - 1))
+    w("\\ The band a face is projected whole inside (clip.projectable).")
+    w("BAND_XS     = %d" % clip.BAND_XS)
+    w("BAND_YS     = %d" % clip.BAND_YS)
     w("")
-    w("VIEW_FX     = %d             ; the focal lengths, sixteenths" % view.FX)
+    w("VIEW_FX    = %d             ; the focal lengths, sixteenths" % view.FX)
     w("VIEW_FY     = %d" % view.FY)
     w("")
     w("K_CUBOID = %d : K_RECT = %d : K_GENERIC = %d : K_SENSOR = %d" % (CUBOID, RECT, GENERIC, SENSOR))

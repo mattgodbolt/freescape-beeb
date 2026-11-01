@@ -38,7 +38,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from tools.model import camera as cam
-from tools.model import matrix, objects, order, parts, render, transform
+from tools.model import clip, matrix, objects, order, parts, render, transform
 
 def render_geometry(db, area, camera, state=None):
     """render.render()'s stages 1-7, with what each stage made."""
@@ -95,8 +95,13 @@ def case(db, layout, a_index, area, camera, name):
         used = sorted({i for f in cand.faces for i in f.loop})
         vmask = sum(1 << i for i in used)
         verts = {str(i): list(transform.transform(m, s.vertices[i], c)) for i in used}
+        # The vertices a polygon's faces can't be projected whole at (the
+        # vertex pass's vp_off): its used vertices clip.projectable refuses.
+        off = None
+        if not (s.line or s.point):
+            off = sum(1 << i for i in used if not clip.projectable(tuple(verts[str(i)])))
         rows.append({
-            "slot": slots[cand.index], "mask": mask, "vmask": vmask, "verts": verts,
+            "slot": slots[cand.index], "mask": mask, "vmask": vmask, "verts": verts, "off": off,
             "faces": [[f.colour, [list(p) for p in f.poly]] for f in faces],
         })
     # The area's floor object (decision 8a), for the cycles' accounting.

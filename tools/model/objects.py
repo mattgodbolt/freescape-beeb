@@ -184,9 +184,14 @@ def shape(obj):
             p[u] += size[u] * du
             p[v] += size[v] * dv
             vertices.append(tuple(p))
+        # Each face's loop winds anticlockwise about its outward normal, as
+        # every face's does (clip.py's cone takes it so): (0, 1, 2, 3)
+        # does about e_u x e_v, which is +x, -y, +z for the zero axis.
+        ccw_side = 0 if axis == 1 else 1
         for f in (0, 1):
             if colours[f]:
-                faces.append(_axis_face(colours[f], (0, 1, 2, 3), axis, 1 if f else -1, lo[axis]))
+                loop = (0, 1, 2, 3) if f == ccw_side else (0, 3, 2, 1)
+                faces.append(_axis_face(colours[f], loop, axis, 1 if f else -1, lo[axis]))
     elif t == RECTANGLE:
         # Two zero sizes: ScummVM makes it a line from the origin to the
         # far corner (GeometricObject's constructor). Three is nothing.

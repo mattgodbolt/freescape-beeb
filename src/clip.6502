@@ -111,6 +111,8 @@ SECTION ObjWork
 .of_cand    SKIP 1                  ; the candidate being drawn
 .of_slot    SKIP 1                  ; its slot
 .out_over   SKIP 1                  ; non-zero if a frame's faces didn't fit
+.vp_off     SKIP 1                  ; the object's vertices the projection can't take
+.vp_need    SKIP 1                  ; ... and those to project, before they are
 ENDSECTION
 
 SECTION ObjOut
@@ -1304,11 +1306,12 @@ ENDMACRO
 }
 
 \ ===========================================================================
-\ A face, and an object's.
+\ A face clipped in 3D: a line's, a point's, and one the projection can't
+\ take whole.
 
-\ draw_face: face X of the object being drawn, its vertices in vx* (the
-\ model's draw_faces for one face).
-.draw_face
+\ draw_face3d: face X of the object being drawn, its vertices in vx* (the
+\ model's draw_faces for one such face).
+.draw_face3d
 {
     ZA_AUTO1 face, n, every, any, k, near
     STX face
@@ -1397,8 +1400,211 @@ ENDMACRO
     RTS
 }
 
+\ ===========================================================================
+\ The vertex pass: which of the object's vertices the projection takes,
+\ and those projected once each, sharing what they can.
+
+\ band_test: C set if vertex X isn't projectable (the model's projectable):
+\ nearer than ZNEAR, or x beyond 2^(n + BAND_XS) or y beyond 2^(n +
+\ BAND_YS) either way, n = bitlen(z). v is within 2^k when v + 2^k has no
+\ bit from k + 1 up: the band_* tables, indexed by 2n, have that bias and
+\ the mask of those bits for each of v's top two bytes. X is kept.
+.band_test
+{
+    ZA_AUTO1 t
+    LDA vflag,X : BMI off               ; (nearer than ZNEAR, or behind)
+    LDY vz2,X : BEQ near
+    LDA proj_bl2,Y : CLC : ADC #32 : TAY     ; 2n, n >= 17: k past 15 for both
+    LDA vx2,X : CLC : ADC band_xb2,Y : AND band_xm2,Y : BNE off
+    LDA vy2,X : CLC : ADC band_yb2,Y : AND band_ym2,Y : BNE off
+    CLC
+    RTS
+.near
+    LDY vz1,X                           ; (not zero: z >= ZNEAR)
+    LDA proj_bl2,Y : CLC : ADC #16 : TAY
+    LDA vx1,X : CLC : ADC band_xb1,Y : STA t
+    LDA vx2,X : ADC band_xb2,Y : AND band_xm2,Y : BNE off
+    LDA t : AND band_xm1,Y : BNE off
+    LDA vy1,X : CLC : ADC band_yb1,Y : STA t
+    LDA vy2,X : ADC band_yb2,Y : AND band_ym2,Y : BNE off
+    LDA t : AND band_ym1,Y : BNE off
+    CLC
+    RTS
+.off
+    SEC
+    RTS
+}
+ASSERT ZNEAR >= 256 AND ZNEAR < 65536   ; (not nearer: a top byte non-zero)
+
+\ vertex_shared: vertex X projected (the maths' project) into vsx and vsy,
+\ its outcode into voc: by project_y if it has the last one's x and z
+\ (vertex_pass.last), by project_z if its z, else by project. X is kept.
+.vertex_shared
+{
+    LDY vertex_pass.last : BMI full
+    LDA vz0,X : CMP vz0,Y : BNE full
+    LDA vz1,X : CMP vz1,Y : BNE full
+    LDA vz2,X : CMP vz2,Y : BNE full
+    LDA vy0,X : STA proj_y
+    LDA vy1,X : STA proj_y+1
+    LDA vy2,X : STA proj_y+2
+    LDA vx0,X : CMP vx0,Y : BNE z_shared
+    LDA vx1,X : CMP vx1,Y : BNE z_shared
+    LDA vx2,X : CMP vx2,Y : BNE z_shared
+    PHX : JSR project_y : PLX           ; (proj_sx is the last one's, the same)
+    BRA got
+.z_shared
+    LDA vx0,X : STA proj_x
+    LDA vx1,X : STA proj_x+1
+    LDA vx2,X : STA proj_x+2
+    PHX : JSR project_z : PLX
+    BRA got
+.full
+    LDA vx0,X : STA proj_x
+    LDA vx1,X : STA proj_x+1
+    LDA vx2,X : STA proj_x+2
+    LDA vy0,X : STA proj_y
+    LDA vy1,X : STA proj_y+1
+    LDA vy2,X : STA proj_y+2
+    LDA vz0,X : STA proj_z
+    LDA vz1,X : STA proj_z+1
+    LDA vz2,X : STA proj_z+2
+    PHX : JSR project : PLX
+.got
+    LDA proj_sx : STA vsxl,X
+    LDA proj_sx+1 : STA vsxh,X
+    LDA proj_sy : STA vsyl,X
+    LDA proj_sy+1 : STA vsyh,X
+    \ the outcode (the model's outcode2d)
+    LDY #0
+    LDA proj_sx+1 : BPL x_right
+    LDY #OC_LEFT
+    BRA x_done
+.x_right
+    LDA #LO(CLIP_W) : CMP proj_sx
+    LDA #HI(CLIP_W) : SBC proj_sx+1
+    BCS x_done                          ; (no borrow: sx <= CLIP_W)
+    LDY #OC_RIGHT
+.x_done
+    TYA
+    LDY proj_sy+1 : BPL y_down
+    ORA #OC_TOP
+    BRA y_done
+.y_down
+    TAY
+    LDA #LO(CLIP_H) : CMP proj_sy
+    LDA #HI(CLIP_H) : SBC proj_sy+1
+    TYA
+    BCS y_done                          ; (no borrow: sy <= CLIP_H)
+    ORA #OC_BOTTOM
+.y_done
+    STA voc,X
+    LDA #VF_PROJ : ORA vflag,X : STA vflag,X
+    RTS
+}
+
+\ vertex_pass: the candidate's (of_cand, slot of_slot, a polygon object)
+\ vertices its seen faces use, transformed: vp_off has a bit for each the
+\ projection can't take; each vertex of a seen face with none of those is
+\ projected, with its outcode (vertex_shared), in the order for the
+\ object's kind, which puts those likely to share x and z, or z, together.
+.vertex_pass
+{
+    ZA_AUTO1 used, mask, face, ord, last
+    LDX of_cand : LDA cd_vmask,X : STA used
+    STZ vp_off
+    LDX #0
+.band
+    LSR used : BCC band_next
+    JSR band_test : BCC band_next
+    LDA bit8,X : TSB vp_off
+.band_next
+    INX
+    LDA used : BNE band
+    \ the vertices to project
+    STZ vp_need
+    LDX of_slot : LDA ob_f0,X : STA face
+    LDX of_cand : LDA cd_mask,X : STA mask
+.need
+    LSR mask : BCC need_next
+    LDX face : LDA fa_vmask,X
+    BIT vp_off : BNE need_next
+    TSB vp_need
+.need_next
+    INC face
+    LDA mask : BNE need
+    \ the order
+    LDX of_slot
+    LDA ob_flags,X : AND #K_MASK : TAY
+    LDA order_at,Y
+    CPY #K_RECT : BNE ordered
+    LDA ob_aux,X : ASL A : ASL A : ADC #VP_RECT     ; (C clear: ob_aux < 3)
+.ordered
+    STA ord
+    LDA #&FF : STA last
+.project
+    LDA vp_need : BEQ done
+    LDY ord : INC ord
+    LDX vp_order,Y
+    LDA bit8,X : TRB vp_need : BEQ project
+    JSR vertex_shared
+    STX last
+    BRA project
+.done
+    RTS
+.order_at
+    EQUB VP_CUBOID, VP_RECT, VP_GENERIC, VP_GENERIC
+    ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2 AND K_SENSOR = 3
+}
+
+\ ===========================================================================
+\ A face projected whole (the model's draw_faces, its every vertex
+\ projectable): wholly beyond one of the view's edges it isn't drawn; with a
+\ vertex beyond any it's clipped (clip2d), else its repeats are dropped;
+\ then the drawn test.
+
+\ poly_face: face X of the object being drawn, its vertices projected.
+.poly_face
+{
+    ZA_AUTO1 face, n, every, any
+    STX face
+    LDA fa_nv,X : STA n
+    LDY fa_loop,X
+    LDX #0
+.index
+    LDA lp_table,Y : STA fp_idx,X
+    INY : INX : CPX n : BNE index
+    LDA #&FF : STA every
+    STZ any
+    LDX #0
+.gather
+    LDY fp_idx,X
+    LDA voc,Y : TSB any
+    AND every : STA every
+    LDA vsxl,Y : STA pa_xl,X
+    LDA vsxh,Y : STA pa_xh,X
+    LDA vsyl,Y : STA pa_yl,X
+    LDA vsyh,Y : STA pa_yh,X
+    INX : CPX n : BNE gather
+    STX p_n
+    LDA every : BNE rejected
+    LDA any : BEQ inside
+    JSR clip2d
+    BRA clipped
+.inside
+    JSR dedupe
+.clipped
+    JSR drawable : BCC rejected
+    LDX face : LDA fa_col,X
+    JMP emit_face
+.rejected
+    RTS
+}
+
 \ draw_object: the candidate of_cand's seen faces, in order; it joins the
-\ draw list if any is drawn.
+\ draw list if any is drawn. A polygon object's vertices go through the
+\ vertex pass first; a face with every vertex projected goes by poly_face,
+\ and the rest of its faces, and a line's or a point's, by draw_face3d.
 .draw_object
 {
     ZA_ENTRY
@@ -1406,12 +1612,30 @@ ENDMACRO
     LDX of_slot : LDA ob_f0,X : STA face
     LDX of_cand : LDA cd_mask,X : STA mask
     LDA tf_n : STA first
+    LDX of_slot
+    LDA ob_flags,X : BIT #F_LINE : BNE each3d
+    AND #K_MASK : CMP #K_SENSOR : BEQ each3d
+    JSR vertex_pass
+.passed                             ; (tools/objectcheck.mjs reads vp_off here)
 .face_loop
     LSR mask : BCC next
-    LDX face : JSR draw_face
+    LDX face
+    LDA fa_vmask,X : BIT vp_off : BNE hard
+    JSR poly_face
+    BRA next
+.hard
+    JSR draw_face3d
 .next
     INC face
     LDA mask : BNE face_loop
+    BRA listed
+.each3d
+    LSR mask : BCC next3d
+    LDX face : JSR draw_face3d
+.next3d
+    INC face
+    LDA mask : BNE each3d
+.listed
     LDA tf_n : SEC : SBC first : BEQ none
     LDY dl_n
     STA dl_nf,Y
@@ -1421,6 +1645,45 @@ ENDMACRO
 .none
     RTS
 }
+
+
+\ The vertex pass's tables.
+.bit8
+    EQUB 1 << (0..7)
+\ The vertex pass's orders: a cuboid's vertices i and i + 2 have the same x
+\ and z under a level camera; so do a rectangle's along y.
+VP_CUBOID = 0 : VP_RECT = 8 : VP_GENERIC = 20
+.vp_order
+    EQUB 0, 2, 1, 3, 4, 6, 5, 7         ; a cuboid
+    EQUB 0, 1, 3, 2                     ; a rectangle across x: (u, v) = (y, z)
+    EQUB 0, 1, 2, 3                     ; ... across y: (x, z)
+    EQUB 0, 3, 1, 2                     ; ... across z: (x, y)
+    EQUB 0, 1, 2, 3, 4, 5, 6, 7         ; anything else
+ASSERT VMAX = 8
+\ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
+\ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
+\ bytes and the mask of the bits from k + 1 up.
+BAND_I0 = 2 * 9
+ASSERT ZNEAR >= 1 << 8 AND ZNEAR < 1 << 9
+BAND_N = (BAND_I0..47) DIV 2
+BAND_KX = BAND_N + BAND_XS
+BAND_KY = BAND_N + BAND_YS
+band_xb1 = P% - BAND_I0
+    EQUB WHERE(BAND_KX >= 8 AND BAND_KX <= 15, 1 << (BAND_KX - 8), 0)
+band_xb2 = P% - BAND_I0
+    EQUB WHERE(BAND_KX >= 16 AND BAND_KX <= 22, 1 << (BAND_KX - 16), 0)
+band_xm1 = P% - BAND_I0
+    EQUB WHERE(BAND_KX <= 15, (&FF << (BAND_KX - 7)) AND &FF, 0)
+band_xm2 = P% - BAND_I0
+    EQUB WHERE(BAND_KX <= 15, &FF, WHERE(BAND_KX <= 22, (&FF << (BAND_KX - 15)) AND &FF, 0))
+band_yb1 = P% - BAND_I0
+    EQUB WHERE(BAND_KY >= 8 AND BAND_KY <= 15, 1 << (BAND_KY - 8), 0)
+band_yb2 = P% - BAND_I0
+    EQUB WHERE(BAND_KY >= 16 AND BAND_KY <= 22, 1 << (BAND_KY - 16), 0)
+band_ym1 = P% - BAND_I0
+    EQUB WHERE(BAND_KY <= 15, (&FF << (BAND_KY - 7)) AND &FF, 0)
+band_ym2 = P% - BAND_I0
+    EQUB WHERE(BAND_KY <= 15, &FF, WHERE(BAND_KY <= 22, (&FF << (BAND_KY - 15)) AND &FF, 0))
 
 ENDSECTION
 

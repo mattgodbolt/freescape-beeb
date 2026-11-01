@@ -31,6 +31,7 @@ point.
 from tools.model.view import FX, FY, SUB, VIEW_H, VIEW_W, XC, YC, ZNEAR
 
 NEAR, LEFT, RIGHT, TOP, BOTTOM = 1, 2, 4, 8, 16
+assert FY == 2 * FX                 # (the cone's lines)
 GUARD_X = 16                # |X| <= 16 Z: sx inside XC +- 16 FX
 GUARD_Y = 8                 # |Y| <= 8 Z: sy inside YC +- 8 FY
 assert XC + GUARD_X * FX < 1 << 15 and YC + GUARD_Y * FY < 1 << 15
@@ -256,6 +257,148 @@ def drawable(poly):
     (x0, y0), (x1, y1) = poly[0], poly[1]
     dx, dy = x1 - x0, y1 - y0
     return any(dx * (y - y0) != dy * (x - x0) for x, y in poly[2:])
+
+
+# --- The cone ------------------------------------------------------------------
+#
+# A face with a vertex the projection can't take (nearer than ZNEAR, or
+# outside the guard band) is drawn as the view's rectangle clipped, in 2D,
+# by its edges' planes through the eye. Seen from the eye, the face covers
+# the rays inside every one of those planes, so that intersection is the
+# face on the screen with nothing cut away: no near plane, no guard band,
+# and no vertex projected. Each plane is a line on the screen, exactly the
+# line its edge's two ends would project onto (camera space is exact).
+#
+# For an edge from A to B of a loop that winds anticlockwise about the
+# face's outward normal (objects.py makes every loop so), seen from in
+# front, the face is on the side where (A x B) . r <= 0 for the rays r
+# through it. A box's edge runs along a world axis k, so B - A is a
+# multiple of M's column k and A x B has the direction of A x M[:, k], a
+# product of bytes; any other edge's is A x (B - A), each first cut to 16
+# bits. On the screen, r = ((x - XC) / FX, -(y - YC) / FY, 1) (z > 0), so
+# with FY = 2 FX the plane's line is f(x, y) = A x + B y + C, inside where
+# f >= 0, its normal first cut to LINE_BITS bits.
+
+LINE_BITS = 14
+BEHIND = 32                 # code3: z <= 0
+
+
+def code3(v):
+    """Which of the half-spaces x < -z, x > z, 2y > z, 2y < -z and z <= 0 a
+    camera-space vertex is in, anywhere (in front or not): each misses the
+    view's pyramid, so a face with every vertex in one of them can't be
+    seen."""
+    x, y, z = v
+    code = 0
+    if x < -z:
+        code |= LEFT
+    if x > z:
+        code |= RIGHT
+    if 2 * y > z:
+        code |= TOP
+    if 2 * y < -z:
+        code |= BOTTOM
+    if z <= 0:
+        code |= BEHIND
+    return code
+
+
+BAND_XS, BAND_YS = 3, 2
+
+
+def projectable(v):
+    """Whether a face with this camera-space vertex can be projected whole:
+    in front of the near plane, and with x within 2^(n + BAND_XS) and y
+    within 2^(n + BAND_YS) (each as two's complement, from -2^k up to 2^k
+    - 1), n the bit length of z. As z >= 2^(n - 1), that's inside the guard
+    band, and it's a test on a byte or two of each coordinate."""
+    x, y, z = v
+    if z < ZNEAR:
+        return False
+    n = z.bit_length()
+    kx, ky = n + BAND_XS, n + BAND_YS
+    return -(1 << kx) <= x < (1 << kx) and -(1 << ky) <= y < (1 << ky)
+
+
+assert 2 << BAND_XS <= GUARD_X and 2 << BAND_YS <= GUARD_Y   # (inside the guard band)
+
+
+def cut16(v):
+    """A vector shifted right (rounding down) until every component fits 16
+    bits, signed."""
+    s = max(0, max(abs(x) for x in v).bit_length() - 15)
+    return tuple(x >> s for x in v)
+
+
+def cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def edge_normal_axis(a, col, sign):
+    """The plane through the eye and a box's edge from camera-space vertex
+    a along M's column col (the world axis's direction), sign +1 up the
+    axis and -1 down it."""
+    n = cross(a, col)
+    return n if sign > 0 else (-n[0], -n[1], -n[2])
+
+
+def edge_normal(a, b):
+    """The plane through the eye and the edge from a to b, any direction."""
+    return cross(cut16(a), cut16(tuple(b[k] - a[k] for k in range(3))))
+
+
+def screen_line(n):
+    """A plane through the eye as the screen's line (A, B, C): f(x, y) =
+    A x + B y + C, at least 0 on the face's side."""
+    s = max(0, max(abs(x) for x in n).bit_length() - LINE_BITS)
+    nx, ny, nz = (x >> s for x in n)
+    return (-2 * nx, ny, 2 * nx * XC - ny * YC - 2 * FX * nz)
+
+
+def line_f(line, p):
+    a, b, c = line
+    return a * p[0] + b * p[1] + c
+
+
+RECT = [(0, 0), (WIDTH, 0), (WIDTH, HEIGHT), (0, HEIGHT)]
+
+
+def _clip_poly(poly, line):
+    """Sutherland-Hodgman against one line, new vertices by crossing() from
+    the inside end."""
+    fs = [line_f(line, p) for p in poly]
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        fa, fb = fs[i], fs[(i + 1) % n]
+        if fa >= 0:
+            out.append(a)
+            if fb < 0:
+                out.append(crossing(a, b, fa, fb))
+        elif fb >= 0:
+            out.append(crossing(b, a, fb, fa))
+    return out
+
+
+def cone_clip(lines):
+    """The view's rectangle inside every line (the face's edges' planes, in
+    its loop's order), repeats dropped: [] if nothing's left. A line with
+    the rectangle's every corner inside it cuts nothing and is passed over;
+    one with every corner outside leaves nothing."""
+    cutting = []
+    for line in lines:
+        fs = [line_f(line, p) for p in RECT]
+        if all(f < 0 for f in fs):
+            return []
+        if any(f < 0 for f in fs):
+            cutting.append(line)
+    poly = list(RECT)
+    for line in cutting:
+        poly = _clip_poly(poly, line)
+        if not poly:
+            return []
+    return dedupe(poly)
 
 
 def point_square(a):

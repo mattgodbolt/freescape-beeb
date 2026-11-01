@@ -111,6 +111,11 @@ const STAGES = [
     ["near_clip", "near"],
     ["guard_clip", "guard"],
     ["project", "project"],
+    ["project_z", "project"],
+    ["project_y", "project"],
+    ["vertex_pass", "vertices"],
+    ["poly_face", "faces"],
+    ["draw_face3d", "faces3d"],
     ["clip2d", "clip2d"],
     ["dedupe", "clip2d"],
     ["drawable", "drawable"],
@@ -190,6 +195,7 @@ const sortAt = has("of_sort") ? S("of_sort") : -1;
 // The calls a frame makes of the arithmetic's routines, for the cost model
 // (docs/research/objects.md): each counted as its first instruction runs.
 const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point", "clip_cut", "project",
+                 "project_z", "project_y", "band_test", "vertex_shared", "poly_face", "draw_face3d",
                  "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
 for (const c of CALLEES) if (has(c)) callees.set(S(c), c);
@@ -255,7 +261,11 @@ for (const view of views) {
                 const g = (p) => [0, 1, 2].map((b) => arr(`${p}${b}`, j));
                 verts[j] = [s24(...g("vx")), s24(...g("vy")), s24(...g("vz"))];
             }
-            seen.push({ slot, verts });
+            seen.push({ slot, verts, off: null });
+        });
+        // the vertex pass: which of a polygon's vertices it found it can't project
+        watches.set(S("draw_object.passed"), () => {
+            seen[seen.length - 1].off = m.peek(S("vp_off"));
         });
     }
     badWrites.length = 0;
@@ -289,6 +299,8 @@ for (const view of views) {
                 fail(`${name}: candidate ${i} not transformed`);
                 continue;
             }
+            if (w.off !== null && g.off !== w.off)
+                fail(`${name}: slot ${w.slot} vertices off the band ${g.off} want ${w.off}`);
             for (const [j, v] of Object.entries(w.verts)) {
                 counts.verts++;
                 if (!g.verts[j] || g.verts[j].join() !== v.join())
@@ -341,13 +353,21 @@ const median = (v) => {
     const n = s.length;
     return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0;
 };
+// the 90th percentile: the smallest value at least 90% of the views are at or under
+const p90 = (v) => {
+    const s = [...v].sort((a, b) => a - b);
+    return s.length ? s[Math.ceil(0.9 * s.length) - 1] : 0;
+};
 const report = (label, rows) => {
     if (!rows.length) return;
-    console.log(`${label}: ${rows.length} views, cycles median / max`);
+    console.log(`${label}: ${rows.length} views, cycles median / p90 / max`);
     const line = (name, vals) => {
         const top = Math.max(...vals);
         const who = rows[vals.indexOf(top)].name;
-        console.log(`  ${name.padEnd(10)} ${String(median(vals)).padStart(8)} ${String(top).padStart(8)}  ${who}`);
+        console.log(
+            `  ${name.padEnd(10)} ${String(median(vals)).padStart(8)} ${String(p90(vals)).padStart(8)} ` +
+                `${String(top).padStart(8)}  ${who}`,
+        );
     };
     for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0));
     line("total", rows.map((r) => r.total));
