@@ -1,0 +1,29 @@
+# Held turns and walks at the sizes the port starts with (decision 48): the
+# smallest turn and a step of 25, from the start (area 1, entrance 19, yaw
+# 34). On the live disc (make live) each run of the same keys is held down
+# through its passes, so they come at the disc's pace, and each frame
+# between is checked; a single pass is a tap.
+Z x2
+expect TurnIndex 0
+expect Turn 1
+X x3
+expect StepIndex 4
+expect Step 25
+# A held turn left past 0, and back right.
+Q x40
+expect Yaw 66
+W x12
+expect Yaw 6
+# Taps between.
+Q
+W
+O
+K
+# A held walk forward and back, then walking and turning together.
+O x24
+K x6
+O Q x18
+expect Yaw 60
+W O x18
+expect Yaw 6
+O
