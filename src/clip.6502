@@ -1662,72 +1662,47 @@ MACRO MULK v, k, out
 .done
 ENDMACRO
 
-\ EL_OR k: el_or |= |N's component k|
-MACRO EL_OR k
-    LDA en_n + 4 * k + 3 : BMI negative
-    ORA el_or+3 : STA el_or+3
-    LDA en_n + 4 * k + 2 : ORA el_or+2 : STA el_or+2
-    LDA en_n + 4 * k + 1 : ORA el_or+1 : STA el_or+1
-    LDA en_n + 4 * k : ORA el_or : STA el_or
-    BRA done
-.negative
-    SEC
-    LDA #0 : SBC en_n + 4 * k : ORA el_or : STA el_or
-    LDA #0 : SBC en_n + 4 * k + 1 : ORA el_or+1 : STA el_or+1
-    LDA #0 : SBC en_n + 4 * k + 2 : ORA el_or+2 : STA el_or+2
-    LDA #0 : SBC en_n + 4 * k + 3 : ORA el_or+3 : STA el_or+3
-.done
-ENDMACRO
-
-\ EL_RIGHT / EL_LEFT: el_w's three windows shifted a bit right, or left
-MACRO EL_RIGHT
-    FOR k = 0..2
-        LSR el_w + 3 * k + 2 : ROR el_w + 3 * k + 1 : ROR el_w + 3 * k
-    NEXT
-ENDMACRO
-MACRO EL_LEFT
-    FOR k = 0..2
-        ASL el_w + 3 * k : ROL el_w + 3 * k + 1 : ROL el_w + 3 * k + 2
-    NEXT
-ENDMACRO
-
-\ EL_CORNER k, a, b: line slot X's f at corner k = a + b (4 bytes each, el_*)
-MACRO EL_CORNER k, a, b, less
-    IF less
-        SEC
-        LDA a : SBC b : STA lfc + 32 * k,X
-        LDA a+1 : SBC b+1 : STA lfc + 32 * k + 8,X
-        LDA a+2 : SBC b+2 : STA lfc + 32 * k + 16,X
-        LDA a+3 : SBC b+3 : STA lfc + 32 * k + 24,X
-    ELSE
-        CLC
-        LDA a : ADC b : STA lfc + 32 * k,X
-        LDA a+1 : ADC b+1 : STA lfc + 32 * k + 8,X
-        LDA a+2 : ADC b+2 : STA lfc + 32 * k + 16,X
-        LDA a+3 : ADC b+3 : STA lfc + 32 * k + 24,X
-    ENDIF
-ENDMACRO
-
 \ edge_line: line slot X = en_n's plane on the screen (the model's
 \ screen_line): N' = N >> s (rounding down), s = bitlen(the largest
 \ magnitude) - LINE_BITS if positive; A = -2 N'x, B = N'y, and f = A x + B y
-\ + C at the rectangle's corners (0, 0), (W, 0), (W, H) and (0, H): P - Q -
-\ R, -P - Q - R, -P + Q - R and P + Q - R, as C = P - Q - R, A W = -2P and B
-\ H = 2Q, with P = 2 XC N'x = 128 (13 N'x), Q = YC N'y = 64 (13 N'y), R = 2
-\ FX N'z = 8 (317 N'z). The slot gets A (lna*), B (lnb*) and the corners'
-\ f (lfc). Returns A = how many corners are outside (f < 0). X is kept.
+\ + C at the rectangle's corners, by image_line's tail: A W and B H (im_w),
+\ and C = 2 XC N'x - YC N'y - R = -R - (A W + B H) / 2, R = 2 FX N'z = 8
+\ (317 N'z), as XC = W / 2 and YC = H / 2. The slot gets A (lna*), B (lnb*)
+\ and the corners' f (lfc). Returns A = how many corners are outside (f <
+\ 0). (Only for an edge whose line the images can't give, which is rare:
+\ written for room, not speed.)
 .edge_line
 {
     ZA_AUTO1 slot, b
-    ZA_AUTO 4, nr                       ; -R
-    ZA_AUTO 4, u                        ; -R - Q, then -R + Q
     STX slot
     LDA #&FF : STA ln_sch,X             ; (no side crossing kept)
     STZ el_or : STZ el_or+1 : STZ el_or+2 : STZ el_or+3
-    EL_OR 0
-    EL_OR 1
-    EL_OR 2
-    \ s = bitlen - LINE_BITS, at least 0: b = s DIV 8, and el_r = 2 (s MOD 8)
+    \ el_or = the components' magnitudes ORed
+    LDX #8
+.or
+    LDA en_n+3,X : ZA_INDEXEDBY 0,4,8
+    BMI negative
+    ORA el_or+3 : STA el_or+3
+    LDA en_n+2,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or+2 : STA el_or+2
+    LDA en_n+1,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or+1 : STA el_or+1
+    LDA en_n,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or : STA el_or
+    BRA ored
+.negative
+    SEC
+    LDA #0 : SBC en_n,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or : STA el_or
+    LDA #0 : SBC en_n+1,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or+1 : STA el_or+1
+    LDA #0 : SBC en_n+2,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or+2 : STA el_or+2
+    LDA #0 : SBC en_n+3,X : ZA_INDEXEDBY 0,4,8
+    ORA el_or+3 : STA el_or+3
+.ored
+    DEX : DEX : DEX : DEX : BPL or
+    \ s = bitlen - LINE_BITS, at least 0: b = s DIV 8, and el_r = s MOD 8
     LDX #3
 .top
     LDA el_or,X : ZA_INDEXEDBY 0..3
@@ -1740,9 +1715,9 @@ ENDMACRO
     SEC : SBC #2 * LINE_BITS : BCS shift
     LDA #0
 .shift
-    TAY                                 ; 2 s
-    AND #15 : STA el_r
-    TYA : LSR A : LSR A : LSR A : LSR A : STA b
+    LSR A : TAY                         ; s
+    AND #7 : STA el_r
+    TYA : LSR A : LSR A : LSR A : STA b
     \ each component's window: its bytes b, b + 1, b + 2 (its sign past
     \ the fourth)
     TAX
@@ -1763,22 +1738,28 @@ ENDMACRO
         LDA en_n + 4 * k + 3 : ASL A : SEXT : STA el_w + 3 * k + 2
     NEXT
 .windows
-    \ the windows shifted s MOD 8 right, or 8 - that left and a byte down
-    LDX el_r
-    JMP (el_shift,X)
-    ZA_CANJUMP EL_SHIFTS
-.r4 EL_RIGHT
-.r3 EL_RIGHT
-.r2 EL_RIGHT
-.r1 EL_RIGHT
-.r0
+    \ the windows shifted s MOD 8 right (logically: at most four bits, so
+    \ the top bit's zero stays out of the low two bytes), or 8 - that left
+    \ and a byte down
+    LDY el_r : BEQ low
+    CPY #5 : BCS left
+.right
+    FOR k = 0..2
+        LSR el_w + 3 * k + 2 : ROR el_w + 3 * k + 1 : ROR el_w + 3 * k
+    NEXT
+    DEY : BNE right
+.low
     FOR k = 0..5
         LDA el_w + 3 * (k DIV 2) + (k MOD 2) : STA el_np + k
     NEXT
     BRA have
-.l3 EL_LEFT
-.l2 EL_LEFT
-.l1 EL_LEFT
+.left
+    TYA : EOR #7 : TAY : INY            ; 8 - s MOD 8
+.lift
+    FOR k = 0..2
+        ASL el_w + 3 * k : ROL el_w + 3 * k + 1 : ROL el_w + 3 * k + 2
+    NEXT
+    DEY : BNE lift
     FOR k = 0..5
         LDA el_w + 3 * (k DIV 2) + (k MOD 2) + 1 : STA el_np + k
     NEXT
@@ -1787,11 +1768,16 @@ ENDMACRO
     LDX slot
     LDA el_np : ASL A : TAY
     LDA el_np+1 : ROL A : PHA
-    TYA : EOR #&FF : CLC : ADC #1 : STA lna0,X
-    PLA : EOR #&FF : ADC #0 : STA lna1,X
+    TYA : EOR #&FF : CLC : ADC #1 : STA lna0,X : STA im_c
+    PLA : EOR #&FF : ADC #0 : STA lna1,X : STA im_c+1
     LDA el_np+2 : STA lnb0,X
     LDA el_np+3 : STA lnb1,X
-    \ R = 8 (317 N'z) = 8 (61 N'z + 256 N'z), to 24 bits, then -R
+    \ A W and B H
+    LDX #0 : JSR im_w
+    LDA el_np+2 : STA im_c
+    LDA el_np+3 : STA im_c+1
+    LDX #4 : JSR im_w                   ; (im_bh)
+    \ R = 8 (317 N'z) = 8 (61 N'z + 256 N'z), to 24 bits
     MULK el_np+4, 61, el_t
     LDA el_np+5 : BPL r_pos
     LDA el_t+2 : SEC : SBC #61 : STA el_t+2
@@ -1799,71 +1785,30 @@ ENDMACRO
     LDA el_t+1 : CLC : ADC el_np+4 : STA el_t+1
     LDA el_t+2 : ADC el_np+5 : STA el_t+2
     ASL A : SEXT : STA el_t+3
+    LDY #3
+.times8
     ASL el_t : ROL el_t+1 : ROL el_t+2 : ROL el_t+3
-    ASL el_t : ROL el_t+1 : ROL el_t+2 : ROL el_t+3
-    ASL el_t : ROL el_t+1 : ROL el_t+2 : ROL el_t+3
-    SEC
-    LDA #0 : SBC el_t : STA nr
-    LDA #0 : SBC el_t+1 : STA nr+1
-    LDA #0 : SBC el_t+2 : STA nr+2
-    LDA #0 : SBC el_t+3 : STA nr+3
-    \ Q = 64 (13 N'y) = (13 N'y << 8) >> 2
-    LDA el_np+2 : ORA el_np+3 : BNE q_some
-    STZ el_q : STZ el_q+1 : STZ el_q+2 : STZ el_q+3
-    BRA q_done
-.q_some
-    MULK el_np+2, 13, el_t
-    LDA el_np+3 : BPL q_pos
-    LDA el_t+2 : SEC : SBC #13 : STA el_t+2
-.q_pos
-    LDA el_t+2 : CMP #&80 : ROR A : STA el_q+3
-    LDA el_t+1 : ROR A : STA el_q+2
-    LDA el_t : ROR A : STA el_q+1
-    LDA #0 : ROR A : STA el_q
-    LDA el_q+3 : CMP #&80 : ROR A : STA el_q+3
-    ROR el_q+2 : ROR el_q+1 : ROR el_q
-.q_done
-    \ P = 128 (13 N'x) = (13 N'x << 8) >> 1
-    MULK el_np, 13, el_t
-    LDA el_np+1 : BPL p_pos
-    LDA el_t+2 : SEC : SBC #13 : STA el_t+2
-.p_pos
-    LDA el_t+2 : CMP #&80 : ROR A : STA el_p+3
-    LDA el_t+1 : ROR A : STA el_p+2
-    LDA el_t : ROR A : STA el_p+1
-    LDA #0 : ROR A : STA el_p
-    \ the corners: -R - Q + P, -R - Q - P, -R + Q - P, -R + Q + P
-    SEC
-    LDA nr : SBC el_q : STA u
-    LDA nr+1 : SBC el_q+1 : STA u+1
-    LDA nr+2 : SBC el_q+2 : STA u+2
-    LDA nr+3 : SBC el_q+3 : STA u+3
-    LDX slot
-    EL_CORNER 0, u, el_p, FALSE
-    EL_CORNER 1, u, el_p, TRUE
+    DEY : BNE times8
+    \ C = -(R + (A W + B H) / 2): the sum's even, and far inside 32 bits
     CLC
-    LDA nr : ADC el_q : STA u
-    LDA nr+1 : ADC el_q+1 : STA u+1
-    LDA nr+2 : ADC el_q+2 : STA u+2
-    LDA nr+3 : ADC el_q+3 : STA u+3
-    EL_CORNER 2, u, el_p, TRUE
-    EL_CORNER 3, u, el_p, FALSE
-    \ how many are outside
-    LDA lfc + 24,X : ASL A
-    LDA #0 : ROL A
-    LDY lfc + 32 + 24,X : BPL c1
-    INC A
-.c1
-    LDY lfc + 64 + 24,X : BPL c2
-    INC A
-.c2
-    LDY lfc + 96 + 24,X : BPL c3
-    INC A
-.c3
-    RTS
-EL_SHIFTS = {r0, r1, r2, r3, r4, l3, l2, l1}
-.el_shift
-    EQUW r0, r1, r2, r3, r4, l3, l2, l1
+    LDA im_aw : ADC im_bh : STA im_cf
+    LDA im_aw+1 : ADC im_bh+1 : STA im_cf+1
+    LDA im_aw+2 : ADC im_bh+2 : STA im_cf+2
+    LDA im_aw+3 : ADC im_bh+3
+    CMP #&80 : ROR A : STA im_cf+3
+    ROR im_cf+2 : ROR im_cf+1 : ROR im_cf
+    CLC
+    LDA im_cf : ADC el_t : STA im_cf
+    LDA im_cf+1 : ADC el_t+1 : STA im_cf+1
+    LDA im_cf+2 : ADC el_t+2 : STA im_cf+2
+    LDA im_cf+3 : ADC el_t+3 : STA im_cf+3
+    SEC
+    LDA #0 : SBC im_cf : STA im_cf
+    LDA #0 : SBC im_cf+1 : STA im_cf+1
+    LDA #0 : SBC im_cf+2 : STA im_cf+2
+    LDA #0 : SBC im_cf+3 : STA im_cf+3
+    LDX slot
+    JMP image_line.corners
 \ 16 times a byte's place, for 2 bitlen
 .el_16x
     EQUB 0, 16, 32, 48
@@ -1872,10 +1817,8 @@ ZA_AUTO 4, el_or                        ; the magnitudes ORed
 ZA_AUTO 9, el_w                         ; the components' windows
 ZA_AUTO 6, el_np                        ; N' (three signed 16-bit)
 ZA_AUTO 4, el_t
-ZA_AUTO 4, el_p
-ZA_AUTO 4, el_q
 ZA_AUTO1 el_r
-ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (A W = -2P, B H = 2Q)
+ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (C = -R - (A W + B H) / 2)
 ASSERT 2 * PROJ_XC = 128 * 13 AND PROJ_YC = 64 * 13 AND 2 * VIEW_FX = 8 * 317
 ASSERT LINE_BITS = 13                   ; (|N'| at most 2^13: 13 |N'| fits 24 bits, 317 |N'| 23, and A 16)
 
@@ -2268,9 +2211,10 @@ ENDMACRO
     LDA im_bb : STA im_c
     LDA im_bb+1 : STA im_c+1
     LDX #4 : JSR im_w                   ; (im_bh)
-.corners
-    \ f at (0, 0), (W, 0), (W, H) and (0, H): C, C + A W, C + A W + B H, C + B H
     LDX slot
+.corners
+    \ f at (0, 0), (W, 0), (W, H) and (0, H), for slot X: C, C + A W, C + A
+    \ W + B H and C + B H (edge_line's way in too)
     LDA im_cf : STA lfc,X
     CLC : ADC im_aw : STA im_t : STA lfc + 32,X
     LDA im_cf+1 : STA lfc + 8,X
@@ -2903,7 +2847,13 @@ SECTION ObjMore
     DEY : BNE right
     BRA indexed
 .small
-    LDY sc_a : LDA proj_bl2,Y : LSR A
+    LDY sc_a : CPY #1 : BNE fraction
+    \ a of 1 (a unit line from images): d is f(K) itself (UNIT_SIDES)
+    LDA dv : STA sc_l
+    LDA dv+1 : STA sc_l+1
+    JMP fits
+.fraction
+    LDA proj_bl2,Y : LSR A
     SEC : SBC #8 : STA sc_k             ; -7 to 0
     EOR #&FF : TAY : INY : INY          ; 1 - k
     LDA sc_a
@@ -2995,6 +2945,7 @@ SECTION ObjMore
 ZA_AUTO2 sc_l, sc_a
 ZA_AUTO1 sc_r, sc_k
 ASSERT CLIP_W = CLIP_H AND CLIP_W < 2048    ; (d has eleven bits whichever side)
+ASSERT UNIT_SIDES                           ; (a of 1: f(K), under W, is d)
 ASSERT NLINES <= 32                         ; (lfc's index: 32 corner + slot)
 ENDSECTION
 SECTION ObjCode

@@ -473,6 +473,11 @@ JOINS = True
 # crossings are (crossing_r), with no division; off, f(K) / a by division,
 # rounded half up.
 SIDE_RECIP = True
+# A side's crossing with a line whose coefficient along it is 1 is f(K)
+# itself (side_d), exactly: a line from images square to the side
+# (image_line's unit) crosses it at its image. Off, the reciprocal's, which
+# can be a few sixteenths short.
+UNIT_SIDES = True
 
 
 def side_d(fk, a):
@@ -481,9 +486,13 @@ def side_d(fk, a):
     a's nine bits from its top one an = a >> s, s = bitlen(a) - 9, and fk
     shifted right s + 4 so that its product with R has 16 bits by 9, rounded
     and at most WIDTH (within about 2^-8 of the division's, which is under
-    WIDTH); or with SIDE_RECIP off, by division, rounded half up."""
+    WIDTH); f(K) itself for a of 1 (UNIT_SIDES: a line from images square to
+    the side, image_line's unit); or with SIDE_RECIP off, by division,
+    rounded half up."""
     if not SIDE_RECIP:
         return (2 * fk + a) // (2 * a)
+    if a == 1 and UNIT_SIDES:
+        return fk
     s = a.bit_length() - maths.CLIP_RBITS
     an = a >> s if s >= 0 else a << -s
     r = 256 + maths.CLIP_M[an - 256]
