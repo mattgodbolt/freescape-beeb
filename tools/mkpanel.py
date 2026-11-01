@@ -242,16 +242,21 @@ def texts(rows):
 # from solid colours and pairs: a third colour's texture costs more than it
 # gives on a panel's small shapes.
 
-def st_patterns(pal):
+_CANDS = []
+
+
+def pattern_of(rgb):
+    """An RGB colour's pattern's eight pixels, for the build's display."""
     import patterns
     from tools.model import colours
-    display = colours.DISPLAY
-    cands = patterns.candidates("pair")
-    out = []
-    for rgb in pal:
-        p, _d = patterns.best(patterns.target_of([[*rgb, 1.0]]), cands, display)
-        out.append(p.pixels)
-    return out
+    if not _CANDS:
+        _CANDS.append(patterns.candidates("pair"))
+    p, _d = patterns.best(patterns.target_of([[*rgb, 1.0]]), _CANDS[0], colours.DISPLAY)
+    return p.pixels
+
+
+def st_patterns(pal):
+    return [pattern_of(rgb) for rgb in pal]
 
 
 def logical(pic, pats):
@@ -299,15 +304,19 @@ def save_rgb(rows, path, scale=(1, 1)):
 
 # --- The fields' inks ---------------------------------------------------------
 
-def inks(cut, pats):
-    """Each field's ink, a byte for each cell and line: a logical colour
-    solid; the bars the ST's own bar's colours line by line (the first
-    BAR_RED cells its red end's, the rest its yellow's), each its pattern's
-    byte for the line."""
-    def pattern_byte(c, y):
-        p = pats[c]
-        return panel.mode2_byte(p[2 * (y & 3)], p[2 * (y & 3) + 1])
+# The bars' colours, line by line: the ST's as the game draws them over the
+# console's (ScummVM's drawAmigaAtariSTUI: brown edges, brownish, a yellow
+# middle; the red end red and reddish), each as a pattern.
+BAR_YELLOW = [(0x7E, 0x60, 0x19), (0x9E, 0x80, 0x20), (0xFF, 0xFF, 0x55),
+              (0xFF, 0xFF, 0x55), (0x9E, 0x80, 0x20), (0x7E, 0x60, 0x19)]
+BAR_RED = [(0xE0, 0x00, 0x00), (0xE0, 0x60, 0x20), (0xFF, 0xFF, 0x55),
+           (0xFF, 0xFF, 0x55), (0xE0, 0x60, 0x20), (0xE0, 0x00, 0x00)]
 
+
+def inks(pats_of):
+    """Each field's ink, a byte for each cell and line: a logical colour
+    solid; the bars BAR_RED's colours in their first BAR_RED cells and
+    BAR_YELLOW's in the rest, each its pattern's byte for the line."""
     out = {}
     for f in panel.FIELDS:
         name, x, y, n, across, table, ink = f
@@ -317,14 +326,15 @@ def inks(cut, pats):
             if ink is not None:
                 cells.append([panel.mode2_byte(ink, ink)] * h)
                 continue
-            # (the ST's bar: its red end at BAR_ST_RED, the rest at BAR_ST_YELLOW)
-            sx = BAR_ST_RED if i < panel.BAR_RED else BAR_ST_YELLOW
-            cells.append([pattern_byte(cut[cy + k][sx], cy + k) for k in range(h)])
+            rgbs = BAR_RED if i < panel.BAR_RED else BAR_YELLOW
+            assert len(rgbs) == h
+            line = []
+            for k, rgb in enumerate(rgbs):
+                p = pats_of(rgb)
+                line.append(panel.mode2_byte(p[2 * ((cy + k) & 3)], p[2 * ((cy + k) & 3) + 1]))
+            cells.append(line)
         out[name] = cells
     return out
-
-
-BAR_ST_RED, BAR_ST_YELLOW = 8, 20   # pixels of the cut inside the ST's bar's red end and the rest
 
 
 def check_layout():
@@ -640,7 +650,7 @@ def main(argv):
     check_layout()
     pal, img = st_console()
     pats = st_patterns(pal)
-    cut, screen = picture(pal, vehicle(img, PROBE_FRAME), pats)
+    _cut, screen = picture(pal, vehicle(img, PROBE_FRAME), pats)
     jet = picture(pal, vehicle(img, JET_FRAME), pats)[1]
     places, unique = tiles([jet, screen], 1)
     tile_list = sorted(unique, key=unique.get)
@@ -653,7 +663,7 @@ def main(argv):
     layout = json.loads(Path(areas_json).read_text())
     names = [by_id[a["id"]]["name"].strip() for a in layout["areas"]]
     build = {
-        "picture": screen.hex(), "inks": inks(cut, pats), "papers": papers(screen),
+        "picture": screen.hex(), "inks": inks(pattern_of), "papers": papers(screen),
         "tables": {name: panel.table_lines(name) for name in panel.TABLES},
         "tile_places": places, "tiles": [t.hex() for t in tile_list],
         "pictures": [tiles_of(jet), tiles_of(screen)], "messages": messages(snap),

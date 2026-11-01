@@ -329,8 +329,8 @@ FIELDS = [
     ("cross",    80, 115,  1, True,  "light",   YELLOW),
     ("shoot",    86, 115,  1, True,  "light",   WHITE),
 ]
-# The bars' inks by line, the ST's own bars' (its console's): the first
-# cell its red end's, the rest its yellow's.
+# The bars' inks by line are the ST's (tools/mkpanel.py's BAR_RED and
+# BAR_YELLOW): the first BAR_RED cells its red end's, the rest its yellow's.
 BAR_RED = 1
 BAR_CELLS = 6
 BAR_MAX = 63                # the energy and shield the bars show whole
