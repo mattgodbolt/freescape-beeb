@@ -97,6 +97,7 @@ ENDIF
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
 \   array for array, so no copy goes between them
+\   page &0D: the start (LiveBoot), which runs once
 \ Main RAM's &3000 up to SCREEN: the front end's data, which only
 \   objects_frame and area_enter read and write: the transform's cache
 \   (ObjCache), the sort's memory (ObjMemo), the pipeline's tables
@@ -254,6 +255,13 @@ RASTER_IN_HEAD = 11                     ; rs_nfaces .. rs_overflow
 RASTER_IN_ORG = RASTER_IN_END - 5 * 256 - 3 * RS_FACES - RASTER_IN_HEAD
 SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
+\ Page &0D: the start, which runs once (LiveBoot, before live_loop). The
+\ DFS's NMI code is there until the loader's last read, and nothing after;
+\ a soft BREAK reads the Master's extended vectors from &0D9F, so the start
+\ stays below. The loader puts it in once the OS is gone (LIVE_LATE).
+LIVE_BOOT_ORG = RASTER_IN_END
+SECTION LiveBoot, org = LIVE_BOOT_ORG, guard = &0D9F, filename = "LBOOT", cmos = TRUE
+ENDSECTION
 SECTION ObjOut, org = rs_fn - 2, guard = rs_pat, virtual = TRUE
 ENDSECTION
 \ The panel's packed picture, which the loader puts in the transform's
@@ -330,6 +338,12 @@ PASS_FIELDS   = 44
 MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a frame of its
 ASSERT PASS_FIELDS < 128
 
+\ ---------------------------------------------------------------------------
+\ The start, run once, in page &0D (LiveBoot, above). An NMI comes to
+\ &0D00: none does with the disc done with, but one would find an RTI.
+SECTION LiveBoot
+    RTI
+
 \ start (the loader's LD_EXEC, with every part in place and the OS gone):
 \ the machine taken, the panel's picture unpacked into both buffers before
 \ clear_work clears where it was loaded, everything set up, then the
@@ -362,7 +376,8 @@ ENDIF
     JSR input_init
     JSR irq_install
     JSR clock_init
-    \ (on into live_loop)
+    JMP live_loop
+ENDSECTION
 
 \ live_loop: a frame at a time. The logic's pass when one is due, and the
 \ frame's camera (or the free camera's keys); then, if anything the view is
@@ -1689,6 +1704,9 @@ ENDSECTION
 SECTION AreaCode
 .area_code_end
 ENDSECTION
+SECTION LiveBoot
+.live_boot_end
+ENDSECTION
 SECTION ObjConst
 .obj_const_end
 ENDSECTION
@@ -1777,8 +1795,10 @@ ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
 ASSERT LO(RASTER_STATE_ORG) = 0 AND RASTER_STATE_ORG >= &0E00
 ASSERT live_end <= area_code_end AND area_code_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
 ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
-\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's page.
+\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's
+\ page, and there the start, below the MOS's extended vectors.
 ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
+ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 \ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
 \ memory, the pipeline's tables and the area's working copy.
 ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
@@ -1792,8 +1812,9 @@ ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_R
 \ this PRINT into its description: every section saved, {file, where,
 \ from, to}, where a sideways bank or -1 (main RAM, nothing paged). The
 \ loader writes LIVE_PARTS while the OS reads them, in this order (LGLUE
-\ over the gap in LOGIC), and LIVE_LATE, HAZEL's, once it's gone; then it
-\ starts this at start. It runs from SCREEN, which screen_init clears.
+\ over the gap in LOGIC), and LIVE_LATE, HAZEL's and page &0D's, once it's
+\ gone; then it starts this at start. It runs from SCREEN, which
+\ screen_init clears.
 LIVE_PARTS = {
     {"LOGIC", BANK_DB, &8000, &C000},
     {"LGLUE", BANK_DB, logic_db_code_end, live_glue_end},
@@ -1813,7 +1834,8 @@ LIVE_PARTS = {
 }
 LIVE_LATE = {
     {"HAZEL", -1, &C000, hazel_tables_end},
-    {"OTABLE", -1, hazel_tables_end, obj_tables_end}
+    {"OTABLE", -1, hazel_tables_end, obj_tables_end},
+    {"LBOOT", -1, LIVE_BOOT_ORG, live_boot_end}
 }
 PRINT #1, "\ src/live.6502's parts, for src/loader.6502"
 PRINT #1, "LD_TITLE = ", CHR(34) + "FREESCAPE for the BBC Master: Driller, live " + build_stamp + CHR(34)

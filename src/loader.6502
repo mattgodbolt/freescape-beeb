@@ -66,12 +66,22 @@ LD_ERROR    = &C7               ; the MOS's "Disc error"
 \ Each part: {file, where, from, to}.
 FUNCTION ld_size(p) = p[3] - p[2]
 
+\ ld_place(p): the place a part goes: its where, but HAZEL (-2) apart from
+\ main RAM.
+FUNCTION ld_place(p)
+    IF p[1] < 0 AND p[2] >= &C000
+        r = -2
+    ELSE
+        r = p[1]
+    ENDIF
+= r
+
 \ ld_places(parts): each place the parts go, in the order they first come.
 FUNCTION ld_places(parts)
     r = {}
     FOR p = parts
-        IF FIND(r, p[1], -1) < 0
-            r = CONCAT(r, p[1])
+        IF FIND(r, ld_place(p), -9) == -9
+            r = CONCAT(r, ld_place(p))
         ENDIF
     NEXT
 = r
@@ -81,7 +91,7 @@ FUNCTION ld_going(parts, i)
     w = ld_places(parts)[i]
     r = {}
     FOR p = parts
-        IF p[1] == w
+        IF ld_place(p) == w
             r = CONCAT(r, {p})
         ENDIF
     NEXT
@@ -224,6 +234,7 @@ ELSE
     LDA #HI(MODE7_SCREEN) : STA ld_top          ; (never reached: nothing more is read)
     JSR ld_streams
 ENDIF
+.go                                             ; (tools/loadcheck.mjs: every part in place)
     JMP LD_EXEC
 }
 

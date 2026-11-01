@@ -96,20 +96,22 @@ const ram = cpu.ramRomOs;
 const t0 = tm.elapsedCycles;
 const secs = (c) => (c - t0) / 2e6;
 session.loadDisc(path.resolve(disc));
-const START = need(loader, "ld_start"), EXEC = need(loader, "LD_EXEC");
-let tStart = null;
-const hook = cpu.debugInstruction.add((pc) => {
-    if (pc === START && tStart === null) tStart = tm.elapsedCycles;
-    return false;
-});
+// (to the loader's JMP to LD_EXEC: LD_EXEC may be where the DFS's code is
+// while it reads)
+const START = need(loader, "ld_start"), GO = need(loader, "ld_start.go");
 await quietly(() => session.autoboot());
 try {
-    await session.runUntilAddress(EXEC, 120);
+    await session.runUntilAddress(START, 60);
 } catch {
-    throw new Error("didn't reach LD_EXEC in 120s of emulated time");
+    throw new Error("the loader didn't start in 60s of emulated time");
+}
+const tStart = tm.elapsedCycles;
+try {
+    await session.runUntilAddress(GO, 120);
+} catch {
+    throw new Error("the loader didn't finish in 120s of emulated time");
 }
 const tExec = tm.elapsedCycles;
-hook.remove();
 
 // Where the CPU sees an address in a place, as ramRomOs holds it: a bank
 // (and ANDY over its first 4K, with ROMSEL_ANDY), or main RAM (-1: below
@@ -124,11 +126,14 @@ function at(where, a) {
     if (where & ROMSEL_ANDY && a < 0x9000) return a;
     return bankAt(where & 15, a);
 }
-// Each place's image, as the loader writes it, against memory.
+// Each place's image, as the loader writes it, against memory: a place is
+// a part's where, HAZEL apart from main RAM (src/loader.6502's ld_place).
+const placeOf = (p) => (p[1] < 0 && p[2] >= 0xc000 ? -2 : p[1]);
 const places = [];
 for (const list of [PARTS, LATE]) {
-    for (const where of [...new Set(list.map((p) => p[1]))]) {
-        const going = list.filter((p) => p[1] === where);
+    for (const place of [...new Set(list.map(placeOf))]) {
+        const going = list.filter((p) => placeOf(p) === place);
+        const where = going[0][1];
         const lo = Math.min(...going.map((p) => p[2])), hi = Math.max(...going.map((p) => p[3]));
         const image = new Uint8Array(hi - lo);
         for (const p of going) {
@@ -173,7 +178,7 @@ const report = {
     files,
     places,
     boot: {
-        loader: tStart === null ? null : secs(tStart),
+        loader: secs(tStart),
         exec: secs(tExec),
         until: tUntil === null ? null : secs(tUntil),
         firstFrame: tFrame === null ? null : secs(tFrame),
