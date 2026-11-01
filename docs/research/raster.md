@@ -432,6 +432,21 @@ Driller's 65 views and the profile, a view's mean):
   left is mostly per piece and per line, and the 5,408 bytes' 27,040
   cycles of `STA abs,Y`.
 
+### A column fill, priced (track U, 2026-11-01)
+
+The fill down the screen's byte columns, PORTAL's and lander's way, with
+this fill's picture: modelled exactly (`tools/model/colfill.py`), its work
+counted, priced from 6502 kernels timed in jsbeeb
+(`src/colfill-kernels.6502`, `tools/colfillprice.mjs`, `make colfill`) and
+compared view by view with this fill's measured cycles
+(`docs/research/colfill.md`). Over Driller's 65 views it's priced at a
+median of 123,467 against this fill's 110,119 (p90 183,240 against
+183,995, max 269,828 against 319,926), and over 738 live frames 89,837
+against 75,016. Down a column a dithered pattern's byte changes every line,
+so each store needs a load (8 cycles a byte against the row runs' 5), and
+Driller's faces are wider than they are tall, so working a byte column at a
+time saves only a third of the units of work. Not built.
+
 ## The painter's way
 
 Built and measured 2026-10-31 (`RASTER_PAINTER`, the comparison build).
@@ -525,7 +540,9 @@ the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
     room for beside the rest;
   - half the lines rasterised, each written twice: an estimated quarter
     off (what's per face-line and the background halve), with half the
-    vertical resolution.
+    vertical resolution;
+  - not a column fill: priced slower at the median (above, and
+    `docs/research/colfill.md`).
 - **Both ways in one build**, chosen a frame by the faces' line ranges
   (the figures above): about 40K off the busiest view; it needs the span
   buffer's pools and the painter's code in the bank together.
