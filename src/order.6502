@@ -46,9 +46,11 @@ SECTION ObjWork
 ENDSECTION
 
 \ The compares remembered (sort_objects): a compare of two objects' boxes
-\ depends on nothing but them and the camera's ceiling cells, so its keep or
-\ swap is kept by the pair of slots, as so_gen << 1 OR keep, until the cells
-\ move (a new so_gen) or the objects do (sort_forget).
+\ depends on nothing but them and each box's side of the camera on each axis
+\ (SK_AXIS's: L >= e above, H < e below, else across), so its keep or swap
+\ is kept by the pair of slots, as so_gen << 1 OR keep, until a ceiling cell
+\ e moves past some box's L or H (a new so_gen), or the objects move
+\ (sort_forget).
 SECTION ObjMemo
 .so_memo    SKIP ((N_OBJ * N_OBJ + 255) DIV 256) * 256   ; (whole pages: so_new clears them)
 ENDSECTION
@@ -145,7 +147,7 @@ ENDMACRO
 .sort_objects
 {
     ZA_ENTRY
-    ZA_AUTO1 last, passes, changed, j, mslot, second, keyed
+    ZA_AUTO1 last, passes, changed, j, mslot, second, keyed, lo, span, axis
     ZA_AUTO2 row
     LDX dl_n : BNE some
     RTS
@@ -157,11 +159,37 @@ ENDMACRO
     LDA so_row_lo,Y : STA dl_rl,X
     LDA so_row_hi,Y : STA dl_rh,X
     DEX : BPL order
-    \ the camera's ceiling cells moved: a new generation
+    \ a ceiling cell moved past a box's L or H, which some slot's side then
+    \ changes on: a new generation (any slot's: the memory keeps them all)
     LDA so_valid : BEQ moved
     LDX #2
 .cells
-    LDA cell_e,X : CMP so_cells,X : BNE moved
+    LDA cell_e,X : CMP so_cells,X : BEQ cell_kept
+    \ e moved from e0 to e1: a side changed if L or H is in [min, max)
+    BCS up
+    STA lo                              ; (moved down: from e1)
+    LDA so_cells,X
+    BRA spanned
+.up
+    LDA so_cells,X : STA lo
+    LDA cell_e,X
+.spanned
+    SEC : SBC lo : STA span
+    LDA sc_ll,X : STA box_l+1
+    LDA sc_lh,X : STA box_l+2
+    LDA sc_hl,X : STA box_h+1
+    LDA sc_hh,X : STA box_h+2
+    STX axis
+    LDX ob_n : DEX
+.slot
+.box_l
+    LDA ob_lx,X : SEC : SBC lo : CMP span : BCC moved
+.box_h
+    LDA ob_hx,X : SEC : SBC lo : CMP span : BCC moved
+    DEX : BPL slot
+    LDX axis
+    LDA cell_e,X : STA so_cells,X       ; (no side changed: the memory holds)
+.cell_kept
     DEX : BPL cells
     BRA same
 .moved
@@ -227,8 +255,17 @@ ENDMACRO
     PHA : ORA so_gen : STA (row),Y : PLA
     LDX j
     JMP verdict
+\ by axis: the header box's L and H arrays, for the cells' check
+.sc_ll
+    EQUB LO(ob_lx), LO(ob_ly), LO(ob_lz)
+.sc_lh
+    EQUB HI(ob_lx), HI(ob_ly), HI(ob_lz)
+.sc_hl
+    EQUB LO(ob_hx), LO(ob_hy), LO(ob_hz)
+.sc_hh
+    EQUB HI(ob_hx), HI(ob_hy), HI(ob_hz)
 }
-ASSERT N_OBJ < 256
+ASSERT N_OBJ < 128                      ; (the cells' check counts slots down to 0)
 
 \ sort_keys: each draw-list entry's keys: its header box's cells and its
 \ side of the camera on each axis.
