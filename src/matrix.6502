@@ -109,12 +109,14 @@ MACRO MADD acc
     LDA acc+1 : ADC mp+1 : STA acc+1
 ENDMACRO
 
-\ matrix_build: M from mat_angles.
+\ matrix_build: M from mat_angles (and the transform's M c no longer for
+\ it: mc_valid).
 .matrix_build
 {
     ZA_ENTRY
     ZA_AUTO1 sy, cy, sp, cp, sr, cr, py10, py12, nsy
     ZA_AUTO2 acc
+    STZ mc_valid
     LDX mat_angles : LDA sin_table,X : STA sy : LDA cos_table,X : STA cy
     LDX mat_angles+1 : LDA sin_table,X : STA sp : LDA cos_table,X : STA cp
     LDX mat_angles+2 : LDA sin_table,X : STA sr : LDA cos_table,X : STA cr

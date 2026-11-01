@@ -44,6 +44,8 @@ VALL        = 24                    ; the vertex arrays: the object's, then the 
 
 SECTION ObjWork
 .mc         SKIP 9                  ; M c: x, y, z, each 24-bit signed, low byte first
+.mc_cam     SKIP 6                  ; the camera it is for
+.mc_valid   SKIP 1                  ; non-zero once it is, under this matrix (matrix_build clears it)
 .cache_gen  SKIP 1                  ; the orientation's stamp: a cache is good when its
 .ob_stamp   SKIP N_OBJ              ; object's ob_stamp is this
 .slot_next  SKIP 1                  ; the next free slot
@@ -101,11 +103,51 @@ SECTION ObjCode
     RTS
 }
 
-\ transform_setup: M c, the camera's position through the matrix, a row at
-\ a time by the maths' dot3 (src/maths.6502).
+\ transform_setup: M c, the camera's position through the matrix: a row at a
+\ time by the maths' dot3 (src/maths.6502); or, while the matrix holds and
+\ the camera has moved by less than 64 units on each axis since (a step),
+\ the last M c plus M times the move, a byte product (mmul) a non-zero term.
+\ Nothing is rounded, so the two are the same.
 .transform_setup
 {
     ZA_ENTRY
+    ZA_AUTO 3, dl                       ; the move, a signed byte an axis
+    ZA_AUTO1 ti, ext
+    LDA mc_valid : BNE stepped
+    JMP full
+.stepped
+    FOR k = 0..2
+        LDA cam_x + 2 * k : SEC : SBC mc_cam + 2 * k : STA dl + k
+        LDA cam_x + 2 * k + 1 : SBC mc_cam + 2 * k + 1 : BEQ pos
+        CMP #&FF : BNE full_k
+        LDA dl + k : CMP #&C1 : BCS ok      ; (-63 .. -1)
+    .full_k
+        JMP full
+    .pos
+        LDA dl + k : CMP #64 : BCS full_k   ; (0 .. 63)
+    .ok
+    NEXT
+    LDX #8
+.term
+    LDA mat,X : BEQ next
+    LDY tk3,X
+    LDA dl,Y : ZA_INDEXEDBY 0..2
+    BEQ next
+    TAY
+    LDA mat,X : STX ti
+    JSR mmul                            ; (|m| <= 65 and |d| <= 63: within its table)
+    LDX ti : LDY tr3,X
+    LDA #0 : BIT mp+1 : BPL ext_got
+    LDA #&FF
+.ext_got
+    STA ext
+    LDA mc,Y : CLC : ADC mp : STA mc,Y
+    LDA mc+1,Y : ADC mp+1 : STA mc+1,Y
+    LDA mc+2,Y : ADC ext : STA mc+2,Y
+.next
+    DEX : BPL term
+    JMP moved
+.full
     FOR r = 0..2
         LDA mat + 3 * r + 0 : STA mrow+0
         LDA mat + 3 * r + 1 : STA mrow+1
@@ -122,7 +164,17 @@ SECTION ObjCode
         LDA macc+1 : STA mc + 3 * r + 1
         LDA macc+2 : STA mc + 3 * r + 2
     NEXT
+    LDA #1 : STA mc_valid
+.moved
+    FOR k = 0..5
+        LDA cam_x + k : STA mc_cam + k
+    NEXT
     RTS
+\ by 3 r + k: k, and 3 r
+.tk3
+    EQUB 0, 1, 2, 0, 1, 2, 0, 1, 2
+.tr3
+    EQUB 0, 0, 0, 3, 3, 3, 6, 6, 6
 }
 
 \ ---------------------------------------------------------------------------
