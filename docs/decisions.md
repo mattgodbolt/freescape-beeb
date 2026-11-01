@@ -482,3 +482,17 @@ growth (`ObjMore`) in main RAM; RasterIn in the OS's pages; the
 transform's cache and the sort's memory in main RAM at `&3000` (ACCCON X
 clear) and the logic's lists by face in shadow RAM at `&3000` (X set round
 each pass).
+
+## 41. The cone's lines, and the 2D clip's crossings by reciprocal (2026-10-31, autonomous; amends 24 and 33)
+
+The cone (decision 33) makes no line for an edge with both ends behind
+the eye; takes a crossing on a side of the view's rectangle from the
+line itself, rounded half up from the side's corner inside it; joins two
+consecutive edges' lines at their shared vertex's projected image; and
+takes the lines of edges with both ends in front first. The 2D clip's
+crossings come from a nine-bit reciprocal rather than a division, within
+about 2^-8 of it and still from the edge's inside end, so shared edges
+meet. Together, against the model before them (journal 2026-10-31): 333 of
+3,515,200 pixels differ over the entrance views and walks, 8,961 of
+35,314,240 over every check view, single pixels along long edges; against
+the ZX oracle, 1,389,703 of 1,406,080 pixels agree (1,389,643 before).

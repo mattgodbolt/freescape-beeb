@@ -526,3 +526,18 @@ X turn, : and / walk; Driller's sizes moved to f0-f3. On the live disc's
 check with both (fields a frame, median / p90 / max, mostly close to
 walls): walking 3.09 / 6.30 / 16.26, turning 4.97 / 12.50 / 15.86,
 standing 1.86 / 6.25 / 16.94.
+
+## 2026-10-31: the cone restructured (track Q)
+
+Five changes to the cone and the 2D clip (`docs/research/objects.md`,
+decision 41). Measured with `objectcheck --entrance` (median / p90 / max
+cycles): a step frame from 153,950 / 210,662 / 252,158 to 133,939 /
+176,806 / 219,512; a turn from 195,229 / 258,319 / 323,343 to 170,605 /
+215,093 / 292,559. The cone at a step's median from 52,078 to 34,770 (the
+floor's share from 21,258 to 13,864), the 2D clip from 12,843 to 10,584;
+the projection up from 10,570 to 11,778, since joins project some of the
+cone's vertices. The check now also compares the cone's lines and the
+vertices projected, and runs the crossing routine alone on 3,189 of the
+model's crossings. The front end's code now nearly fills its room on the
+live disc (bank 7 and `ObjMore`), so the next rounds need room found
+first.
