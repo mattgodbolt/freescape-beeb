@@ -3,7 +3,9 @@
 #
 #   make live       build/live.ssd (Driller's logic moves the camera) and
 #                   build/live-free.ssd (the free camera, -D
-#                   FREE_CAMERA=TRUE), and their checks (tools/livecheck.mjs),
+#                   FREE_CAMERA=TRUE), and their checks: the loader's
+#                   (tools/loadcheck.mjs: every part in its place, and the
+#                   boot's times, into <dir>/load.json), then tools/livecheck.mjs,
 #                   on jsbeeb's full video: on the first, the scenarios of
 #                   tests/logic/ LIVE_SCENARIOS names, a run of the keys they
 #                   don't press and a tour of every entrance by the FCL's
@@ -21,11 +23,19 @@
 # The discs' data derive from the originals (make data, make colours, the
 # logic's data, build/logic6502/), so they're built, never committed
 # (decision 6).
+#
+# Each disc is built in two passes: src/live.6502 writes each of its parts
+# as a file into <dir>/parts/ (baron -p) and PRINTs where each goes into
+# <dir>/parts.6502; then the loader (src/loader.6502) packs them into the
+# disc's two files, !BOOT and DRILLER. tools/loadcheck.mjs boots each disc
+# and holds every part in memory to its file, and times the boot.
 
 LIVE_DIR     = build/live
+LIVE_FREE_DIR = build/live-free
 LIVE_DISC    = build/live.ssd
 LIVE_FREE    = build/live-free.ssd
 LIVE_SYMBOLS = build/live.json
+LOADER_SOURCES = src/loader.6502 src/zx02.6502
 LIVE_GEN     = $(LIVE_DIR)/data.6502 $(LIVE_DIR)/live.json
 LIVE_TRACE   = $(LIVE_DIR)/trace.json
 LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros.6502 \
@@ -52,13 +62,25 @@ CHECKS += live
 $(LIVE_GEN) &: tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(MODEL_PY) $(COLOUR_MODEL)
 	$(PYTHON) -I tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(LIVE_DIR)
 
-$(LIVE_DISC) $(LIVE_SYMBOLS) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
-	$(ASM) -D 'BUILD="$(FS_BUILD)"' -o $(LIVE_DISC) --title DRILLER --opt 3 --warn 2 \
+# The first pass: the parts and their description, and the symbols.
+$(LIVE_SYMBOLS) $(LIVE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
+	@mkdir -p $(LIVE_DIR)/parts
+	$(ASM) -D 'BUILD="$(FS_BUILD)"' -p $(LIVE_DIR)/parts -log1 $(LIVE_DIR)/parts.6502 --warn 2 \
 	    --symbols $(LIVE_SYMBOLS) src/live.6502
 
-$(LIVE_FREE) $(LIVE_FREE:.ssd=.json) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
-	$(ASM) -D 'BUILD="$(FS_BUILD)"' -D FREE_CAMERA=TRUE -o $(LIVE_FREE) --title DRILLER --opt 3 --warn 2 \
-	    --symbols $(LIVE_FREE:.ssd=.json) src/live.6502
+$(LIVE_FREE:.ssd=.json) $(LIVE_FREE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
+	@mkdir -p $(LIVE_FREE_DIR)/parts
+	$(ASM) -D 'BUILD="$(FS_BUILD)"' -D FREE_CAMERA=TRUE -p $(LIVE_FREE_DIR)/parts -log1 $(LIVE_FREE_DIR)/parts.6502 \
+	    --warn 2 --symbols $(LIVE_FREE:.ssd=.json) src/live.6502
+
+# The second: the disc, the loader's symbols beside it.
+$(LIVE_DISC) $(LIVE_DISC:.ssd=-loader.json) &: $(LOADER_SOURCES) $(LIVE_DIR)/parts.6502
+	$(ASM) -D 'LD_BUILD="../$(LIVE_DIR)/"' -o $(LIVE_DISC) --title DRILLER --opt 2 --warn 2 \
+	    --symbols $(LIVE_DISC:.ssd=-loader.json) src/loader.6502
+
+$(LIVE_FREE) $(LIVE_FREE:.ssd=-loader.json) &: $(LOADER_SOURCES) $(LIVE_FREE_DIR)/parts.6502
+	$(ASM) -D 'LD_BUILD="../$(LIVE_FREE_DIR)/"' -o $(LIVE_FREE) --title DRILLER --opt 2 --warn 2 \
+	    --symbols $(LIVE_FREE:.ssd=-loader.json) src/loader.6502
 
 # The scenarios' passes, as the transcription takes them, with the
 # segments its moves walked (tools/mklive.py --trace).
@@ -69,6 +91,8 @@ $(LIVE_TRACE): tools/mklive.py tools/logictrace.py $(wildcard tools/logic/*.py) 
 
 .PHONY: live live-run
 live: $(LIVE_DISC) $(LIVE_FREE) $(LIVE_GEN) $(LIVE_TRACE)
+	node tools/loadcheck.mjs --disc $(LIVE_DISC) --json $(LIVE_DIR)/load.json
+	node tools/loadcheck.mjs --disc $(LIVE_FREE) --json $(LIVE_FREE_DIR)/load.json
 	node tools/livecheck.mjs --disc $(LIVE_DISC) --live $(LIVE_DIR)/live.json --trace $(LIVE_TRACE) \
 	    --json $(LIVE_DIR)/check.json
 	node tools/livecheck.mjs --free --disc $(LIVE_FREE) --live $(LIVE_DIR)/live.json \
