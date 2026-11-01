@@ -30,11 +30,10 @@
 \   transform_setup   M c for the frame (after matrix_update)
 \   transform_object  X = a slot, A = the mask of its vertices wanted:
 \                     those vertices in vx*, vy*, vz* (vertex j at index
-\                     j), with vflag's bit 7 set for one nearer than ZNEAR
-\                     and its other bits clear. Others of its vertices may
-\                     be computed too, as the ones wanted are built from
-\                     them. Fills the object's cache first if it isn't
-\                     good. Clobbers A, X, Y.
+\                     j). Others of its vertices may be computed too, as
+\                     the ones wanted are built from them. Fills the
+\                     object's cache first if it isn't good. Clobbers A,
+\                     X, Y.
 \
 \ The camera's coordinates must be below &8000 (M c's products take them as
 \ signed).
@@ -45,6 +44,8 @@ VALL        = 24                    ; the vertex arrays: the object's, then the 
 
 SECTION ObjWork
 .mc         SKIP 9                  ; M c: x, y, z, each 24-bit signed, low byte first
+.mc_cam     SKIP 6                  ; the camera it is for
+.mc_valid   SKIP 1                  ; non-zero once it is, under this matrix (matrix_build clears it)
 .cache_gen  SKIP 1                  ; the orientation's stamp: a cache is good when its
 .ob_stamp   SKIP N_OBJ              ; object's ob_stamp is this
 .slot_next  SKIP 1                  ; the next free slot
@@ -60,7 +61,6 @@ SECTION ObjWork
 .vz0        SKIP VALL
 .vz1        SKIP VALL
 .vz2        SKIP VALL
-.vflag      SKIP VALL               ; bit 7: nearer than ZNEAR; the clip's bits below
 ENDSECTION
 
 \ The cache: a slot is one vector, M v for a corner or M times an edge.
@@ -103,11 +103,51 @@ SECTION ObjCode
     RTS
 }
 
-\ transform_setup: M c, the camera's position through the matrix, a row at
-\ a time by the maths' dot3 (src/maths.6502).
+\ transform_setup: M c, the camera's position through the matrix: a row at a
+\ time by the maths' dot3 (src/maths.6502); or, while the matrix holds and
+\ the camera has moved by less than 64 units on each axis since (a step),
+\ the last M c plus M times the move, a byte product (mmul) a non-zero term.
+\ Nothing is rounded, so the two are the same.
 .transform_setup
 {
     ZA_ENTRY
+    ZA_AUTO 3, dl                       ; the move, a signed byte an axis
+    ZA_AUTO1 ti, ext
+    LDA mc_valid : BNE stepped
+    JMP full
+.stepped
+    FOR k = 0..2
+        LDA cam_x + 2 * k : SEC : SBC mc_cam + 2 * k : STA dl + k
+        LDA cam_x + 2 * k + 1 : SBC mc_cam + 2 * k + 1 : BEQ pos
+        CMP #&FF : BNE full_k
+        LDA dl + k : CMP #&C1 : BCS ok      ; (-63 .. -1)
+    .full_k
+        JMP full
+    .pos
+        LDA dl + k : CMP #64 : BCS full_k   ; (0 .. 63)
+    .ok
+    NEXT
+    LDX #8
+.term
+    LDA mat,X : BEQ next
+    LDY tk3,X
+    LDA dl,Y : ZA_INDEXEDBY 0..2
+    BEQ next
+    TAY
+    LDA mat,X : STX ti
+    JSR mmul                            ; (|m| <= 65 and |d| <= 63: within its table)
+    LDX ti : LDY tr3,X
+    LDA #0 : BIT mp+1 : BPL ext_got
+    LDA #&FF
+.ext_got
+    STA ext
+    LDA mc,Y : CLC : ADC mp : STA mc,Y
+    LDA mc+1,Y : ADC mp+1 : STA mc+1,Y
+    LDA mc+2,Y : ADC ext : STA mc+2,Y
+.next
+    DEX : BPL term
+    JMP moved
+.full
     FOR r = 0..2
         LDA mat + 3 * r + 0 : STA mrow+0
         LDA mat + 3 * r + 1 : STA mrow+1
@@ -124,7 +164,17 @@ SECTION ObjCode
         LDA macc+1 : STA mc + 3 * r + 1
         LDA macc+2 : STA mc + 3 * r + 2
     NEXT
+    LDA #1 : STA mc_valid
+.moved
+    FOR k = 0..5
+        LDA cam_x + k : STA mc_cam + k
+    NEXT
     RTS
+\ by 3 r + k: k, and 3 r
+.tk3
+    EQUB 0, 1, 2, 0, 1, 2, 0, 1, 2
+.tr3
+    EQUB 0, 0, 0, 3, 3, 3, 6, 6, 6
 }
 
 \ ---------------------------------------------------------------------------
@@ -377,17 +427,6 @@ MACRO V_ADD d, s, e
     LDA vz2+s : ADC ca_z2+e,X : STA vz2+d
 ENDMACRO
 
-\ NEAR_FLAG j: vflag j = &80 if vertex j's z < ZNEAR (signed), else 0
-MACRO NEAR_FLAG j
-    LDA vz0+j : CMP #LO(ZNEAR)
-    LDA vz1+j : SBC #HI(ZNEAR)
-    LDA vz2+j : SBC #ZNEAR DIV 65536
-    BVC no_overflow
-    EOR #&80
-.no_overflow
-    AND #&80 : STA vflag+j
-ENDMACRO
-
 \ A cuboid's vertex j is built from PARENT[j] and edge EDGE[j] (cache slot
 \ X + EDGE[j]): its highest bit's axis added to the vertex without it.
 CUBE_PARENT = {0, 0, 0, 1, 0, 1, 2, 3}
@@ -428,13 +467,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     LDA ca_z0,X : SEC : SBC mc+6 : STA vz0,Y
     LDA ca_z1,X : SBC mc+7 : STA vz1,Y
     LDA ca_z2,X : SBC mc+8 : STA vz2,Y
-    LDA vz0,Y : CMP #LO(ZNEAR)
-    LDA vz1,Y : SBC #HI(ZNEAR)
-    LDA vz2,Y : SBC #ZNEAR DIV 65536
-    BVC gen_no_overflow
-    EOR #&80
-.gen_no_overflow
-    AND #&80 : STA vflag,Y
 .gen_next
     INY
     LDA want : BNE gen_vertex
@@ -442,7 +474,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
 .sensor
     LDX slot
     V_SUB 0
-    NEAR_FLAG 0
     RTS
 .rect
     LDX slot
@@ -450,9 +481,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     V_ADD 1, 0, 1
     V_ADD 2, 1, 2
     V_ADD 3, 0, 2
-    FOR j = 0..3
-        NEAR_FLAG j
-    NEXT
     RTS
 .cuboid
     \ The vertices wanted and those they're built from: 7 from 3, 3 and 5
@@ -470,11 +498,9 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     LSR A : STA want
     LDX slot
     V_SUB 0
-    NEAR_FLAG 0
     FOR j = 1..7
         LSR want : BCC skip
         V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
-        NEAR_FLAG j
     .skip
     NEXT
     RTS

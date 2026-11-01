@@ -136,6 +136,9 @@ SECTION ObjOut, org = &7000, guard = &7600, virtual = TRUE
 ENDSECTION
 SECTION ObjMemo, org = &7600, guard = &7C00, virtual = TRUE
 ENDSECTION
+\ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
+SECTION ObjMore, org = &7C00, guard = &8000, filename = "OMORE", cmos = TRUE
+ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 

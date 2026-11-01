@@ -6,6 +6,7 @@
 //   node tools/objectcheck.mjs BUILD [--db build/logic6502/LOGIC] [--cases CASES.json]
 //                              [--areas build/gen/areas.json] [--entrance]
 //                              [--view TEXT] [--verbose] [--json OUT]
+//                              [--profile | --profile-walks]
 //
 // BUILD holds the check build (OCODE, OAREA, OCONST, OMATHS, OTABLES, ACONV,
 // symbols.json) and, unless --cases names them, cases.json (mk/objects.mk);
@@ -67,7 +68,7 @@ const S = (name) => m.sym(name);
 const has = (name) => name in m.syms;
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
 for (const [file, section] of [["OCODE", "ObjCode"], ["OCONST", "ObjConst"], ["OAREA", "AreaCode"],
-                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"]])
+                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"], ["OMORE", "ObjMore"]])
     m.load(`${dir}/${file}`, sections[section].org, space(sections[section].org));
 m.load(`${dir}/ACONV`, sections.AreaConv.org, has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
@@ -141,14 +142,17 @@ for (const [label, stage] of STAGES) if (has(label)) entries.set(S(label), stage
 const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
 
 // --profile: every instruction's cycles to the routine it's in (the last
-// label at or below it that isn't inside a scope), over all the views.
-const profile = args.includes("--profile") ? new Map() : null;
+// label at or below it that isn't inside a scope), over all the views;
+// --profile-walks, over the walks' steps alone (the frames that only move).
+const walksOnly = args.includes("--profile-walks");
+const profile = args.includes("--profile") || walksOnly ? new Map() : null;
+let profiling = false;
 const routines = [];
 if (profile) {
     const all = JSON.parse(fs.readFileSync(symFile, "utf8"));
     for (const a of all.assemblies)
         for (const s of a.sections)
-            if (s.name === "ObjCode" && s.labels)
+            if ((s.name === "ObjCode" || s.name === "ObjMore") && s.labels)
                 for (const [k, v] of Object.entries(s.labels))
                     if (!k.includes(".") && !k.includes("@")) routines.push([v.value, k]);
     routines.sort((a, b) => a[0] - b[0]);
@@ -178,7 +182,7 @@ m.tm.processor.debugInstruction.add((pc) => {
     if (lastPc >= 0) {
         tally[current] = (tally[current] || 0) + (now - lastCycles);
         if (inFloor) floorTally[current] = (floorTally[current] || 0) + (now - lastCycles);
-        if (profile) {
+        if (profiling) {
             const r = routineOf(lastPc);
             profile.set(r, (profile.get(r) || 0) + (now - lastCycles));
         }
@@ -293,6 +297,7 @@ for (const view of views) {
     }
     badWrites.length = 0;
     floorSlot = view.floor ?? null;
+    profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name));
     const { total, stages, calls: made, floor } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
@@ -420,9 +425,10 @@ console.log(
 );
 if (profile) {
     const total = [...profile.values()].reduce((a, b) => a + b, 0);
-    console.log(`profile: cycles by routine over ${results.length} views`);
+    const n = walksOnly ? results.filter((r) => /-w\d+$/.test(r.name)).length : results.length;
+    console.log(`profile: cycles by routine over ${n} ${walksOnly ? "walk steps" : "views"}`);
     for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40))
-        console.log(`  ${r.padEnd(20)} ${String(Math.round(c / results.length)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);
+        console.log(`  ${r.padEnd(20)} ${String(Math.round(c / n)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);
 }
 if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify(results, null, 1) + "\n");
 if (failures) {

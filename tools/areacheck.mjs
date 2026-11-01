@@ -76,6 +76,7 @@ load("OCONST", "ObjConst");
 load("OAREA", "AreaCode");
 load("OMATHS", "ObjMaths");
 load("OTABLES", "ObjTables");
+load("OMORE", "ObjMore");
 load("ACONV", "AreaConv", has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
 
