@@ -374,10 +374,11 @@ calls), or main RAM with ACCCON's X clear. The DFS's own OSGBPB reads a
 sector a revolution on the Master, and `*RUN` loads a whole file into main
 RAM, which can't hold the packed parts, so the parts are read by sector,
 from a second file (measured below). HAZEL holds the filing system's
-workspace until the OS is gone, and page `&0D` its NMI code, so their
-streams ride in `!BOOT` itself (`LIVE_LATE`): after the last read the
-loader turns interrupts off for good, sets ACCCON's Y, unpacks them, and
-jumps to `start`. That's in page `&0D`: it runs once, and nothing uses the
+workspace until the OS is gone, ANDY the MOS's own, and page `&0D` the
+DFS's NMI code, so their streams ride in `!BOOT` itself (`LIVE_LATE`):
+after the last read the loader turns interrupts off for good, sets ACCCON's
+Y, unpacks them (ANDY's with ROMSEL `BANK_OBJ OR ROMSEL_ANDY`), and jumps to
+`start`. That's in page `&0D`: it runs once, and nothing uses the
 page after the disc is done with (`LiveBoot`, `&0D00` an RTI for any NMI).
 
 The unpacker is dmsc's ZX02 decoder (zx02-optim) with its copies by Y and a
@@ -408,7 +409,8 @@ logic's code and variables unused.
 | bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, written over `LOGIC`'s gap): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
 | bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' patterns and index by id, the lines' code), the panel's code and tables (`PanelData`, `PDATA`), and the working copy's conversion (`AreaConv`, `ACONV`) |
 | bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20); its quarter squares are the maths' in HAZEL (`RASTER_SQUARES`: the same table, ASSERTed) |
-| bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below) |
+| bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below): the transform's and the object pass's first, then from `obj_andy_reach`, past the bank's first 4K, what ANDY's code may call |
+| ANDY (ROMSEL's bit 7, over `BANK_OBJ`'s first 4K) | the object pipeline's rarely run code (`ObjAndy`, `OANDY`, decision 52: `docs/research/objects.md`, "ANDY"), which its code calls through trampolines in `ObjMore`; the loader puts it in once the OS is gone (`LIVE_LATE`) |
 | HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), which the loader unpacks once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies and the fill read the maths' quarter squares here (`LOGIC_SQUARES`, `RASTER_SQUARES`) |
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
@@ -433,10 +435,12 @@ Each owner's room is the rest of its section's span, up to the guard its
 `ASSERT`s hold; `build/live.json` has the addresses, and the measurements
 below the bytes (2026-11-01).
 
-- **The front end**: its bank from `obj_code_end` to `&C000`; `ObjMore`
-  from `obj_more_end` to `&3000` (code or tables, read whatever bank and
-  X); main RAM from `obj_area_end` to `SCREEN` (tables or work it reads
-  with X clear only); HAZEL from `obj_work_end` to `&E000`. The bytes
+- **The front end**: its bank from `obj_code_end` to `&C000`; ANDY from
+  `obj_andy_end` to `&9000` (code its trampolines reach, which calls nothing
+  in the bank's first 4K and no trampoline); `ObjMore` from `obj_more_end`
+  to `&3000` (code or tables, read whatever bank and X); main RAM from
+  `obj_area_end` to `SCREEN` (tables or work it reads with X clear only);
+  HAZEL from `obj_work_end` to `&E000`. The bytes
   before `OBJ_CODE_ORG` in its bank are the price of where its hot loops
   fall (below); aligning those loops would take them back.
   `mk/objects.mk`'s check build keeps room for the bank full
@@ -450,8 +454,8 @@ below the bytes (2026-11-01).
   as the front end's own code goes elsewhere it can reach: `ObjMore` (any X,
   any bank), main RAM's `&3000` room (with X clear, as it runs; code there
   would be a decision, as the rest of the map keeps code below `&3000`),
-  HAZEL, or ANDY as a second window over its bank's first 4K (below). The
-  measurements below list its code by how often it runs.
+  HAZEL, or ANDY, its second window over its bank's first 4K, where its
+  rarely run code now is (decision 52).
 - **Both, at the same address**: main RAM's room past `obj_area_end` and
   shadow RAM's at the same addresses, if the front end leaves it, is
   per-buffer room (ACCCON's X picks the buffer drawn), for the fill's
@@ -460,20 +464,16 @@ below the bytes (2026-11-01).
 - **The logic's**: shadow RAM from `logic_faces_end` to `SCREEN` (with X
   set, as its passes run); `BANK_DB` from `live_glue_end` to `LOGIC_DB`;
   `BANK_DATA` from `area_conv_end` to `&C000`.
+- **ANDY**, `&8000-&8FFF` with ROMSEL's bit 7: the Master's private RAM,
+  the MOS's own (it pages it only in set-up, through the font's OSWORD
+  10), so the engine's once it owns the machine; the loader fills it once
+  the OS is gone (`LIVE_LATE`, `BANK_OBJ OR ROMSEL_ANDY`). It stands in for
+  the first 4K of whichever bank is paged, so the front end's code there
+  calls only its bank's past that (decision 52: `docs/research/objects.md`,
+  "ANDY"). A harness hook keyed on a bank's address checks that the bank,
+  not ANDY, is in view there (`tools/livecheck.mjs`, jsbeeb's
+  `isBankPagedAt`; `tools/run6502.mjs`'s `paged`).
 - **Not used yet**, measured on jsbeeb with the OS gone (below):
-  - ANDY, `&8000-&8FFF` with ROMSEL's bit 7: the Master's private RAM, the
-    MOS's own (it pages it only in set-up, through the font's OSWORD 10),
-    so free once the engine owns the machine; the loader can fill it once
-    the OS is gone (`LD_LATE`, a bank OR `ROMSEL_ANDY`). It stands in for
-    the first 4K of whichever bank is paged, so it adds room only where
-    that bank's first 4K isn't needed while it's paged in. Two uses fit
-    (proposed, below): the front end's second window, its code above
-    `&9000` paging ANDY in to call what's there; or the working copy's
-    conversion (`AreaConv`), which runs only on entering an area and reads
-    only main RAM and the database: at `&8000` with ROMSEL `&80 OR
-    BANK_DB`, its last bytes in `BANK_DB`'s gap above `&9000` and the
-    database in view, freeing its place in `BANK_DATA` with no code
-    changed (a harness hook keyed on a bank then needs ANDY's bit too).
   - the OS's pages: from `work_end` to `RASTER_IN_ORG`; page `&0D` from
     `live_boot_end` to `&0D9F` (a soft BREAK reads the Master's extended
     vectors from `&0D9F` on, and pages 2 and 3, so those stay the MOS's),
@@ -626,8 +626,6 @@ disc's demo.
   its NMI code filling one buffer while the unpacker empties the other
   (`../porting-to-the-beeb.md`, "Reading the disc yourself"), would hide
   the unpacking; a quicker format than ZX02 would shorten it.
-- ANDY's use (Room, above), and the front end's colder code out of its
-  bank (measured below), are the front end's to choose.
 
 ## Decisions to record
 
@@ -678,11 +676,9 @@ decision 42.)
   the DFS's NMI code was, which the loader writes once the disc is done
   with, behind an RTI at `&0D00`. Main RAM below `&3000` gains it, which
   takes the maths' code down a page and so gives `ObjMore` a page more.
-- **ANDY** (open, for Matt): the front end's second window (it gains up to
-  4K for code it calls through a ROMSEL switch from above `&9000`, the
-  front end's change), or the area conversion's place (`BANK_DATA` gains
-  the conversion's bytes, with no code changed and nothing measurable on a
-  frame). Not both. "Room", above.
+- **ANDY**: decided (decision 52, Matt): the front end's second window
+  ("Room", above; `docs/research/objects.md`, "ANDY"), not the area
+  conversion's place.
 
 ## Measurements
 
@@ -881,4 +877,5 @@ routines, 5,066 bytes, under 0.5% each and 8.4% together. The lines' and
 points' code (`seg_f`, `seg_point`, `seg_clip`, `draw_segment`,
 `line_quad`, `point_square`, `quad_across`, `quad_x`), 1,125 bytes, took
 0.29%. Code like that could leave the bank for `ObjMore` or, through a
-ROMSEL switch, ANDY.
+ROMSEL switch, ANDY. (ANDY took it: decision 52, the journal's entry for
+track AB.)

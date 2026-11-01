@@ -428,10 +428,13 @@ Faces nearest first, in the rasteriser's input's shape
   by `ob_id`, and must call `area_enter` again after loading an area (the
   rig's parts move) and `cache_reset` if it moves an object otherwise.
 - **Sections** (each placed by the build's memory map; the check build's
-  in `mk/objects.mk`): `ObjCode` (this track's code, and the vertex pass's
-  and the cone's tables), `ObjMore` (more of it, outside the code's bank:
-  main RAM on the live disc, which any bank paged sees; the 2D clip, its
-  crossings and their reciprocals, and the cone's side crossings),
+  in `mk/objects.mk`, where the live disc has the code): `ObjCode` (this
+  track's code, and the vertex pass's and the cone's tables, in the
+  pipeline's bank, `OBJ_BANK`, from `OBJ_CODE_ORG`), `ObjAndy` (its rarely
+  run code, in ANDY over that bank's first 4K: "ANDY", below), `ObjMore`
+  (more of it, outside the code's bank: main RAM on the live disc, which
+  any bank paged sees; the 2D clip, its crossings and their reciprocals,
+  the cone's side crossings, and the trampolines into ANDY),
   `ObjConst` (the loops, the sine table, the
   matrix's quarter squares, the outcodes' tables), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
   `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjMemo` (the
@@ -780,6 +783,59 @@ What's left:
   test from the vertex below.
 - **The floor** is still the largest face.
 
+## ANDY: the cold code out of the bank (track AB, decision 52)
+
+The pipeline's bank was full but for a few dozen bytes. Matt chose ANDY
+(decision 52), the Master's 4K at `&8000-&8FFF` that ROMSEL's bit 7 pages
+over the paged bank's first 4K, for the front end's rarely run code, so
+that its bank has room for the hot paths. What went (`ObjAndy`), each a
+routine that runs in few frames or a few times a frame, so that what it
+costs there is a trampoline's call, not its speed (ANDY's RAM is as fast as
+the bank's):
+
+- the lines and points: `draw_segment`, `seg_clip`, `seg_point`, `seg_f`,
+  `line_quad`, `point_square` and their tables, and `band_test`;
+- the planes' own lines, for the edges whose lines the images can't give:
+  `edge_plane` (new: `edge_normal` then `edge_line`), with `en_mul`,
+  `en_shl6`, `en_acc`, `cut16` and `smul16`;
+- the matrix's build (`matrix_build`, `im_cols`), a turn's alone;
+- `sensor_watching`, `frac16` (the cone's general crossings and a line's 3D
+  clip) and the slow fill (`fill_slow_point`, for an orientation with an
+  entry of 65).
+
+How it's reached (`src/transform.6502`'s header, `ANDY_CALL`):
+
+- **Trampolines** in `ObjMore` (`andy_draw_segment` and the rest), as code
+  in a bank can't page another in under itself: ANDY paged in (ROMSEL
+  `OBJ_BANK OR ROMSEL_ANDY`), the routine, ANDY paged out. The routine takes
+  its inputs in X, Y or memory and gives back X, Y, C and V (and A, by
+  `ANDY_CALL_A`'s, for `edge_plane`). The interrupt pages nothing and reads
+  nothing in sideways RAM, so ANDY paged under it changes nothing.
+- **What ANDY's code calls in the bank** must be past the bank's first 4K,
+  which ANDY hides: the bank holds the transform's code and the object
+  pass's first, nothing of which ANDY's code reaches, then `obj_andy_reach`
+  (ASSERTed at `&9000` or past it) and the rest (`src/matrix.6502`,
+  `clip.6502`, `order.6502`), whose routines ANDY's code calls (`umul16`,
+  `lerp`, `cone_qs`, which it patches, `vertex_shared`, `drawable` and the
+  rest, each ASSERTed past `obj_andy_reach` at the end of `src/clip.6502`).
+  So `mmul` and `mround`, which the matrix's build calls, stay in the bank,
+  and `src/matrix.6502` comes after `src/objects.6502` in both builds.
+- **Nothing ANDY's code reaches calls a trampoline**, which would page ANDY
+  out under it: `dedupe` and `stage_pa`, which the 2D clip reaches from a
+  line's face, stay in the bank.
+- **The check build has the live disc's map** for the front end's code:
+  `ObjCode` in its bank from `OBJ_CODE_ORG`, `ObjAndy` in ANDY, `ObjMore`
+  from a page with the maths' code and the live disc's stub, so every byte of
+  the code is where the free disc has it, and the check's cycles are the
+  disc's. `tools/objectcheck.mjs` lets the pipeline patch its code only with
+  its bank (or ANDY) paged, and fails a view that runs anything in sideways
+  RAM but its own code, the bank's with the bank paged and ANDY's with ANDY;
+  its stages, calls and profile tell ANDY's addresses from the bank's.
+
+The figures (the bank's room before and after, ANDY's, what a frame pays on
+the check and on both discs, the boot) are in the journal's entry for track
+AB.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -896,10 +952,10 @@ ways over the views `render.py --diff` takes, and over all the check's):
   candidates that draw nothing, the cone's lines and passes, the
   projection's overheads, the floor). Then the transform's adds (a 16-bit
   space with a block exponent is picture-free, above).
-- **Size**: the pipeline's code fills its sideways bank on the live disc
-  but for a few dozen bytes (the build's guard says when it doesn't fit);
-  cold code (a line's 3D clip, the slow fills, the generic cone edges)
-  could move to the main RAM the per-area records freed.
+- **Size**: since ANDY took the cold code ("ANDY", above), the bank has
+  room for the hot paths, and ANDY a little more (the build's guards say
+  when either doesn't fit); `dedupe` and `stage_pa` could follow if a
+  trampoline saved and restored ROMSEL's state.
 - **The logic's side**: a build with the logic (`OBJ_LOGIC`, `AREA_GLOBALS`)
   calls `area_enter` after each of its area loads, which builds the
   globals' slots from its records with the rig's parts where it put them.

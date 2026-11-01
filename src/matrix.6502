@@ -20,7 +20,8 @@
 \   matrix_update   the matrix for cam_yaw, cam_pitch, cam_roll, built if
 \                   an angle changed since the last build (and the
 \                   transform's cache then emptied); C set if it was built
-\   matrix_build    the matrix built
+\   andy_matrix_build  the matrix built (matrix_build, which is in ANDY: a
+\                   build is a turn's alone; src/transform.6502's ANDY_CALL)
 \ ***************************************************************************
 
 SECTION ObjWork
@@ -64,7 +65,7 @@ SECTION ObjCode
     LDA cam_pitch : STA mat_angles+1
     LDA cam_roll : STA mat_angles+2
     LDA #1 : STA mat_valid
-    JSR matrix_build
+    JSR andy_matrix_build
     JSR cache_empty
     SEC
     RTS
@@ -116,8 +117,15 @@ MACRO MADD acc
     LDA acc+1 : ADC mp+1 : STA acc+1
 ENDMACRO
 
+ENDSECTION
+SECTION ObjMore
+.andy_matrix_build
+    ANDY_CALL matrix_build
+ENDSECTION
+SECTION ObjAndy
+
 \ matrix_build: M from mat_angles (and the transform's M c no longer for
-\ it: mc_valid).
+\ it: mc_valid). (mmul and mround are the bank's, past its first 4K.)
 .matrix_build
 {
     ZA_ENTRY
@@ -217,6 +225,7 @@ ASSERT 317 * 65 < &8000 AND 4 * 317 = VIEW_FX AND 8 * 317 = VIEW_FY   ; (317 m f
 ASSERT im_fx1 = im_fx0 + 3 AND im_fx2 = im_fx1 + 3 AND im_fy1 = im_fy0 + 3 AND im_fy2 = im_fy1 + 3
 
 ENDSECTION
+ASSERT mmul >= obj_andy_reach AND mround >= obj_andy_reach   ; (matrix_build's, from ANDY)
 
 SECTION ObjConst
 \ Quarter squares for MMUL: n * n DIV 4, n = 0..128.

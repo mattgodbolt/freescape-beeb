@@ -17,7 +17,7 @@
 #                  their walks; one of make check's
 #
 # The check build puts the front end's code where the live disc does (its
-# bank and main RAM), the tables and the
+# bank, ANDY over that bank's first 4K, and main RAM), the tables and the
 # working memory in main RAM and HAZEL, the logic's database bank and the
 # conversion's in sideways RAM, as the engine's build places the same
 # sections where its memory map says.
@@ -54,8 +54,8 @@ define OBJECTS_CHECK_6502
 \ The object pipeline's check build (mk/objects.mk, tools/objectcheck.mjs,
 \ tools/areacheck.mjs). The front end's code where the live disc has it:
 \ ObjCode in its sideways bank (src/defs.6502's OBJ_BANK, from
-\ OBJ_CODE_ORG), and ObjMore in main RAM from a page, the maths' code
-\ first, then the same never-called
+\ OBJ_CODE_ORG), ObjAndy in ANDY over that bank's first 4K, and ObjMore in
+\ main RAM from a page, the maths' code first, then the same never-called
 \ stub as the live disc's (live_shared), so that every byte of the front
 \ end's code is where the free disc has it (the logic's disc's differs by
 \ OBJ_LOGIC); the check's entries in ObjCheck. The working copy and the
@@ -73,6 +73,8 @@ AREA_CONV_BANK = 5
 ASSERT OBJ_BANK <> AREA_DB_BANK AND OBJ_BANK <> AREA_CONV_BANK
 
 SECTION ObjCode, org = OBJ_CODE_ORG, guard = &C000, filename = "OCODE", cmos = TRUE
+ENDSECTION
+SECTION ObjAndy, org = &8000, guard = &9000, filename = "OANDY", cmos = TRUE
 ENDSECTION
 SECTION ObjMore, org = &0E00, guard = &5700, filename = "OMORE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
@@ -119,7 +121,7 @@ ENDMACRO
 .check_matrix
     ZA_ENTRY
     OBJ_IN
-    JMP matrix_build
+    JMP andy_matrix_build
 .check_pass
     ZA_ENTRY
     OBJ_IN
@@ -185,11 +187,17 @@ ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 
+\ (in the bank's order on the live disc: the transform's code and the
+\ object pass's first, below obj_andy_reach, past which is what ANDY's
+\ code may call: src/live.6502's map)
 INCLUDE "../gen/areas.6502"
 INCLUDE "../../src/area.6502"
-INCLUDE "../../src/matrix.6502"
 INCLUDE "../../src/transform.6502"
 INCLUDE "../../src/objects.6502"
+SECTION ObjCode
+.obj_andy_reach
+ENDSECTION
+INCLUDE "../../src/matrix.6502"
 INCLUDE "../../src/clip.6502"
 INCLUDE "../../src/order.6502"
 IF DEFINED(OBJ_LOGIC)
@@ -199,7 +207,11 @@ SECTION ObjWork
 .ix_flags   SKIP IX_MOST
 ENDSECTION
 ENDIF
+SECTION ObjAndy
+.obj_andy_end
+ENDSECTION
 ASSERT LO(fq0) = 0
+ASSERT obj_andy_end <= &9000 AND obj_andy_reach >= &9000
 endef
 export OBJECTS_CHECK_6502
 
@@ -207,7 +219,7 @@ $(OBJ_DIR)/check.6502: mk/objects.mk
 	@mkdir -p $(@D)
 	printf '%s\n' "$$OBJECTS_CHECK_6502" > $@
 
-$(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/OCHECK $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
+$(OBJ_DIR)/OCODE $(OBJ_DIR)/OANDY $(OBJ_DIR)/OAREA $(OBJ_DIR)/OCHECK $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
                                              src/maths.6502 src/project.6502 $(MATHS_GEN)
 	$(ASM) --warn 2 -p $(OBJ_DIR) --symbols $(OBJ_DIR)/symbols.json $<
 

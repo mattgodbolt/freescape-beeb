@@ -82,7 +82,16 @@ ENDIF
 \                tools/mklive.py, LDATA; and the lines' code), the panel's
 \                code and tables (PanelData, PDATA: src/panel.6502), and the
 \                working copy's conversion (AreaConv, ACONV: src/area.6502)
-\   BANK_OBJ     the object pipeline's code (ObjCode)
+\   BANK_OBJ     the object pipeline's code (ObjCode): the transform's and
+\                the object pass's first, below obj_andy_reach, then the
+\                rest, which ANDY's code may call
+\   ANDY         (ROMSEL's bit 7, over BANK_OBJ's first 4K) the object
+\                pipeline's rarely run code (ObjAndy, decision 52: the
+\                lines and points, the planes' own lines, the matrix's
+\                build, the sensors, frac16, the slow fills), which its
+\                code calls through trampolines in ObjMore
+\                (src/transform.6502's ANDY_CALL); the loader puts it in
+\                once the OS is gone (LIVE_LATE)
 \   BANK_RASTER  the rasteriser's row runs, code and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
 \   the maths' tables (the logic's multiplies share their quarter squares)
@@ -119,7 +128,7 @@ ENDIF
 \ The disc (src/loader.6502): this build writes each part's section as a
 \ file (baron -p) and PRINTs where each goes (channel 1, below: LD_PARTS and
 \ LD_LATE); the loader's build packs them into !BOOT and DRILLER, and the
-\ loader unpacks each into its place, HAZEL's once the OS is gone, then
+\ loader unpacks each into its place, HAZEL's and ANDY's once the OS is gone, then
 \ starts this at start.
 
 BANK_DB     = 4                 ; src/logic/vars.6502's LOGIC_BANK
@@ -198,6 +207,8 @@ ASSERT IX_HIDDEN = &60          ; (src/area.6502's: bit 6 invisible, bit 5 destr
 \ before it back.
 SECTION ObjCode, org = OBJ_CODE_ORG, guard = &C000, filename = "OCODE", cmos = TRUE
 ENDSECTION
+SECTION ObjAndy, org = &8000, guard = &9000, filename = "OANDY", cmos = TRUE
+ENDSECTION
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
 SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
@@ -274,12 +285,19 @@ SECTION PanelPack, org = PANEL_LOAD, filename = "PANEL", guard = SCREEN
 ENDSECTION
 PANEL_BOUNCE = RASTER_IN_ORG
 
-\ The records, the pipeline and the rasteriser.
+\ The records, the pipeline and the rasteriser. In the pipeline's bank the
+\ transform's code and the object pass's come first, as nothing ANDY's
+\ code reaches is theirs: from obj_andy_reach on, past the bank's first 4K
+\ (ASSERTed below), ANDY's code may call the rest (src/transform.6502's
+\ ANDY_CALL).
 INCLUDE "../build/gen/areas.6502"
 INCLUDE "area.6502"
-INCLUDE "matrix.6502"
 INCLUDE "transform.6502"
 INCLUDE "objects.6502"
+SECTION ObjCode
+.obj_andy_reach
+ENDSECTION
+INCLUDE "matrix.6502"
 INCLUDE "clip.6502"
 INCLUDE "order.6502"
 INCLUDE "raster.6502"
@@ -1802,6 +1820,9 @@ ENDSECTION
 SECTION LiveData
 .live_data_end
 ENDSECTION
+SECTION ObjAndy
+.obj_andy_end
+ENDSECTION
 SECTION AreaConv
 .area_conv_end
 ENDSECTION
@@ -1833,6 +1854,9 @@ ASSERT PANEL_BOUNCE >= RASTER_IN_ORG AND PANEL_BOUNCE + 256 <= raster_in_end
 ASSERT logic_code_end <= live_data_end
 ASSERT logic_db_code_end <= live_glue_end AND live_glue_end <= LOGIC_DB
 ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
+\ ANDY, over the pipeline's bank's first 4K: what its code reaches there
+\ is past it.
+ASSERT obj_andy_end <= &9000 AND obj_andy_reach >= &9000
 \ Main RAM: RasterState (from a page, so its ALIGN costs nothing), LIVE,
 \ AreaCode, LogicWork, ObjMore, to &3000: never in &3000-&7FFF, which
 \ ACCCON's X switches, as the frame reads them whatever X.
@@ -1856,8 +1880,8 @@ ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_R
 \ this PRINT into its description: every section saved, {file, where,
 \ from, to}, where a sideways bank or -1 (main RAM, nothing paged). The
 \ loader writes LIVE_PARTS while the OS reads them, in this order (LGLUE
-\ over the gap in LOGIC), and LIVE_LATE, HAZEL's and page &0D's, once it's
-\ gone; then it starts this at start. It runs from SCREEN, which
+\ over the gap in LOGIC), and LIVE_LATE, HAZEL's, ANDY's (the MOS's until
+\ then) and page &0D's, once it's gone; then it starts this at start. It runs from SCREEN, which
 \ screen_init clears.
 LIVE_PARTS = {
     {"LOGIC", BANK_DB, &8000, &C000},
@@ -1879,6 +1903,7 @@ LIVE_PARTS = {
 LIVE_LATE = {
     {"HAZEL", -1, &C000, hazel_tables_end},
     {"OTABLE", -1, hazel_tables_end, obj_tables_end},
+    {"OANDY", BANK_OBJ OR ROMSEL_ANDY, &8000, obj_andy_end},
     {"LBOOT", -1, LIVE_BOOT_ORG, live_boot_end}
 }
 PRINT #1, "\ src/live.6502's parts, for src/loader.6502"

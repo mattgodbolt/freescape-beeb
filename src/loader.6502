@@ -130,7 +130,7 @@ FUNCTION ld_stream(parts, data)
 \ A section for each stream (each must hold less than baron's 64K before
 \ it's packed), LD_STREAMS of them at most, and LD_LATE_STREAMS in !BOOT.
 LD_STREAMS      = 8
-LD_LATE_STREAMS = 2
+LD_LATE_STREAMS = 3
 FUNCTION ld_pack0(data) = ld_stream(ld_going(LD_PARTS, 0), data)
 FUNCTION ld_pack1(data) = ld_stream(ld_going(LD_PARTS, 1), data)
 FUNCTION ld_pack2(data) = ld_stream(ld_going(LD_PARTS, 2), data)
@@ -141,6 +141,7 @@ FUNCTION ld_pack6(data) = ld_stream(ld_going(LD_PARTS, 6), data)
 FUNCTION ld_pack7(data) = ld_stream(ld_going(LD_PARTS, 7), data)
 FUNCTION ld_late0(data) = ld_stream(ld_going(LD_LATE, 0), data)
 FUNCTION ld_late1(data) = ld_stream(ld_going(LD_LATE, 1), data)
+FUNCTION ld_late2(data) = ld_stream(ld_going(LD_LATE, 2), data)
 LD_N      = LEN(ld_places(LD_PARTS))
 LD_LATE_N = LEN(ld_places(LD_LATE))
 ASSERT LD_N <= LD_STREAMS AND LD_LATE_N <= LD_LATE_STREAMS
@@ -424,6 +425,11 @@ IF LD_LATE_N > 1
     FOR p = ld_going(LD_LATE, 1) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
     ENDSECTION
 ENDIF
+IF LD_LATE_N > 2
+    SECTION Late2, org = 0, transform = "ld_late2"
+    FOR p = ld_going(LD_LATE, 2) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
     EQUB LD_END
 .ld_end
 ENDSECTION
@@ -504,6 +510,7 @@ FOR i = 0..<LD_LATE_N
         ASSERT s[1] <= &E000 AND ((s[0] >= &C000) OR (s[1] <= &8000 AND ld_clear(s))), "main RAM's or HAZEL's late image can't go there"
     ELSE
         ASSERT (w AND NOT(ROMSEL_ANDY)) < 16 AND s[0] >= &8000 AND s[1] <= &C000, "the late image ", w, " isn't a bank's"
+        ASSERT (w AND ROMSEL_ANDY) = 0 OR s[1] <= &9000, "the late image ", w, " isn't ANDY's"
     ENDIF
 NEXT
 ASSERT NOT(LD_KEEP_OS) OR LEN(LD_LATE) = 0

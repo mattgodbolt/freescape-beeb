@@ -319,12 +319,14 @@ come with it, to see where the cycles go.
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
   with room to share. The renderer reads the database too, as it enters
   an area (`src/area.6502`).
-- Not used yet: ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the
-  paged bank's first 4K), and parts of the OS's pages, free once the
-  engine owns the machine (`docs/research/live.md`, "Room").
+- ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the paged bank's
+  first 4K): the front end's rarely run code, reached through trampolines
+  in main RAM (decision 52, `docs/research/objects.md`, "ANDY").
+- Not used yet: parts of the OS's pages, free once the engine owns the
+  machine (`docs/research/live.md`, "Room").
 - The disc puts it all there: `!BOOT`, the loader (`src/loader.6502`),
   reads the packed parts from one other file a track at a time and unpacks
-  each into its place, HAZEL's and ANDY's once the OS is gone
+  each into its place, HAZEL's, ANDY's and page `&0D`'s once the OS is gone
   (`docs/research/live.md`, "The disc").
 
 The tracks size these as they go. The live disc's map, the whole engine

@@ -37,7 +37,43 @@
 \
 \ The camera's coordinates must be below &8000 (M c's products take them as
 \ signed).
+\
+\ ANDY (decision 52): the front end's rarely run code is in ObjAndy, the
+\ Master's 4K at &8000-&8FFF, which ROMSEL's bit 7 pages over the first 4K
+\ of the front end's bank (src/defs.6502's OBJ_BANK). Code anywhere calls a
+\ routine there through its trampoline in ObjMore (main RAM, which any
+\ paging leaves in view), ANDY_CALL's: ANDY paged in, the routine, ANDY
+\ paged out. So:
+\ - what ANDY's code calls, reads or patches in the bank must be past the
+\   bank's first 4K, which ANDY hides: the bank's code from obj_andy_reach
+\   on (ASSERTed by the build). The builds put this file's code and
+\   src/objects.6502's first in the bank, and nothing of either is reached
+\   from ANDY's code;
+\ - nothing ANDY's code reaches calls a trampoline, which would page ANDY
+\   out under it;
+\ - a routine there takes its inputs in X, Y or memory (the trampoline
+\   clobbers A going in), and gives back X, Y, C and V (and A, by
+\   ANDY_CALL_A's), N and Z clobbered.
+\ tools/objectcheck.mjs fails a view that runs anything in sideways RAM but
+\ the front end's own code: the bank's with the bank paged, ANDY's with
+\ ANDY.
 \ ***************************************************************************
+
+MACRO ANDY_CALL entry
+    LDA #OBJ_BANK OR ROMSEL_ANDY : STA romsel
+    JSR entry
+    LDA #OBJ_BANK : STA romsel
+    RTS
+ENDMACRO
+MACRO ANDY_CALL_A entry
+    LDA #OBJ_BANK OR ROMSEL_ANDY : STA romsel
+    JSR entry
+    PHA
+    LDA #OBJ_BANK : STA romsel
+    PLA
+    RTS
+ENDMACRO
+ASSERT OBJ_BANK < 16 AND ROMSEL_ANDY = &80
 
 VMAX        = 8                     ; vertices an object has, at most (the masks are bytes)
 VALL        = 24                    ; the vertex arrays: the object's, then the clips' (src/clip.6502)
@@ -212,7 +248,8 @@ ENDMACRO
     ZA_AUTO 9, acc
     STY slot
     LDA mat_big : BEQ fast
-    JMP fill_slow_point
+    JSR andy_fill_slow_point            ; (Y kept)
+    JMP store
 .fast
     \ a column at a time, past a zero cell or a zero entry of M (a level
     \ camera's has four)
@@ -253,8 +290,12 @@ ENDMACRO
     ZA_AUTO 3, col
     STY slot
     LDY mat_big : BEQ fast
+    \ the slow fill's point: those cells on that axis and none on the others
+    STZ fill_point.px : STZ fill_point.py : STZ fill_point.pz
+    STA fill_point.p,X : ZA_INDEXEDBY 0..2
     LDY slot
-    JMP fill_slow_edge
+    JSR andy_fill_slow_point            ; (Y kept)
+    JMP fill_point.store
 .fast
     CLC : ADC #64 : STA u64
     LDA mat + 0,X : STA col
@@ -278,13 +319,21 @@ ENDMACRO
 \ An entry of M can be 65 (rounding), and then f64's indices can run off
 \ the table for a cell of 0 or 127; matrix_build sets mat_big for such an
 \ orientation (docs/research/objects.md counts them), whose fills take
-\ these instead: the products by the maths' mul (src/maths.6502), 64 u as
-\ its coordinate.
+\ this instead, in ANDY (it's rare): the products by the maths' mul
+\ (src/maths.6502), 64 u as its coordinate.
 
 ZA_AUTO 2, fs_v                     ; 64 u, the slow fills' coordinate
 
-\ fill_slow_point: fill_point's, slot in Y: a column at a time, each
-\ product by the maths' mul.
+ENDSECTION
+SECTION ObjMore
+.andy_fill_slow_point
+    ANDY_CALL fill_slow_point
+ENDSECTION
+SECTION ObjAndy
+
+\ fill_slow_point: fill_point.acc = M (64 p), p fill_point.p's cells, a
+\ column at a time, each product by the maths' mul; Y (the slot) kept, for
+\ fill_point.store.
 .fill_slow_point
 {
     ZA_AUTO1 slot, k, i
@@ -322,17 +371,11 @@ ZA_AUTO 2, fs_v                     ; 64 u, the slow fills' coordinate
     CMP #9 : BCC row
     INC k : LDA k : CMP #3 : BNE column
     LDY slot
-    JMP fill_point.store
+    RTS
 }
 
-\ fill_slow_edge: fill_edge's, A cells along axis X, slot in Y: the point
-\ with those cells on that axis and none on the others.
-.fill_slow_edge
-{
-    STZ fill_point.px : STZ fill_point.py : STZ fill_point.pz
-    STA fill_point.p,X : ZA_INDEXEDBY 0..2
-    JMP fill_slow_point
-}
+ENDSECTION
+SECTION ObjCode
 
 \ transform_fill: object X's cache, from fresh slots.
 .transform_fill

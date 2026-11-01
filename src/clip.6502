@@ -209,13 +209,22 @@ SECTION ObjCode
 \ ===========================================================================
 \ Crossings (the model's crossing_t and lerp).
 
+ENDSECTION
+SECTION ObjMore
+.andy_frac16
+    ANDY_CALL frac16
+ENDSECTION
+SECTION ObjAndy
+
 \ frac16: ft = the model's crossing_t, from fp (4 bytes, at least 0) and fd
 \ (4 bytes, fp less): fp and fd shifted right together by s = bitlen(fd) -
 \ 16 if positive, so that fd fits 16 bits (whole bytes, then s MOD 8 bits
 \ right, or 8 less that left and a byte down), then floor(2^16 fp / fd) by
 \ sixteen steps of a long division; then patched into lerp's
 \ products. (When the shifts leave fp = fd, every step takes and ft is
-\ &FFFF, the model's clamp.)
+\ &FFFF, the model's clamp.) In ANDY: since the side crossings, the joins
+\ and the lines from images it's rare (the cone's general crossings, by
+\ andy_frac16, and a line's 3D clip).
 .frac16
 {
     ZA_AUTO 4, fp
@@ -288,6 +297,9 @@ FR_SHIFTS = {divide, r1, r2, r3, r4, l3, l2, l1}
 .fr_shift
     EQUW divide, r1, r2, r3, r4, l3, l2, l1
 }
+
+ENDSECTION
+SECTION ObjCode
 
 \ lerp: lr (3 bytes) = round half up of ld (32-bit signed, its magnitude
 \ within 24 bits) times frac16.ft / 2^16, modulo 2^24 (the model's lerp,
@@ -400,6 +412,11 @@ MACRO QUAD_OFF l, h, tab
     LDA l,X : CLC : ADC tab,X : STA l,X
     LDA h,X : ADC tab+4,X : STA h,X
 ENDMACRO
+
+\ (The lines' and points' code is in ANDY, as rare as they are: below,
+\ draw_segment's.)
+ENDSECTION
+SECTION ObjAndy
 
 \ line_quad: the line from vertex 0 to vertex 1 as the polygon a one-pixel
 \ line covers (the model's line_quad): a, b, b, a, moved half a pixel each
@@ -1040,7 +1057,17 @@ ENDMACRO
 \ the projection can't take, a point isn't drawn and a line is first
 \ clipped in 3D (seg_clip); projected, wholly beyond one of the view's edges
 \ it isn't drawn; else widened to the quad a one-pixel line covers, or a
-\ pixel's square, and clipped to the view.
+\ pixel's square, and clipped to the view. In ANDY, by andy_draw_segment:
+\ Driller's lines and points are few. What it reaches in the bank
+\ (vertex_shared, drawable, commit, lerp, dedupe_stage) is past its first
+\ 4K (src/live.6502's map), and calls no trampoline.
+
+ENDSECTION
+SECTION ObjMore
+.andy_draw_segment
+    ANDY_CALL draw_segment
+ENDSECTION
+SECTION ObjAndy
 
 \ seg_f: sf (32-bit) = the plane seg_clip.plane's f at vertex X (the
 \ model's SEGMENT_PLANES: z - ZNEAR, z + x, z - x, z - 2y, z + 2y). X is
@@ -1217,6 +1244,9 @@ ASSERT VMAX + 5 <= VALL                 ; (a new vertex a plane at most)
     RTS
 }
 
+ENDSECTION
+SECTION ObjCode
+
 \ ===========================================================================
 \ The cone (the model's clip.py, "The cone", and render.py's edge_lines): a
 \ face the projection can't take whole is the view's rectangle clipped, in
@@ -1245,8 +1275,11 @@ ENDMACRO
 }
 ZA_AUTO1 cq_lo
 
+ENDSECTION
+SECTION ObjAndy
+
 \ smul16: sm_p (4 bytes) = sm_a times sm_b, each signed 16-bit (umul16 on
-\ their sizes).
+\ their sizes). (In ANDY, for edge_normal's.)
 .smul16
 {
     ZA_AUTO1 neg
@@ -1280,6 +1313,9 @@ ZA_AUTO1 cq_lo
 ZA_AUTO 2, sm_a
 ZA_AUTO 2, sm_b
 ZA_AUTO 4, sm_p
+
+ENDSECTION
+SECTION ObjCode
 
 OC_BEHIND = 32
 
@@ -1350,6 +1386,26 @@ MACRO CN_DIFF k
     LDA vx2 + 3 * VALL * k,Y : SBC vx2 + 3 * VALL * k,X : STA cn_v + 3 * k + 2
 ENDMACRO
 
+\ An edge's plane's own line (edge_plane: edge_normal, then edge_line), for
+\ the edges whose lines the images can't give, is in ANDY: such edges are
+\ rare since the lines from images. What it reaches in the bank (edge_axis,
+\ cone_qs, which it patches, umul16, im_w and image_line's tail) is past its
+\ first 4K (src/live.6502's map), and calls no trampoline.
+ENDSECTION
+SECTION ObjMore
+.andy_edge_plane
+    ANDY_CALL_A edge_plane
+ENDSECTION
+SECTION ObjAndy
+
+\ edge_plane: line slot X = the plane through the eye and the edge en_vi ->
+\ en_vk (edge_normal, edge_line): A = how many corners are outside it.
+.edge_plane
+    PHX
+    JSR edge_normal
+    PLX
+    JMP edge_line
+
 \ en_mul: en_p (4 bytes) = the coordinate at vx0 + Y (24-bit signed) times
 \ the byte en_ca, which QS_SET patched into cone_qs: the raw bytes'
 \ products, and en_ca off the top byte for a negative coordinate (whose top
@@ -1418,6 +1474,9 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
 ZA_AUTO1 en_vi, en_vk                   ; an edge's vertices, from en_vi to en_vk
 ZA_AUTO1 en_axis, en_down              ; ... a box's: its axis, and &FF going down it
 
+ENDSECTION
+SECTION ObjCode
+
 \ edge_axis: for the edge from vertex en_vi to vertex en_vk of the object
 \ being drawn, a box's (C clear): the axis it runs along (en_axis), and
 \ en_down &FF going down it (else 0); C set for a generic object's.
@@ -1465,6 +1524,9 @@ ZA_AUTO1 en_axis, en_down              ; ... a box's: its axis, and &FF going do
     EQUB 0, 0, 1, 1                     ; ... and dv
 }
 ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2
+
+ENDSECTION
+SECTION ObjAndy
 
 \ edge_normal: en_n (Nx, Ny, Nz, 32-bit each) = the plane through the eye
 \ and the edge from vertex en_vi to vertex en_vk of the object being drawn:
@@ -1821,6 +1883,9 @@ ZA_AUTO1 el_r
 ASSERT CLIP_W = 2 * PROJ_XC AND CLIP_H = 2 * PROJ_YC   ; (C = -R - (A W + B H) / 2)
 ASSERT 2 * PROJ_XC = 128 * 13 AND PROJ_YC = 64 * 13 AND 2 * VIEW_FX = 8 * 317
 ASSERT LINE_BITS = 13                   ; (|N'| at most 2^13: 13 |N'| fits 24 bits, 317 |N'| 23, and A 16)
+
+ENDSECTION
+SECTION ObjCode
 
 \ ===========================================================================
 \ The cone's lines from images (the model's render._image_line and
@@ -2538,7 +2603,7 @@ ENDMACRO
     SBC cf2,Y : STA frac16.fd+2
     LDA cf3,X : STA frac16.fp+3
     SBC cf3,Y : STA frac16.fd+3
-    JSR frac16
+    JSR andy_frac16
     CC_AXIS pa_xl, pa_xh
     CC_AXIS pa_yl, pa_yh
     RTS
@@ -2713,9 +2778,8 @@ ENDMACRO
     LDA fp_idx,X : STA en_vi
     LDX nl
     JSR image_edge : BCC made_line      ; (from the images, if it can)
-    JSR edge_normal
     LDX nl
-    JSR edge_line
+    JSR andy_edge_plane                 ; (else the plane's own)
 .made_line
     CMP #4 : BEQ none                   ; (every corner out)
     CMP #0 : BEQ passed                 ; (every corner in: it cuts nothing)
@@ -3001,10 +3065,15 @@ ZA_AUTO1 band_t
 BAND_MID = 1 << (16 - 1 - BAND_YS - 8)
 ASSERT BAND_XS >= BAND_YS AND 14 + BAND_YS >= 16
 
-\ band_test: BAND_TEST, as a routine.
+\ band_test: BAND_TEST, as a routine, for draw_segment's (in ANDY; the
+\ band's tables are the bank's, past its first 4K).
+ENDSECTION
+SECTION ObjAndy
 .band_test
     BAND_TEST
     RTS
+ENDSECTION
+SECTION ObjCode
 
 \ vertex_shared: vertex X projected (the maths' project) into vsx and vsy,
 \ its outcode into voc, and vs_last made X: by project_y if it has the last
@@ -3374,7 +3443,7 @@ ENDMACRO
     BRA listed
 .each3d
     LSR mask : BCC next3d
-    LDX face : JSR draw_segment
+    LDX face : JSR andy_draw_segment
 .next3d
     INC face
     LDA mask : BNE each3d
@@ -3422,3 +3491,11 @@ band_ym2 = P% - BAND_I0
     EQUB WHERE(BAND_KY <= 15, &FF, WHERE(BAND_KY <= 22, (&FF << (BAND_KY - 15)) AND &FF, 0))
 
 ENDSECTION
+\ What ANDY's code reaches in the bank, which must be past the bank's first
+\ 4K, which ANDY hides (src/transform.6502's ANDY_CALL; obj_andy_reach is
+\ the builds')
+ASSERT umul8 >= obj_andy_reach AND umul16 >= obj_andy_reach AND lerp >= obj_andy_reach
+ASSERT cone_qs >= obj_andy_reach AND edge_axis >= obj_andy_reach AND im_w >= obj_andy_reach
+ASSERT image_line >= obj_andy_reach AND vertex_shared >= obj_andy_reach AND drawable >= obj_andy_reach
+ASSERT commit >= obj_andy_reach AND dedupe_stage >= obj_andy_reach AND dedupe >= obj_andy_reach
+ASSERT stage_pa >= obj_andy_reach AND bit8 >= obj_andy_reach AND band_xb1 + BAND_I0 >= obj_andy_reach

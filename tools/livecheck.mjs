@@ -277,7 +277,9 @@ let clockChecked = 0;
 let afterClock = null; // the span whose clock_to is running
 
 cpu.debugInstruction.add((addr, opcode) => {
-    const bank = cpu.romsel & 15;
+    // the bank paged at a hooked address, unless ANDY (ROMSEL's bit 7, over
+    // a bank's first 4K) is there instead: none then
+    const bank = cpu.isBankPagedAt(cpu.romsel & 15, addr) ? cpu.romsel & 15 : -1;
     if (opcode === JSR && word(addr + 1) === FB_BEGIN) calling = true;
     if (addr === LIVE_LOOP) {
         // (a loop that drew nothing leaves its frame unbegun)

@@ -181,16 +181,24 @@ OP_SLOT = 7                         ; (the CMP's operand at 4, the branch at 5)
     LDX obj
     JMP next
 .sensor
-    JSR sensor_watching
+    JSR andy_sensor_watching
     BCC restore
     LDA #1 : STA mask : STA vmask
     BRA candidate
 }
 
+ENDSECTION
+SECTION ObjMore
+.andy_sensor_watching
+    ANDY_CALL sensor_watching
+ENDSECTION
+SECTION ObjAndy
+
 \ sensor_watching: C set if sensor slot X is watching the camera: it's on a
 \ side the sensor's axes watch (bits as the model's sides(): 2k below the
 \ corner on axis k, 2k + 1 above it), and the Manhattan distance from the
-\ corner (64 L) to the camera is under its range. X is kept.
+\ corner (64 L) to the camera is under its range. X is kept. (In ANDY: a
+\ sensor is a candidate in few views.)
 .sensor_watching
 {
     ZA_AUTO1 sides
@@ -233,6 +241,9 @@ OP_SLOT = 7                         ; (the CMP's operand at 4, the branch at 5)
     CLC
     RTS
 }
+
+ENDSECTION
+SECTION ObjCode
 
 \ plane_test: C set if the camera sees face X, a slanted plane: the reduced
 \ normal n's two components on axes a and b, and the plane's point 64 v on
