@@ -442,7 +442,7 @@ live`), stages 1-7 went from a median 7.25 fields a frame to 6.22, walks
 
 - **Kept**: one pass over each object's vertices (a band test by bit
   lengths, then each vertex of a face projected whole projected once, with
-  the shared entries taking about half: 23 full, 7 by Z and 16 by X and Z
+  the shared entries taking about half: 22 full, 7 by Z and 16 by X and Z
   in a median step's view); faces projected whole taken or dropped by
   their outcodes, the 2D clip only for those crossing the edges; the sort's
   compares remembered by pair of slots while the camera's cells hold.
