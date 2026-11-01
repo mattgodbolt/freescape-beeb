@@ -13,6 +13,7 @@
 // --db is the logic's database bank (LOGIC), which area_enter builds each
 // area's working copy from (tools/areacheck.mjs checks that). It checks:
 //   - stage 1: every matrix of cases.json's (matrix_build);
+//   - stage 6's crossings alone: every one of cases.json's (clip_cut);
 //   - for each view, through objects_frame:
 //     - stage 2: the candidates, their seen faces and the vertices those use;
 //     - stage 3: each candidate's camera-space vertices, read as
@@ -250,6 +251,19 @@ for (const [yaw, pitch, roll, want] of cases.matrices) {
     }
 }
 console.log(`stage 1: ${cases.matrices.length} matrices, ${matrixBad} wrong`);
+
+// --- The 2D clip's crossings, alone (clip_cut): edge cases no view need reach.
+let cutBad = 0;
+for (const [fp, fq, po, qo, want] of cases.crossings ?? []) {
+    [fp, fq, po, qo].forEach((v, k) => m.pokew(S("cut_args") + 2 * k, v & 0xffff));
+    await m.call(S("check_cut"));
+    const got = s16(m.peek(S("cut_args") + 8), m.peek(S("cut_args") + 9));
+    if (got !== want) {
+        cutBad++;
+        fail(`crossing fp ${fp} fq ${fq} po ${po} qo ${qo}: ${got} want ${want}`);
+    }
+}
+console.log(`stage 6: ${(cases.crossings ?? []).length} crossings of the 2D clip, ${cutBad} wrong`);
 
 // --- The views.
 const full = has("of_transformed");

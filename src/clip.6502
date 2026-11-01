@@ -467,19 +467,104 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
     EQUB LO(-HALF), LO(HALF), LO(HALF), LO(-HALF)
     EQUB HI(-HALF), HI(HALF), HI(HALF), HI(-HALF)
 
+\ The 2D clip is in ObjMore (main RAM, which any bank paged sees), its four
+\ sides' passes each written out, with its crossings (clip_cut) and their
+\ table; lerp and dedupe are ObjCode's.
+ENDSECTION
+SECTION ObjMore
+
 \ clip_cut: r = the crossing's other coordinate, P's + lerp(Q's - P's) by
-\ t from fp >= 0 at P and fq < 0 at Q (16-bit signed each, so fp - fq fits
-\ 16 bits unsigned).
+\ the 2D clip's fraction (the model's crossing_r), from fp >= 0 at P and fq
+\ < 0 at Q (16-bit signed each, so d = fp - fq fits 16 bits unsigned): d's
+\ nine bits from its top one, dn = d >> s (s = bitlen(d) - 9, a shift left
+\ when it's negative), R = 256 + clip_m[dn - 256], and t = fp R >> k, k = s
+\ + 1, at most &FFFF, then patched into lerp's products.
 .clip_cut
 {
     ZA_AUTO2 fp, fq, po, qo, r
-    LDA fp : STA frac16.fp
-    SEC : SBC fq : STA frac16.fd
-    LDA fp+1 : STA frac16.fp+1
-    SBC fq+1 : STA frac16.fd+1
-    STZ frac16.fp+2 : STZ frac16.fp+3
-    STZ frac16.fd+2 : STZ frac16.fd+3
-    JSR frac16
+    ZA_AUTO2 d
+    ZA_AUTO 4, pr
+    ZA_AUTO1 k
+    LDA fp : SEC : SBC fq : STA d
+    LDA fp+1 : SBC fq+1 : STA d+1 : BEQ small
+    \ d >= 256: k = bitlen(d's high byte), 1 to 8, and dn's low byte is d's
+    \ low byte with s = k - 1 of its high byte's bits shifted in from above
+    TAY : LDA proj_bl2,Y : LSR A : STA k
+    TAY : DEY
+    LDA d
+    CPY #0 : BEQ indexed
+.right
+    LSR d+1 : ROR A
+    DEY : BNE right
+    BRA indexed
+.small
+    \ d < 256: k = bitlen(d) - 8, -7 to 0, and dn = d << (1 - k), its top
+    \ bit (the implicit one) shifted out
+    LDY d : LDA proj_bl2,Y : LSR A
+    SEC : SBC #8 : STA k
+    EOR #&FF : TAY : INY : INY
+    LDA d
+.left
+    ASL A
+    DEY : BNE left
+.indexed
+    \ fp R = fp M + 256 fp, M = clip_m[dn - 256], by cone_qs's products
+    TAY : LDA clip_m,Y
+    STA cone_qs.a+1 : STA cone_qs.c+1   ; (QS_SET's)
+    EOR #&FF
+    STA cone_qs.b+1 : STA cone_qs.d+1
+    LDX fp : JSR cone_qs
+    STA pr+1
+    LDA cq_lo : STA pr
+    LDX fp+1 : JSR cone_qs
+    STA pr+2
+    STZ pr+3
+    LDA cq_lo : CLC : ADC pr+1 : STA pr+1
+    BCC carried
+    INC pr+2                            ; (hi(fh M) < 255: no carry on)
+.carried
+    LDA pr+1 : CLC : ADC fp : STA pr+1
+    LDA pr+2 : ADC fp+1 : STA pr+2      ; (fp < 2^15, R < 2^9: no carry on)
+    \ t = fp R >> k: k from 4 up, left 8 - k and a byte down; 1 to 3,
+    \ right k; at most 0, left -k
+    LDA k : BMI up
+    BEQ shifted
+    CMP #4 : BCS byte
+    TAY
+.down
+    LSR pr+3 : ROR pr+2 : ROR pr+1 : ROR pr
+    DEY : BNE down
+    BRA shifted
+.byte
+    LDA #8 : SEC : SBC k : TAY          ; 8 - k, 0 to 4
+    BEQ moved
+.across
+    ASL pr : ROL pr+1 : ROL pr+2 : ROL pr+3
+    DEY : BNE across
+.moved
+    LDA pr+1 : STA pr
+    LDA pr+2 : STA pr+1
+    LDA pr+3 : STA pr+2
+    STZ pr+3
+    BRA shifted
+.up
+    EOR #&FF : TAY : INY                ; -k, 1 to 7
+.lift
+    ASL pr : ROL pr+1 : ROL pr+2 : ROL pr+3
+    DEY : BNE lift
+.shifted
+    \ at most &FFFF, then into lerp's products (lerp.t0, lerp.t1)
+    LDA pr+2 : ORA pr+3 : BEQ fits
+    LDA #&FF : STA pr : STA pr+1
+.fits
+    LDA pr
+    STA lerp.a1+1 : STA lerp.a3+1
+    EOR #&FF
+    STA lerp.a2+1 : STA lerp.a4+1
+    LDA pr+1
+    STA lerp.b1+1 : STA lerp.b3+1
+    EOR #&FF
+    STA lerp.b2+1 : STA lerp.b4+1
     \ Q's - P's, 17 bits signed, as lerp's 32
     LDA qo : SEC : SBC po : STA lerp.ld
     LDA qo+1 : SBC po+1 : STA lerp.ld+1
@@ -487,19 +572,18 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
     LDA #0 : BVC no_overflow
     LDA #&FF
 .no_overflow
-    EOR lerp.ld+1 : ASL A           ; C = the true sign
+    EOR lerp.ld+1 : ASL A               ; C = the true sign
     SEXT : STA lerp.ld+2 : STA lerp.ld+3
     JSR lerp
     LDA lerp.lr : CLC : ADC po : STA r
     LDA lerp.lr+1 : ADC po+1 : STA r+1
     RTS
 }
+\ the 2D clip's reciprocals, less 256 (tools/model/maths.py's CLIP_M)
+.clip_m
+    EQUB CLIP_M
+ASSERT CLIP_RBITS = 9 AND LEN(CLIP_M) = 256
 
-\ The 2D clip is in ObjMore (main RAM, which any bank paged sees), its four
-\ sides' passes each written out; its arithmetic (clip_cut, frac16, lerp)
-\ and dedupe are ObjCode's.
-ENDSECTION
-SECTION ObjMore
 
 \ CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below: one side of the view's
 \ rectangle (the model's _clip_edge), from the polygon's half of the pa and
@@ -2643,6 +2727,7 @@ VP_CUBOID = 0 : VP_RECT = 8 : VP_GENERIC = 20
     EQUB 0, 1, 2, 3, 4, 5, 6, 7         ; anything else
 ASSERT VMAX = 8
 ASSERT CONE                             ; (the model's render.CONE: the 6502 has only it)
+ASSERT BEHIND_EDGES AND FRONT_FIRST AND SIDE_CROSSINGS AND JOINS AND RECIP_2D   ; (and these)
 \ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
 \ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
 \ bytes and the mask of the bits from k + 1 up.

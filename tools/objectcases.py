@@ -31,7 +31,9 @@ and the faces' colours the followed version's (render.recolour), as
 render() has them.
 
 Also the matrices: every yaw at every pitch (roll 0), every roll at a few
-of those, and random triples.
+of those, and random triples; and the 2D clip's crossings (clip_cut, the
+model's crossing_r and lerp) at every bit length of the ends' distance, at
+its ends, and at random.
 """
 import json
 import pathlib
@@ -184,6 +186,32 @@ def cameras(db, layout, quick=False):
     return out
 
 
+def crossings(quick=False):
+    """[fp, fq, po, qo, r]: the 2D clip's crossing from P, fp >= 0 inside,
+    to Q, fq < 0 outside, on the other axis from po to qo: r as clip2d
+    makes it (16-bit signed each, as the guard band keeps them)."""
+    rng = random.Random(37)
+    out = []
+
+    def add(fp, fq):
+        po = rng.randint(-21000, 21000)
+        qo = rng.randint(-21000, 21000)
+        t = clip.crossing_r(fp, fq) if clip.RECIP_2D else clip.crossing_t(fp, fq)
+        out.append([fp, fq, po, qo, clip.lerp(po, qo, t)])
+
+    for bits in range(1, 17):
+        lo, hi = 1 << (bits - 1), min((1 << bits) - 1, 65535)
+        for d in (lo, hi, rng.randint(lo, hi)):
+            for fp in (0, d - 1, d // 2, rng.randint(0, d - 1)):
+                fp = min(fp, 32767)
+                if d - fp <= 32768:
+                    add(fp, fp - d)
+    for _ in range(200 if quick else 3000):
+        fp, fq = rng.randint(0, 32767), -rng.randint(1, 32768)
+        add(fp, fq)
+    return out
+
+
 def matrices(db, quick=False):
     rng = random.Random(64)
     triples = []
@@ -215,7 +243,8 @@ def main(argv):
         layout = json.load(f)
     check_render(db)
     views = [case(db, layout, a, area, c, name) for a, area, c, name in cameras(db, layout, quick)]
-    result = {"parts": parts.USING, "matrices": matrices(db, quick), "views": views}
+    result = {"parts": parts.USING, "matrices": matrices(db, quick), "crossings": crossings(quick),
+              "views": views}
     with open(argv[3], "w") as f:
         json.dump(result, f, separators=(",", ":"))
     print("objectcases: %d views, %d matrices" % (len(views), len(result["matrices"])))

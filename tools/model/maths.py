@@ -144,6 +144,13 @@ PROJ_M = [r - 256 for r, k in _RK]
 PROJ_T = _ZI0 + [k for r, k in _RK].index(0)
 assert all((k == 0) == (_ZI0 + i >= PROJ_T) for i, (r, k) in enumerate(_RK))
 
+# The 2D clip's reciprocal (clip.crossing_r): for d normalised to nine bits,
+# dn = 256..511, R = 256 + CLIP_M[dn - 256] = 2^17 / (dn + 1/2), rounded.
+CLIP_RBITS = 9
+CLIP_M = [round(Fraction(1 << (2 * CLIP_RBITS - 1)) / (dn + Fraction(1, 2))) - 256
+          for dn in range(1 << (CLIP_RBITS - 1), 1 << CLIP_RBITS)]
+assert all(0 <= m < 256 for m in CLIP_M)
+
 
 def _shr(v, k):
     return v >> k if k >= 0 else v << -k

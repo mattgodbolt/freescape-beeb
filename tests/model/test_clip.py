@@ -71,6 +71,19 @@ class Crossings(unittest.TestCase):
             exact = (fp << clip.T_BITS) // (fp - fq)
             self.assertLessEqual(abs(t - exact), 2)
 
+    def test_reciprocal_fraction(self):
+        """The 2D clip's fraction by a reciprocal: within 2^-8 of the exact
+        one, and every d's nine bits in the table."""
+        self.assertEqual(clip.crossing_r(0, -5), 0)
+        rng = random.Random(29)
+        for _ in range(20000):
+            d = rng.randint(1, (1 << 16) - 1)
+            fp = rng.randint(0, d - 1)
+            t = clip.crossing_r(fp, fp - d)
+            self.assertTrue(0 <= t < 1 << clip.T_BITS)
+            exact = (fp << clip.T_BITS) / d
+            self.assertLessEqual(abs(t - exact), exact / 256 + 1)
+
     def test_lerp_rounds_half_up(self):
         h = 1 << (clip.T_BITS - 1)
         self.assertEqual(clip.lerp(0, 1, h), 1)

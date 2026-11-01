@@ -28,7 +28,12 @@ up. One division a crossing instead of one a coordinate, and taken from
 the inside end, so the two faces that share an edge cut it at the same
 point.
 """
+from tools.model import maths
 from tools.model.view import FX, FY, SUB, VIEW_H, VIEW_W, XC, YC, ZNEAR
+
+# The 2D clip's crossings by a reciprocal (crossing_r); off, by
+# crossing_t's division, as the cone's and a line's 3D clip's still are.
+RECIP_2D = True
 
 NEAR, LEFT, RIGHT, TOP, BOTTOM = 1, 2, 4, 8, 16
 assert FY == 2 * FX                 # (the cone's lines)
@@ -59,6 +64,24 @@ def crossing_t(fp, fq):
     d = fp - fq
     s = max(0, d.bit_length() - T_BITS)
     return min(((fp >> s) << T_BITS) // (d >> s), (1 << T_BITS) - 1)
+
+
+def crossing_r(fp, fq):
+    """The 2D clip's crossing fraction (RECIP_2D), from its inside end (fp
+    >= 0) to its outside end (fq < 0), by a reciprocal rather than a
+    division: d = fp - fq, normalised to nine bits dn = d >> s (s =
+    bitlen(d) - 9; a shift left when negative), R = 256 + maths.CLIP_M[dn -
+    256], about 2^17 / d's nine bits, and t = fp R >> (s + 1), at most
+    2^T_BITS - 1. Within about 2^-8 of crossing_t's fraction, and still from
+    the inside end, so two faces sharing an edge cut it at the same point."""
+    assert fp >= 0 > fq
+    d = fp - fq                 # (the 6502's within 16 bits: the guard band)
+    s = d.bit_length() - maths.CLIP_RBITS
+    dn = d >> s if s >= 0 else d << -s
+    r = 256 + maths.CLIP_M[dn - 256]
+    k = s + 1
+    t = (fp * r) >> k if k >= 0 else (fp * r) << -k
+    return min(t, (1 << T_BITS) - 1)
 
 
 def lerp(p, q, t):
@@ -209,7 +232,7 @@ def _clip_edge(poly, axis, bound, keep_below):
     def cut(p, q, fp, fq):
         c = [0, 0]
         c[axis] = bound
-        c[other] = lerp(p[other], q[other], crossing_t(fp, fq))
+        c[other] = lerp(p[other], q[other], (crossing_r if RECIP_2D else crossing_t)(fp, fq))
         return tuple(c)
 
     out = []

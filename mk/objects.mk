@@ -98,6 +98,26 @@ ENDMACRO
     JSR objects_frame
     HAZEL_OUT
     RTS
+\ check_cut: the 2D clip's crossing (clip_cut) from fp, fq, po and qo at
+\ cut_args (the harness's), r after them.
+.check_cut
+    ZA_ENTRY
+    HAZEL_IN
+    LDA cut_args : STA clip_cut.fp
+    LDA cut_args+1 : STA clip_cut.fp+1
+    LDA cut_args+2 : STA clip_cut.fq
+    LDA cut_args+3 : STA clip_cut.fq+1
+    LDA cut_args+4 : STA clip_cut.po
+    LDA cut_args+5 : STA clip_cut.po+1
+    LDA cut_args+6 : STA clip_cut.qo
+    LDA cut_args+7 : STA clip_cut.qo+1
+    JSR clip_cut
+    LDA clip_cut.r : STA cut_args+8
+    LDA clip_cut.r+1 : STA cut_args+9
+    HAZEL_OUT
+    RTS
+.cut_args
+    SKIP 10
 \ check_shared: never called by the check; it reaches the projection's
 \ shared-coordinate entries, as a caller would, after project.
 .check_shared
@@ -119,11 +139,11 @@ ENDSECTION
 \ area_init and area_enter page the banks, so their code is never in one.
 SECTION AreaCode, org = &5000, guard = &5100, filename = "OAREA", cmos = TRUE
 ENDSECTION
-SECTION ObjConst, org = &5100, guard = &5800, filename = "OCONST"
+SECTION ObjConst, org = &5100, guard = &5400, filename = "OCONST"
 ENDSECTION
-SECTION ObjArea, org = &5800, guard = &6200, virtual = TRUE
+SECTION ObjArea, org = &5400, guard = &5E00, virtual = TRUE
 ENDSECTION
-SECTION ObjWork, org = &6200, guard = &6C00, virtual = TRUE
+SECTION ObjWork, org = &5E00, guard = &6800, virtual = TRUE
 ENDSECTION
 SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
@@ -132,12 +152,12 @@ SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
 SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
 ENDSECTION
-SECTION ObjOut, org = &6C00, guard = &7200, virtual = TRUE
+SECTION ObjOut, org = &6800, guard = &6E00, virtual = TRUE
 ENDSECTION
-SECTION ObjMemo, org = &7200, guard = &7800, virtual = TRUE
+SECTION ObjMemo, org = &6E00, guard = &7400, virtual = TRUE
 ENDSECTION
 \ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
-SECTION ObjMore, org = &7800, guard = &8000, filename = "OMORE", cmos = TRUE
+SECTION ObjMore, org = &7400, guard = &8000, filename = "OMORE", cmos = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
