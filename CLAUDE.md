@@ -88,6 +88,14 @@ includes.)
 
 (Add what bites, as it bites.)
 
+- **Agents in worktrees (under `.claude/worktrees/`): never name a path
+  under `.claude/` in a shell command.** Claude Code guards that directory,
+  so the command stops for Matt's permission, often on their phone
+  overnight. Run from the worktree with relative paths; keep known-good
+  versions with git (commit, stash, `git show`), not `cp`; one plain
+  command a call (`make`, `node tools/...`, `.venv/bin/python -I ...`), no
+  `;`/`&&` chains, redirects or `tail`.
+
 - A local label inside `{}` silently shadows a global of the same name
   (`.keys` hid `keys`).
 - Anything that touches the front end's data at main RAM `&3000` up to
