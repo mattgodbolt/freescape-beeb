@@ -5,7 +5,7 @@ the background, and the view's bytes. The model (`tools/model/raster.py`,
 `writer.py`) is the specification; the 6502 (`src/raster.6502`,
 `src/writer.6502`) matches it byte for byte, checked by `make raster`
 (`tools/rastercheck.mjs`). Written 2026-10-31 and revised the same day for
-the restructure and for three optimisation rounds after it (the rounds
+the restructure and for four optimisation rounds after it (the rounds
 below); every figure was measured that day, as each section says, in
 headless jsbeeb (Master) through `tools/rastercheck.mjs`'s
 instruction-level profile, unless it says otherwise.
@@ -203,13 +203,15 @@ that overflowed before (330 and 1,040).
   span buffer must give the brute force's image with the exact edges; then
   every edge's DDA must be within a pixel of the exact boundary on every
   line it crosses, and cross the same lines.
-- The 6502 against the model (with the DDA), byte for byte, on 149 scenes
+- The 6502 against the model (with the DDA), byte for byte, on 150 scenes
   (random convex polygons, Driller-like boxes, and the edge cases the brief
-  lists, one of them with 256 vertices so a face's walk wraps round) with
-  the view first set to each expected byte's complement, so every byte
-  must be written, and as many writes, shared bytes (the view's bytes
-  written from outside the row runs) and runs entered (calls to `put_go`)
-  as the model counts; nothing else of either screen may change, and
+  lists, one of them with 256 vertices so a face's walk wraps round, one
+  whose pools run out in a stretch) with the view first set to each
+  expected byte's complement, so every byte must be written, and as many
+  writes, shared bytes (the view's bytes written from outside the row runs)
+  and runs entered (calls to `put_go`) as the model counts, and as many
+  lines left open as the background begins (`nopen`, by which the faces
+  stop) as the model has; nothing else of either screen may change, and
   nothing outside the rasteriser's memory may be written. The frame's own
   work (the lines' heads, the vertices' lines, the pools) is poisoned
   before every frame. Scenes alternate the screens.
@@ -241,6 +243,15 @@ that overflowed before (330 and 1,040).
   strengthened: the walk's wrap (the 256-vertex scene), node 0's start (the
   poisoned work), and the background's records (the held frames' writes).
   Driller's views alone miss the wrap, the horizon's split and the records.
+- Mutation testing of round 4's stretch (2026-10-31, the same way, on the
+  scenes and Driller's views): a whole line not counted full, a line with
+  a face taken as fresh, no plant or no `row_setup` at a new character row,
+  the pool's room not checked, the kinds' bits swapped, the stretch taken
+  with one chain sloping, the middle kind's halves swapped. All eight are
+  caught; two only once the check was strengthened: the lines left open
+  (the first, whose image is the same, as only the early stop is lost) and
+  the scene whose pools run out in a stretch (the room), which Driller's
+  views never do.
 - Driller's own entrance views (65, through the whole-view model's render)
   found a bug every synthetic scene had missed: taking out a line's first
   gap branched on the flags of `LDY r_y`, so on line 0 alone a span stopped
@@ -282,6 +293,8 @@ to them after it (RMS error 5-6% each):
 | Round 1, edges: each vertex's line once, absolute vertex indices, X0's high byte by table, the gradient's shift by a jump, the offset by the product; pools of 127 | 119,915 | 211,198 | 346,036 | 74.4 | 82.1 | 230.0 | 2.0 | 599.6 |
 | Round 2, runs: entered inline through `put_go`, shared bytes inline, X the line on entry, the empty-span test only where one can reach; the background from the pool's fields | 111,202 | 197,745 | 325,017 | 40.0 | 71.1 | 218.0 | 1.8 | 610.4 |
 | Round 3: faces whose lines are all full skipped before their edges; the offset's own products; rows, smaller things | 109,526 | 189,141 | 319,467 | 28.1 | 59.1 | 228.9 | 2.0 | 527.4 |
+| The same, measured again (track S, before round 4) | 109,505 | 189,119 | 319,505 | 27.5 | 58.7 | 229.7 | 1.9 | 526.4 |
+| Round 4: the stretch (fresh lines under vertical chains) | 110,063 | 183,795 | 319,901 | 31.2 | 52.3 | 240.3 | 1.3 | 506.2 |
 
 Every view writes all 5,408 bytes, so the fit can't tell bytes from lines
 (d is near 0 and a takes the bytes); the profile's bytes are 5.3 cycles
@@ -307,6 +320,39 @@ on average over both kinds. After round 3 a sloping one is about 550: its
 two products are about 75 and 90 with their set-up, and the rest is the
 walk, the differences, the normalising, X0, the offset's sign and the
 stores and patches.
+
+### Round 4: the stretch (track S, 2026-10-31)
+
+A line no face has touched yet (fresh) takes a face's span by a path of
+its own (INSERT's `fresh`): its gaps made outright, the piece written. On
+a segment where both of the face's chains are vertical (a box's side under
+a level camera, or a face the 2D clip has cut at the view's sides), every
+line has the span the line before had, so a fresh line there needs none of
+the line loop's work but the nodes and the write: no chain test, no
+dispatch, no steps, no entry or plant for the run, which stay as the line
+before left them in the character row. `STRETCH` (four copies, one a pool,
+as the line loop's) takes such lines one after another from the first
+fresh line's own path, while they're fresh; a line with a face goes back to
+the line loop, the segment's end to `seg_end`. The span's kind (the whole
+line, to an edge, or in the middle) is a byte's two bits (`st_kind`),
+tested with `BIT`. It makes the same nodes, in the same order, and the same
+writes as the line loop would: the model is unchanged, and the check holds
+it byte for byte, writes, shared bytes and runs entered, on every scene and
+view.
+
+Measured on the model first (Driller's 65 views, a view's mean): 96.2
+face-lines a view are fresh, of which 55.8 continue a fresh line above in
+such a segment (31.8 spanning the whole line, 9.9 to an edge, 14.2 in the
+middle). After it, over the 65 views (cycles, `tools/rastercheck.mjs`):
+55 views faster, by up to 5,921, and 10 slower, by up to 852; all 65 come
+to 7,776,446 cycles from 7,946,066. The slower views' fresh lines are
+mostly under one vertical chain and one sloping (a floor cut at the view's
+left edge): each pays the test for both chains (`sa0 + 1 AND sb0 + 1`,
+non-zero when both are `STEP_NONE`, as `STEP_G` is 0) and the jump to it,
+about 11 cycles against the 3 of the jump it replaces. Keeping a flag for
+"both vertical" where the steps are patched cost more, at every edge, than
+it saved. The median view moves by little either way: the median above is
+a different view's.
 
 ### Measured and not built
 
@@ -361,6 +407,30 @@ spans over Driller's 65 views unless it says the profile; a view's mean):
   `STA abs,X`: saves the walk's `TAX` and the unlink's `LDY r_y`, about 5
   cycles a face-line, but the runs' lookups need X, the shared bytes Y and
   `replant` both; not built.
+
+Measured in round 4 (track S, 2026-10-31; the model's spans over
+Driller's 65 views and the profile, a view's mean):
+
+- **Objects rather than faces** (inserting each object's silhouette once a
+  line, the round 3 estimate below). Of the face-lines that search a
+  line's gaps (172.8 a view), 40.8 have a span touching the face before
+  them's on the same line, as a box's faces do across a shared edge:
+  those are the searches grouping by object would save, about 44 cycles
+  each (the walk and its tests), under 2K a view before the grouping's own
+  cost (each object's spans gathered a line, merged, and split again at
+  its inner edges, which still need their own runs). Not built, and
+  `RasterIn` is unchanged.
+- **A line with one gap left.** Of the face-lines meeting a line with gaps
+  (11,235 over the views), 34% find one gap, 43% two and 23% three or
+  more; the span meets one gap in 71% and none in 17%. The insertion on a
+  one-gap line is already its walk's first test and the case's (about 38
+  cycles before the piece), so a path of its own has little to take away.
+- **Where a face-line's cycles go** after the four rounds, at a view's
+  mean: the gaps' walk and its tests about 44 cycles, a piece's entry,
+  plant check and call about 45 more (with a replant on 29% of runs, about
+  40), and the line loop's steps, check and next line about 25: what's
+  left is mostly per piece and per line, and the 5,408 bytes' 27,040
+  cycles of `STA abs,Y`.
 
 ## The painter's way
 
@@ -425,7 +495,9 @@ the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
 
 ## What's left
 
-- **The budget.** After the three rounds the median view is about 2.7
+- **The budget.** Round 4 took the mean over Driller's views down by
+  about 2% and the median not at all; the design's floor (below) stands.
+  After the three rounds the median view is about 2.7
   fields and the busiest 8.0. Writing the view's 5,408 bytes is 27,040
   cycles of `STA abs,Y` alone. What the rounds left, at the median, is
   close to what this design costs: a run about 50 cycles to enter and

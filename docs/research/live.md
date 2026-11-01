@@ -483,3 +483,16 @@ flags, the areas entered or a camera byte left out of it; a pass on a
 reading of the keys taken during the last; turns rounded to the nearest;
 and on the free disc the comparison skipped or its yaw left out. Each is
 caught.
+
+### With the fill's round 4 (2026-10-31, track S)
+
+`make live` with the stretch (`docs/research/raster.md`, round 4) and the
+trace of 319 passes: stages 8-10 on the logic's disc (fields, median /
+p90 / max) walking 1.36 / 2.14 / 8.39 and turning 1.62 / 3.39 / 4.94, from
+1.44 / 2.23 / 8.38 and 1.65 / 3.45 / 4.95 without it; the whole frame, flip
+to flip, walking 3 / 6.31 / 16.04 and turning 5 / 12.49 / 16.07. On the
+free disc, at the entrances, stages 8-10 walking 5.03 / 8.53 / 8.94 and
+turning 5.38 / 8.53 / 9.35, from 5.14 / 8.52 / 8.92 and 5.41 / 8.52 / 9.34.
+A key pressed with nothing left to draw had its pass after 0.68 / 0.95 /
+1.23 fields, and its first changed view shown after 8.41 / 15.22 / 28.18
+walking (30 keys) and 7.61 / 11.12 / 13.24 turning (10).

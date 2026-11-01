@@ -18,7 +18,8 @@
 //   - nothing else of either screen changed;
 //   - nothing was written outside the rasteriser's own memory (its zero
 //     page, the stack, its sections) and the view;
-//   - rs_overflow is set exactly when the model's pools overflowed.
+//   - rs_overflow is set exactly when the model's pools overflowed, and
+//     the faces leave as many lines open for the background as the model's.
 // Then each sequence of frames goes into alternate screens without
 // forgetting, each frame checked the same way: what the 6502 leaves alone
 // must be what's wanted, and it must write as many bytes as the
@@ -118,6 +119,8 @@ const BUCKETS = [
         ["step", `step${k}`],
         ["next", `next${k}`],
     ]),
+    // fresh lines under vertical chains, after the copies (STRETCH)
+    ["stretch", "st0"],
     ["edge", "patch_steps"],
     ["bg", "raster_background"],
     ["horizon", "horizon_split"],
@@ -137,7 +140,7 @@ const bucket = (a) => {
 // Instruction counts at a few addresses: the runs entered, the shared bytes.
 // The runs entered (every one goes through put_go), and the row runs' code:
 // a byte of the view written from outside it is a shared one.
-const counted = { runs: S("put_go") };
+const counted = { runs: S("put_go"), background: S("raster_background") };
 const runsLo = S("rr_rows");
 const runsHi = runsLo + 256 * Math.ceil(VIEW_H / 8);
 
@@ -241,6 +244,9 @@ async function frame(s, shadow, fresh) {
         prevAddr = a;
         prevT = now;
         if (a === counted.runs) counts.runs++;
+        // (the lines the faces left open, as the background begins: nopen
+        // is the frame's own zero page, which others share after)
+        else if (a === counted.background) counts.open = m.peek(S("nopen"));
         return false;
     });
     const onWrite = m.cpu.debugWrite.add((a) => {
@@ -280,6 +286,10 @@ async function frame(s, shadow, fresh) {
     const overflow = m.peek(S("rs_overflow")) !== 0;
     const want_counts = countsOf(s);
     if (overflow !== want_counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${want_counts.overflow}`);
+    // (the lines left open as the background begins, by which the faces
+    // stop: the model's)
+    if (counts.open !== VIEW_H - want_counts.full_lines)
+        problems.push(`${counts.open} lines open for the background, the model's ${VIEW_H - want_counts.full_lines}`);
     if (fresh && counts.bytes !== want_counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${want_counts.bytes}`);
     if (fresh && counts.joins !== want_counts.joins) problems.push(`${counts.joins} shared bytes written, the model's ${want_counts.joins}`);
     if (fresh && counts.runs !== want_counts.runs) problems.push(`${counts.runs} runs entered, the model's ${want_counts.runs}`);

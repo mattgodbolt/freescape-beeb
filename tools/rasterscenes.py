@@ -7,8 +7,9 @@
 Random convex polygons in sixteenths, scenes shaped like Driller's (boxes
 with vertical sides seen by a level camera), and the edge cases: slivers,
 single pixels, shared edges and T-junctions, a face over the whole view,
-many faces on one line, horizontal edges, vertices on pixel centres,
-degenerate polygons, and horizons at any angle and off the view.
+many faces on one line, the pools running out, horizontal edges, vertices
+on pixel centres, degenerate polygons, and horizons at any angle and off
+the view.
 
 Each scene's image is checked here against the model's brute-force
 reference (tools/model/raster.py), so a scene whose spans disagree with
@@ -378,6 +379,15 @@ def edge_scenes():
     faces.append((pattern(rng), jumble(rng, [(0, 300), (XMAX, 0), (XMAX - 200, YMAX), (100, YMAX - 50)])))
     assert sum(len(v) for _, v in faces) == 256
     out.append(scene("vertex-wrap", faces, level, rng))
+    # The pools running out in a stretch: eight slivers over the top half
+    # take nine gaps a line, all but ten of each pool, then a rectangle in
+    # the middle of the bottom half, its lines fresh and its sides vertical,
+    # wants two gaps a line, and runs out of them a few lines in.
+    faces = [(pattern(rng), [(160 * i + 120, 0), (160 * i + 136, 0), (160 * i + 136, YMAX // 2), (160 * i + 120, YMAX // 2)])
+             for i in range(8)]
+    faces.append((pattern(rng), [(200, YMAX // 2 + 40), (XMAX - 200, YMAX // 2 + 40), (XMAX - 200, YMAX - 40),
+                                 (200, YMAX - 40)]))
+    out.append(scene("stretch-overflow", faces, level, rng))
     return out
 
 
