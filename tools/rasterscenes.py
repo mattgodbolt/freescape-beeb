@@ -135,6 +135,24 @@ def scene(name, faces, horizon=None, rng=None, sky=None, ground=None):
     }
 
 
+def crossings_turn(vertices):
+    """How a convex polygon's two chains (its edges going down the screen,
+    and those going up) part, by the DDA's boundaries: (other, same), the
+    lines where they part the other way from the first line they part on,
+    and the lines after it where they part the same way."""
+    chains = ({}, {})
+    n = len(vertices)
+    for i in range(n):
+        (x0, y0), (x1, y1) = vertices[i], vertices[(i + 1) % n]
+        chains[y1 < y0].update(edge_crossings(x0, y0, x1, y1))
+    a, b = chains
+    parted = [a[k] < b[k] for k in sorted(a) if a[k] != b[k]]
+    if not parted:
+        return 0, 0
+    other = sum(p != parted[0] for p in parted)
+    return other, len(parted) - 1 - other
+
+
 def random_scenes():
     out = []
     for i in range(48):
@@ -266,6 +284,26 @@ def edge_scenes():
     out.append(scene("slivers-horizontal", faces, level, rng))
     faces = [(pattern(rng), jumble(rng, [(0 + 40 * i, 0), (40 * i + 3, 0), (1664, 1664 - 40 * i)])) for i in range(30)]
     out.append(scene("slivers-diagonal", faces, Horizon(100, 100, 50, 77), rng))
+    # Slivers whose two chains' DDA boundaries cross (each found by a
+    # search, crossings_turn says so): the span is the line's [min, max)
+    # whichever chain is left on it, so the order the chains first part in
+    # holds only until they cross. After parting one way; first parting the
+    # way most of their lines aren't; and one over the right edge of the
+    # face behind it, sharing that edge, as a live frame had it. (Their own
+    # random numbers, so the scenes after them stay as they were.)
+    rx = random.Random(3100)
+    after =[[(52, 97), (18, 1551), (22, 1551), (57, 97)], [(70, 103), (1523, 1412), (1524, 1412), (73, 103)],
+             [(828, 90), (1183, 1435), (1185, 1435), (832, 90)], [(1169, 64), (319, 1418), (320, 1418), (1172, 64)]]
+    first = [[(419, 153), (76, 1617), (77, 1617), (421, 153)], [(1264, 217), (917, 1485), (918, 1485), (1266, 217)],
+             [(580, 216), (1588, 1644), (1589, 1644), (582, 216)], [(264, 91), (1512, 1552), (1513, 1552), (267, 91)]]
+    for name, slivers, most in (("crossing-chains", after, False), ("crossing-chains-first", first, True)):
+        for vs in slivers:
+            other, same = crossings_turn(vs)
+            assert other and (not most or other > same), (name, vs)
+        out.append(scene(name, [(pattern(rx), jumble(rx, vs)) for vs in slivers], level, rx))
+    behind = [(832, 90), (1185, 1435), (700, 1435), (400, 90)]
+    out.append(scene("crossing-chains-shared", [(pattern(rx), jumble(rx, after[2])),
+                                                (pattern(rx), jumble(rx, behind))], level, rx))
 
     # Single pixels: squares and diamonds around pixel centres, and squares
     # whose edges go through centres (which the top-left rule settles).
