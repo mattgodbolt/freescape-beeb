@@ -125,15 +125,17 @@ ends.
 ### Driller's logic on the disc
 
 - **The start**: `!BOOT` loads `LOGICW` (the logic's variables, the
-  original's in play: area 1, entrance 19, on the probe), `LOGIC` (its
-  database and the code that reads it) and `LOGICC` (the rest of its code);
+  original's in play: area 1, entrance 19, on the probe, with the port's
+  first step and turn: "The pace", below), `LOGIC` (its database and the
+  code that reads it) and `LOGICC` (the rest of its code);
   `lv_start` indexes the area (`logic_go_init`), enters it (`area_enter`
   from the logic's records, `OBJ_LOGIC` and `AREA_GLOBALS`), takes the
   screen's colours if an area's change is pending (`logic_go_colours`) and
   the objects' flags (`logic_go_shown`).
 - **A pass** is due once the last pass's frames are shown and its waits
-  are done (`lv_until`), and on a reading of the keys made after the last
-  ended (the idle loop, above). Its keys are the ones held or gone down since the last
+  are done (`lv_until`), on a reading of the keys made after the last
+  ended (the idle loop, above), and on keys held alone once they repeat
+  (`lv_repeat`: "The pace", below). Its keys are the ones held or gone down since the last
   pass (`lv_lkeys`, the logic's `LOGIC_KEYS`): the held bitmap and
   `key_take`'s, so a key tapped between passes still acts once. The pass
   runs with ACCCON's X set, as the logic's lists by face are in shadow
@@ -175,13 +177,19 @@ ends.
 
 ### The frames between passes (decision 4)
 
-The logic moves a whole step (Driller's default, 250 world units) or turn
-(15°) a pass; the frames between show it. A pass's frames take
-`PASS_FIELDS` fields from its start, so a held key makes `50 / PASS_FIELDS`
-passes a second, whatever each frame costs; a frame at `e` fields in shows
-the fraction `f = 256 e / PASS_FIELDS` (`pace_f`) of the way. A held key's
-next pass comes in the frame its time runs out and starts from the last
-pass's end, not the frame's, so the motion goes on at one speed.
+The logic moves a whole step or turn a pass (of the sizes f0-f3 set, from
+the port's start: "The pace", below); the frames between show it. A pass's
+frames take `PASS_FIELDS` fields from its start; a frame at `e` fields in
+shows the fraction `f = 256 e / PASS_FIELDS` (`pace_f`) of the way. A held
+key's next pass comes in the frame its time runs out and starts from the
+last pass's end, not the frame's, so the motion goes on at one speed; but
+no earlier than `PASS_FIELDS - 1` fields before the frame. Where frames are
+slower than the pace, the loop takes a pass a frame (one a loop), and each
+frame shows its pass most of the way (chaining from the last end alone
+lets a pass's first frame be its end, so the next starts afresh from a
+field on, and frames show part-steps of uneven sizes); and a pass's first
+frame is never its last, so an area's change still comes before the
+logic's camera is shown (`lv_pass`'s `lv_switch`).
 
 `lv_setup`'s rule, from the camera before the pass (`an_p0`, `an_a0`) to
 the logic's after:
@@ -210,15 +218,73 @@ the logic's after:
 
 ### The pace
 
-`PASS_FIELDS` (`src/live.6502`) sets it. It's chosen so that at the free
-disc's median turning frame a held turn shows each of its 5° steps (three
-frames a 15° pass), and it comes to about the original's own pace on the
-8-bit machines (a redraw a second, the brief's figure from Ian Andrew), so
-Driller's sizes keep the speeds they were tuned for, now with frames
-between: a step's frames are part-steps of a cell or so each. A cheaper
-frame shows more of them, a dearer one fewer, at the same speed; the
-busiest views still show a frame or two a pass. A and Z, S and X change the
-turn and the step, as in Driller.
+Decision 48 (amending 4 and 36, after Matt found the disc "impossible to
+steer"). Four constants, together in `tools/logic/state.py` for Matt to
+change there: the build takes them into `build/logic6502/data.6502`, so
+into the logic's start and `src/live.6502`, and into the checks' traces.
+
+- `START_STEP_INDEX`, `START_TURN_INDEX`: the step's and the turn's sizes
+  the game starts with, as indices into the original's `StepTable` and
+  `TurnTable`, in place of the database's (its header's `$C2` and `$C3`,
+  which a new game takes, `$9C36`): a step of 25 world units and the
+  smallest turn, 5°, where Driller starts at 250 and 15°. `port_start`
+  puts them in the database and sets the variables a new game sets from
+  them (`StepIndex`, `Step`, `StepUnits`, `TurnIndex`, `Turn`). f0-f3 change
+  them in play (decision 10).
+- `PASS_FIELDS`: a pass's frames take that many fields, and keys held
+  pass that often once they repeat.
+- `REPEAT_FIELDS`: a key going down (`keys_made`, read, not taken) brings
+  a pass as soon as one is due; the keys held alone repeat only once that
+  many fields have passed since the last pass that took a key gone down
+  (`lv_repeat`, from `lv_made`), as a keyboard's auto-repeat, so a tap
+  shorter than that is one pass. A minute's end brings its pass whatever
+  is held, as the original's input takes a minute without a key.
+
+The logic is Driller's pass for pass: only when passes come, and the sizes
+at the start, are the port's. `make logic` holds the transcription to the
+original from the original's start. `make logic6502` and `make live` start
+from the port's (`tools/logictrace.py`, `tools/mklive.py --trace`), the 6502's
+start held to it, and each scenario's run first pokes the original's sizes
+back (`original_sizes`), so that it runs as `make logic` runs it: the
+scenarios were written for those sizes, and the fuzz found its walks with
+them. `tests/logic/pace.txt` brings the sizes down itself and holds turns
+and walks; the live disc's own run of the keys and its tour run from the
+port's start. `tools/livecheck.mjs` holds each tap's keys down until nearly
+`REPEAT_FIELDS` after they went down, and fails on a second pass of them,
+or on keys held alone repeating sooner after a key went down; it reports
+the held keys' passes, and their speed in `pace.txt`'s run.
+
+#### Measured (2026-11-01, track AA)
+
+On jsbeeb (`tools/play.mjs`), the logic's disc from the start (area 1,
+entrance 19, yaw 34):
+
+- Driller's own start and pace, before: Z held for 2 s turned 15° every
+  0.9 s or so, as Matt found.
+- A tap of Z for 0.1 s and for 0.28 s each turned 5°; held for 0.5 s, 15°
+  (the pass at once, the repeat, one more); a tap of the cursor up stepped
+  25 units.
+- Z held: 19 passes in 96 fields (49.5° a second, the frames keeping up).
+  With `PASS_FIELDS` 4, 17 in 104 (back-to-back frames wait on the
+  panel), so 5.
+- The cursor up held: from the start's view, 13 passes in 95 fields (a
+  frame of 7.3 fields, a pass each: about 170 units a second, frame-bound);
+  facing yaw 4, 495 units in 102 fields (242 a second, the frames keeping
+  up).
+- The Master's own keyboard (MOS 3.20 on jsbeeb, after its CMOS):
+  `&0254`, `&0255` (OSBYTE `&C4`, `&C5`) are 30 and 5: a 30 cs delay before
+  it repeats, 15 fields, so `REPEAT_FIELDS`.
+
+`make live`, every scenario (`LIVE_SCENARIOS`, `pace` with them): 715 taps
+held 13 fields, each one pass; the keys held alone repeated 15 / 15 / 24
+fields after their pass (median / p90 / max, 144 times), then passed every
+6 / 7 / 27 fields (1,123); in `pace.txt`'s run, held turns went 44.9° a
+second and held walks 232.9 units a second. Fields a frame on the logic's
+disc (median / p90 / max): walking 2.82 / 5.89 / 14, turning 4 / 7.45 /
+14.94, over 1,273 and 1,312 frames; a key pressed with nothing left to draw
+had its pass after 0.57 / 0.97 / 1.09 fields, and its first changed view
+shown after 5.9 / 9.69 / 28.05 walking (261 keys) and 6.19 / 10.24 / 13.36
+turning (151).
 
 ### The crosshair
 
