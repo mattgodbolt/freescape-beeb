@@ -134,20 +134,25 @@ vertical sync at the row MOS 3.20 computes (its table's row plus the
 moves. Following the machine's CMOS `*TV` setting at start-up is the
 alternative, if a real display wants it.
 
-## 10. The keys (2026-10-31, autonomous; corrected the same day)
+## 10. The keys (2026-10-31; corrected the same day; motion moved by Matt)
 
-Driller's own, from the ZX's key table (`docs/research/zx-logic.md`):
-O and K forward and back, Q and W turn, P and L look up and down, N and M
-roll, R and F rise and fall, U turns round, A and Z the angle, S and X
-the step; 0 fires (5 is the ZX cursor-left, so it turns), D drills, C
-collects, SPACE changes mode, B shows or hides the crosshair, I shows
-information (where 1 is its key), ESCAPE for the ZX's 1 in play. T and Y
-do nothing in play. COPY fires too, and the cursor keys are read as the
-ZX's cursor joystick. Driller has no key to centre the view, so there
-isn't one. The keys are read once a field (`src/input.6502`).
+Driller's own, from the ZX's key table (`docs/research/zx-logic.md`), but
+for motion, which is on the BBC's traditional keys at Matt's asking ("Can
+you use more traditional BBC-like keys for motion please"):
 
-The first version of this decision followed ScummVM's key map, which
-differs; the ZX's table is the specification (decision 1).
+- **Z and X turn left and right; : and / walk forward and back** (the
+  keys printed `*` and `?`), as so many BBC games move. The cursor keys do
+  the same, as the ZX's cursor joystick (5, 6, 7 and 8). Driller's own Q,
+  W, O and K still work too.
+- So Driller's Z and X (the turn's and the step's size down) move to **f0
+  and f2**, and its A and S (up) to **f1 and f3**.
+- The rest are Driller's: P and L look up and down, N and M roll, R and F
+  rise and fall, U turns round, 0 or COPY fires, D drills, C collects,
+  SPACE changes mode, B shows or hides the crosshair, I shows information
+  (ESCAPE is the ZX's 1 there). T and Y do nothing in play. Driller has no
+  key to centre the view, so there isn't one.
+
+The keys are read once a field (`src/input.6502`).
 
 ## 11. Rounding in the matrix and transform (2026-10-31, autonomous)
 

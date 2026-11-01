@@ -509,7 +509,9 @@ checking = false;
 // its cursor joystick's 0 and 5-8)
 const KEYS = {
     O: "K_O", K: "K_K", Q: "K_Q", W: "K_W", P: "K_P", L: "K_L", N: "K_N", M: "K_M",
-    R: "K_R", F: "K_F", U: "K_U", A: "K_A", Z: "K_Z", S: "K_S", X: "K_X",
+    R: "K_R", F: "K_F", U: "K_U",
+    Z: "K_Q", X: "K_W", COLON_STAR: "K_O", SLASH: "K_K",
+    F0: "K_Z", F1: "K_A", F2: "K_X", F3: "K_S",
     K0: "K_0", K5: "K_5", K6: "K_6", K7: "K_7", K8: "K_8",
     D: "K_D", C: "K_C", SPACE: "K_SPACE", B: "K_B", I: "K_I", T: "K_T", Y: "K_Y",
     ESCAPE: "K_1", COPY: "K_0", UP: "K_7", DOWN: "K_6", LEFT: "K_5", RIGHT: "K_8",

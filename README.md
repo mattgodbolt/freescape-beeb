@@ -22,10 +22,10 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 *2026-10-31.* **You can walk Driller on the BBC, with Driller's own
 logic, and every frame worked out live.** The disc starts at Driller's
-start, in Amethyst. Its keys are Driller's: O and K walk, Q and W turn
-(or the cursor keys), P and L look up and down, N and M roll, R and F
-rise and fall, U turns round, A and Z set the turn's size and S and X the
-step's, B shows the crosshair. You collide, climb, fall and go through
+start, in Amethyst. **Z and X turn, : and / walk** (or the cursor keys,
+or Driller's own Q, W, O and K); P and L look up and down, N and M roll,
+R and F rise and fall, U turns round, f0 and f1 set the turn's size and f2
+and f3 the step's, B shows the crosshair. You collide, climb, fall and go through
 doorways into other areas as in the original, because it is the
 original's logic, transcribed into 6502 and checked pass by pass against
 the original running headless. The renderer animates each step and turn

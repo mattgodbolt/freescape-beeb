@@ -484,7 +484,10 @@ async function logicScript() {
     const startExp = Uint8Array.from(exp);
 
     // The keys: the ZX's names as the BBC's (src/input.6502's KEY_MAP).
-    const bbcKey = (k) => (/^[0-9]$/.test(k) ? BBC[`K${k}`] : BBC[k]);
+    // Driller's Z, X, A and S (the turn's and the step's sizes) are on the
+    // function keys, the BBC's Z and X being motion (decision 10).
+    const MOVED = { Z: "F0", A: "F1", X: "F2", S: "F3" };
+    const bbcKey = (k) => (/^[0-9]$/.test(k) ? BBC[`K${k}`] : BBC[MOVED[k] ?? k]);
     let held = new Set();
     function hold(keys) {
         for (const k of held) if (!keys.includes(k)) session.keyUpRaw(bbcKey(k));

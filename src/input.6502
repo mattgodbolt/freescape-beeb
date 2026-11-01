@@ -12,10 +12,13 @@
 \ is the ZX's half-row r (ports &FEFE to &7FFE) and bit b its key b, as
 \ the original reads them (CPL AND &1F), so the logic takes them in the
 \ ZX's order (decision 19; src/logic/pass.6502). K_x is the ZX's key x.
-\ Each BBC key is the ZX key of the same name, but ESCAPE, which is the
-\ ZX's 1 (the information screen's key), and COPY and the cursor keys,
-\ which are the ZX's cursor joystick: 0 fires, and 5, 6, 7 and 8 are left,
-\ down, up and right.
+\ Each BBC key is the ZX key of the same name, but for these. Motion is
+\ also on the BBC's own keys (decision 10): Z and X turn (the ZX's Q and
+\ W), : and / walk (its O and K). So Driller's Z and X, which size the turn
+\ and the step, move to f0 and f2, with f1 and f3 for the A and S that
+\ grow them. ESCAPE is the ZX's 1 (the information screen's key), and COPY
+\ and the cursor keys are the ZX's cursor joystick: 0 fires, and 5, 6, 7
+\ and 8 are left, down, up and right.
 \
 \ The interrupt leaves port A as the sound chip wants it (the keyboard on
 \ auto-scan, the port an output).
@@ -67,7 +70,8 @@ KEY_MAP = {
     {&36, K_O}, {&46, K_K}, {&10, K_Q}, {&21, K_W},
     {&37, K_P}, {&56, K_L}, {&55, K_N}, {&65, K_M},
     {&33, K_R}, {&43, K_F}, {&35, K_U},
-    {&41, K_A}, {&61, K_Z}, {&51, K_S}, {&42, K_X},
+    {&61, K_Q}, {&42, K_W}, {&48, K_O}, {&68, K_K}, ; Z, X, : and /: the BBC's own (decision 10)
+    {&20, K_Z}, {&71, K_A}, {&72, K_X}, {&73, K_S}, ; f0 and f1 the turn's size, f2 and f3 the step's
     {&27, K_0}, {&13, K_5}, {&34, K_6}, {&24, K_7}, {&15, K_8},
     {&32, K_D}, {&52, K_C}, {&62, K_SPACE}, {&64, K_B}, {&25, K_I},
     {&23, K_T}, {&44, K_Y},

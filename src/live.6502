@@ -289,7 +289,7 @@ FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(R
 FUNCTION label(s) = s + CHR(REPEATED(TEXT_COLS - LEN(s), ' '))
 FIXED_FROM  = TL_FPS            ; the fixed lines, from here to the end
 IF LIVE_LOGIC
-    KEYS_TEXT = {centred("O K Q W P L N M"), centred("R F U A Z S X B")}
+    KEYS_TEXT = {centred("Z X : / P L N M"), centred("R F U B f0-f3")}
 ELSE
     KEYS_TEXT = {centred("cursors P L N M"), centred("SPACE: next")}
 ENDIF
