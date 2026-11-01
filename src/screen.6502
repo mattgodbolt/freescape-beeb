@@ -38,8 +38,10 @@
 \   first screen write (the camera, the transforms, the spans) can go
 \   before it, and so overlaps the wait for the last frame's flip.
 \ - X stays as frame_begin left it until the next frame_begin, so the
-\   per-buffer data at &3000-&3FFF is the buffer just drawn's.
-\ - Code and data used while X is set must lie outside &3000-&7FFF.
+\   per-buffer data at &3000 up to SCREEN is the buffer just drawn's.
+\ - Code and data used whatever X is (the frame's, the interrupt's) must
+\   lie outside &3000-&7FFF; data used only with X clear, or only with X
+\   set, may lie in main RAM's or shadow RAM's &3000 up to SCREEN.
 \ ***************************************************************************
 
 \ frame_begin: wait while a frame handed over isn't shown yet, then the

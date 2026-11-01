@@ -52,17 +52,22 @@ $(AREAS_GEN) $(AREAS_JSON) &: tools/mkareas.py tools/freescape.py $(DATA_JSON) $
 define OBJECTS_CHECK_6502
 \ The object pipeline's check build (mk/objects.mk, tools/objectcheck.mjs,
 \ tools/areacheck.mjs). The code, the working copy and the work in main
-\ RAM; the maths' tables, the transform's cache and f64 table in HAZEL,
-\ which the check's entries page in; the logic's database bank (the
-\ harness loads build/logic6502's LOGIC) and the conversion's in sideways
-\ RAM.
+\ RAM, the output in the OS's pages (nothing of the OS runs once the
+\ harness's stub has turned interrupts off); the maths' tables, the
+\ transform's cache and f64 table in HAZEL, which the check's entries page
+\ in; the logic's database bank (the harness loads build/logic6502's LOGIC)
+\ and the conversion's in sideways RAM. ObjCode holds the maths' code (the
+\ harness lets the pipeline write only its own sections) as well as what
+\ the live disc puts in its bank, so it has room for both to be full
+\ (src/defs.6502's OBJ_CODE_ORG to &C000, ASSERTed below), and ObjMore for
+\ the live disc's less the maths'.
 INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
 AREA_DB_BANK   = 4              ; src/logic/vars.6502's LOGIC_BANK (tools/areacheck.mjs checks)
 AREA_CONV_BANK = 5
 
-SECTION ObjCode, org = &0E00, guard = &5000, filename = "OCODE", cmos = TRUE
+SECTION ObjCode, org = &0E00, guard = CHECK_CODE_GUARD, filename = "OCODE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
 \ The check's entry points, each called from the harness's stub.
@@ -135,15 +140,19 @@ ENDMACRO
     RTS
 .check_area
     EQUB 0
+.check_entries_end
 ENDSECTION
+\ (the rest of ObjCode, the pipeline's, as much as the live disc's bank holds)
+CHECK_CODE_GUARD = &5900
+ASSERT CHECK_CODE_GUARD - check_entries_end >= &C000 - OBJ_CODE_ORG
 \ area_init and area_enter page the banks, so their code is never in one.
-SECTION AreaCode, org = &5000, guard = &5100, filename = "OAREA", cmos = TRUE
+SECTION AreaCode, org = CHECK_CODE_GUARD, guard = &5980, filename = "OAREA", cmos = TRUE
 ENDSECTION
-SECTION ObjConst, org = &5100, guard = &5400, filename = "OCONST"
+SECTION ObjConst, org = &5980, guard = &5B80, filename = "OCONST"
 ENDSECTION
-SECTION ObjArea, org = &5400, guard = &5E00, virtual = TRUE
+SECTION ObjArea, org = &5B80, guard = &6600, virtual = TRUE
 ENDSECTION
-SECTION ObjWork, org = &5E00, guard = &6800, virtual = TRUE
+SECTION ObjWork, org = &6600, guard = &7000, virtual = TRUE
 ENDSECTION
 SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
@@ -152,12 +161,12 @@ SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
 SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
 ENDSECTION
-SECTION ObjOut, org = &6800, guard = &6E00, virtual = TRUE
+SECTION ObjOut, org = &0400, guard = &0A00, virtual = TRUE
 ENDSECTION
-SECTION ObjMemo, org = &6E00, guard = &7400, virtual = TRUE
+SECTION ObjMemo, org = &7000, guard = &7600, virtual = TRUE
 ENDSECTION
 \ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
-SECTION ObjMore, org = &7400, guard = &8000, filename = "OMORE", cmos = TRUE
+SECTION ObjMore, org = &7600, guard = &8000, filename = "OMORE", cmos = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION

@@ -38,10 +38,16 @@ FUNCTION ula_entry(entry, phys) = entry * 16 + (phys EOR 7)
 
 \ --- The screen (docs/engine.md, section 1; decision 2) ------------------
 
+\ Driller's screen, as the ZX's, is 192 lines: the view and the panel below
+\ it. So the CRTC shows SCREEN_ROWS character rows, not MODE 2's 32, and
+\ each buffer is the top of its RAM, from SCREEN up to &8000: main and
+\ shadow RAM's &3000 up to SCREEN go on from what the engine keeps at &3000
+\ in each (src/live.6502's map; docs/research/live.md, "Memory").
 SCREEN_COLS = 64            ; bytes a line: R1, MODE 2's 128 pixels
 SCREEN_ROW  = SCREEN_COLS * 8   ; bytes a character row
-SCREEN      = &4000         ; both buffers, main and shadow RAM
-SCREEN_ROWS = (&8000 - SCREEN) DIV SCREEN_ROW
+SCREEN_ROWS = 24            ; character rows: R6, Driller's 192 lines
+SCREEN      = &8000 - SCREEN_ROWS * SCREEN_ROW  ; both buffers, main and shadow RAM
+ASSERT SCREEN_ROWS * 8 = 192 AND LO(SCREEN) = 0 AND SCREEN >= &3000
 
 VIEW_W      = 104           ; pixels: the ZX's 208 at half the width
 VIEW_H      = 104           ; lines: the ZX's
@@ -55,6 +61,11 @@ VIEW_ROW0   = 1
 VIEW_COL0   = (SCREEN_COLS - VIEW_BYTES) DIV 2
 VIEW_ADDR   = SCREEN + VIEW_ROW0 * SCREEN_ROW + VIEW_COL0 * 8
 ASSERT VIEW_ROW0 + VIEW_H DIV 8 <= SCREEN_ROWS
+
+\ Where the object pipeline's code starts in its sideways bank on the live
+\ disc (src/live.6502, which says why it isn't &8000); mk/objects.mk's
+\ check build keeps room for that bank full.
+OBJ_CODE_ORG = &8080
 
 \ Sixteenths of a pixel: the view coordinates (docs/engine.md, section 9).
 SUB         = 16
@@ -75,7 +86,8 @@ ASSERT mode2_byte(15, 0) = PIX_LEFT AND mode2_byte(0, 15) = PIX_RIGHT
 \ it for MODE 2 (the CRTC at 2MHz, four pixels a microsecond), and the
 \ CRTC's registers as MOS 3.20 sets them for MODE 2 with *TV 0,1, narrowed
 \ to SCREEN_COLS bytes a line and SCREEN_ROWS character rows from SCREEN,
-\ with the syncs moved so the picture keeps MODE 2's centre; not
+\ with the syncs moved so the picture keeps MODE 2's centre (decision 9),
+\ across and down; not
 \ interlaced, and no cursor. MOS 3.20's vertical sync row is its table's
 \ (OS 1.20's) plus the *TV setting plus one, so it sits a row later than
 \ OS 1.20's MODE 2; the CMOS's own *TV setting isn't followed.

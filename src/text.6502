@@ -48,14 +48,21 @@ ASSERT MAX(TEXT_LAYOUT[.., 0]) < SCREEN_ROWS
 \ TEXT_CHAR_US (tools/slidecheck.mjs fails a write to the shown buffer
 \ made with the beam at or past its character row, and a flip with the
 \ buffers different outside the view), so one begun TEXT_T1_MIN pages of
-\ T1 before FLIP_LINE is done by then. No interrupt comes in the window:
-\ T1's is at its end, the vertical sync's far below.
+\ T1 before FLIP_LINE is done by then, and before the beam reaches the
+\ text's first line where that comes sooner: the row straight below the
+\ view begins a line short of FLIP_LINE (TEXT_LEAD_US). No interrupt comes
+\ in the window: T1's is at its end, the vertical sync's far below.
 TEXT_TOP_LINE = MIN(TEXT_LAYOUT[.., 0]) * (CRTC_R9 + 1)
 TEXT_CHAR_US  = 1000
-TEXT_T1_MIN   = CEIL(TEXT_CHAR_US / 256)
+IF TEXT_TOP_LINE < FLIP_LINE
+    TEXT_LEAD_US = (FLIP_LINE - TEXT_TOP_LINE) * LINE_US
+ELSE
+    TEXT_LEAD_US = 0
+ENDIF
+TEXT_T1_MIN   = CEIL((TEXT_CHAR_US + TEXT_LEAD_US) / 256)
 TEXT_PATIENCE = 4                           ; text_catch_up's calls behind before it waits
 ASSERT NOT(FLIP_AT_VSYNC)                   ; (T1 times the window)
-ASSERT TEXT_TOP_LINE >= FLIP_LINE           ; (the text is below the view)
+ASSERT TEXT_TOP_LINE >= VIEW_END_LINE       ; (the text is below the view)
 ASSERT TEXT_T1_MIN < HI(SAFE_T1) AND FLIP_LINE < FLAG_LINE
 
 osword      = &FFF1

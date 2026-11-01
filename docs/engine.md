@@ -17,6 +17,10 @@ fields (25fps) and the busiest in three (16.7fps), measured in jsbeeb.
 - **MODE 2, set in the hardware** (never an OS mode change), with the
   CRTC narrowed to **R1 = 64: 128 pixels across, 512 bytes a character
   row.** Moving down a character row adds 2 to an address's high byte.
+- **The screen is Driller's 192 lines**, as the ZX's: the view and the
+  panel below it. **R6 = 24 character rows** (`SCREEN_ROWS`), from
+  `SCREEN` to the top of RAM, so each buffer is 12K and main and shadow
+  RAM's `&3000` up to `SCREEN` are the engine's (section 8).
 - **The screen is double-buffered in main and shadow RAM at one address.**
   ACCCON's X bit picks which one the CPU writes, and its D bit which one
   the CRTC shows. They swap as soon as a frame is done and the CRTC isn't
@@ -40,8 +44,10 @@ which owns the machine and makes no OS call.
 - **Set-up** (`start`): both buffers cleared, then MODE 2 in the hardware
   (`screen_init`): the palette with logical colour n physical n AND 7
   (MODE 2's eight; 8-15 the same, steady), the ULA's `ULA_MODE2` and the
-  CRTC's `CRTC_R0`-`CRTC_R13` (`src/defs.6502`). The screen sits where
-  MOS 3.20 puts MODE 2 at `*TV 0,1`, whatever the CMOS says. Then
+  CRTC's `CRTC_R0`-`CRTC_R13` (`src/defs.6502`). The screen's centre is
+  where MOS 3.20 puts MODE 2's at `*TV 0,1`, across and down (`CRTC_R2`
+  and `CRTC_R7` move the syncs by half of what R1 and R6 take off),
+  whatever the CMOS says (decision 9). Then
   `irq_install`: IRQ1V taken, and every VIA interrupt off but two: the
   vertical sync's, and User VIA T1's. Anything else goes on to the OS's
   handler. T1 runs free with a field as its period, started in step with
@@ -280,22 +286,32 @@ come with it, to see where the cycles go.
   locations.
 - `&0800-&0CFF`: the player logic's variables, `LogicWork`
   (`docs/research/logic6502.md`).
-- `&0E00-&2FFF`: the engine's main code.
-- `&3000-&3FFF`: per-buffer data only (section 4, stage 10); the live
-  disc keeps the transform's cache in main RAM's, reached with X clear
-  (decision 31).
-- `&4000-&7FFF`: the screen, 16K in each of main and shadow RAM.
-- HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
-  table) and the row-run code.
+- `&0E00-&2FFF`: the engine's main code, and whatever is read whatever
+  ACCCON's X and whatever bank is paged: the interrupt, the code that
+  pages, the rasteriser's state, the maths' code (which patches itself).
+- `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
+  RAM's. Data kept per buffer (section 4, stage 10) needs the same
+  addresses free in both. The live disc keeps the front end's data in main
+  RAM's (the transform's cache, the sort's memory, the pipeline's tables
+  and the area's working copy), reached with X clear, as the front end
+  runs (decision 31), and the logic's lists by face in shadow RAM's,
+  reached with X set, as its passes run. No code goes there.
+- `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
+  192 lines) in each of main and shadow RAM.
+- HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
+  f64 table) and the front end's work.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
   with room to share. The renderer reads the database too, as it enters
   an area (`src/area.6502`).
+- Not used yet: ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the
+  paged bank's first 4K), and parts of the OS's pages, free once the
+  engine owns the machine (`docs/research/live.md`, "Room").
 
-The tracks size these as they go, and `make memory` reports what each
-region holds. The live disc's map, the whole engine in one build, is
-`src/live.6502`'s (`docs/research/live.md`, decision 31).
+The tracks size these as they go. The live disc's map, the whole engine
+in one build, is `src/live.6502`'s, every boundary ASSERTed
+(`docs/research/live.md`, "Memory", decisions 31 and 40).
 
 ## 9. The interfaces between the stages
 
