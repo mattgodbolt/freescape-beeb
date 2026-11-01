@@ -125,6 +125,8 @@ SECTION ObjWork
 .pb_lb      SKIP NP2
 .ln_v0      SKIP NLINES             ; a kept line's edge: its vertices
 .ln_v1      SKIP NLINES
+.ln_scl     SKIP NLINES             ; ... and a line square to two sides: its
+.ln_sch     SKIP NLINES             ; crossing with them (side_cut), or ln_sch &FF
 .cp_src     SKIP 1                  ; the cone's polygon: at pa (0) or pb (NP2)
 ENDSECTION
 ASSERT pb_xl = pa_xl + NP2 AND pb_xh = pa_xh + NP2 AND pb_yl = pa_yl + NP2 AND pb_yh = pa_yh + NP2
@@ -1841,6 +1843,7 @@ ENDMACRO
     ZA_AUTO 4, nr                       ; -R
     ZA_AUTO 4, u                        ; -R - Q, then -R + Q
     STX slot
+    LDA #&FF : STA ln_sch,X             ; (no side crossing kept)
     STZ el_or : STZ el_or+1 : STZ el_or+2 : STZ el_or+3
     EL_OR 0
     EL_OR 1
@@ -2044,9 +2047,12 @@ ASSERT LINE_BITS = 13                   ; (|N'| at most 2^13: 13 |N'| fits 24 bi
 ZA_AUTO1 ce_lo
 
 \ cone_line: line X's |A| and |B| patched into the readers, their signs in
-\ ce_as and ce_bs (bit 7). X is kept.
+\ ce_as and ce_bs (bit 7), and whether each is non-zero in ce_az and ce_bz
+\ (bit 7). X is kept.
 .cone_line
 {
+    LDA lna0,X : ORA lna1,X : CMP #1 : ROR ce_az
+    LDA lnb0,X : ORA lnb1,X : CMP #1 : ROR ce_bz
     LDA lna1,X : STA ce_as : BPL a_pos
     LDA #0 : SEC : SBC lna0,X : PHA
     LDA #0 : SBC lna1,X
@@ -2081,6 +2087,7 @@ ZA_AUTO1 ce_lo
 }
 ZA_AUTO1 ce_as
 ZA_AUTO1 ce_bs
+ZA_AUTO1 ce_az, ce_bz
 
 \ CE_TERM lo, hi, rl, rh, sign: ce_t (4 bytes) = |a| v, v = pa's coordinate
 \ (lo, hi at Y, under 2^11), |a| in the readers rl (its low byte) and rh
@@ -2158,12 +2165,17 @@ ENDMACRO
     CE_BASE 0 : JMP ce_x
 .ce_bottom
     CE_BASE 3 : JMP ce_x
+.ce_none
+    RTS
 .ce_in
     CE_BASE 0 : JSR ce_x
 .ce_y
+    BIT ce_bz : BPL ce_none             ; (B zero: nothing to add)
     CE_TERM pa_yl, pa_yh, ce_bl, ce_bh, ce_bs
+.ce_y_done
     RTS
 .ce_x
+    BIT ce_az : BPL ce_y_done
     CE_TERM pa_xl, pa_xh, ce_al, ce_ah, ce_as
     RTS
 CE_JUMPS = {ce_in, ce_left, ce_right, ce_top, ce_bottom, ce_c0, ce_c1, ce_c2, ce_c3}
@@ -2525,16 +2537,36 @@ ENDMACRO
 \ d = (f(K) + (a >> 1)) DIV a along it, a = |A| along the top and bottom
 \ and |B| down the sides, which is f(K) / a rounded half up; tagged with
 \ the side. f(K) < a W (the side's other corner is outside), so d has
-\ eleven bits and D >> 11 is under a: eleven steps of a long division.
+\ eleven bits and D >> 11 is under a: eleven steps of a long division. A
+\ line square to the side (B zero for the top and bottom, A for the sides)
+\ crosses the opposite side at the same point, which is kept by line
+\ (ln_scl, ln_sch; edge_line marks none kept).
 .side_cut
 {
-    ZA_AUTO1 side, flip
+    ZA_AUTO1 side, flip, keep
     ZA_AUTO 4, dv
     STY side
+    STZ keep
+    LDX cp_line
+    TYA : LSR A : BCS across
+    LDA lnb0,X : ORA lnb1,X
+    BRA square
+.across
+    LDA lna0,X : ORA lna1,X
+.square
+    BNE fresh
+    LDA ln_sch,X : BMI keep_it
+    STA sc_l+1
+    LDA ln_scl,X : STA sc_l
+    JMP along
+.keep_it
+    DEC keep
+.fresh
     \ K: the side's first corner (corner Y) if f >= 0 there, else the next;
     \ the coordinate along the side is d from the side's start (top, right)
     \ or its end (bottom, left), the other way from the second corner
-    TYA : LSR A : AND #1 : STA flip     ; (sides 2 and 3: from the end)
+    LDA side : LSR A : AND #1 : STA flip     ; (sides 2 and 3: from the end)
+    LDY side
     TYA : ASL A : ASL A : ASL A : ASL A : ASL A
     ORA cp_line : TAX                   ; lfc's index for corner Y
     LDA lfc + 24,X : BPL first
@@ -2589,9 +2621,14 @@ ENDMACRO
     NEXT
     ROL sc_l : ROL sc_l+1               ; (d: eleven bits)
     \ the point: d, or W less it, along the side
-    LDA flip : BEQ along
+    LDA flip : BEQ placed
     LDA #LO(CLIP_W) : SEC : SBC sc_l : STA sc_l
     LDA #HI(CLIP_W) : SBC sc_l+1 : STA sc_l+1
+.placed
+    BIT keep : BPL along
+    LDX cp_line
+    LDA sc_l : STA ln_scl,X
+    LDA sc_l+1 : STA ln_sch,X
 .along
     LDY cp_m
     LDX side
