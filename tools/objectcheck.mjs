@@ -68,7 +68,7 @@ const S = (name) => m.sym(name);
 const has = (name) => name in m.syms;
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
 for (const [file, section] of [["OCODE", "ObjCode"], ["OCONST", "ObjConst"], ["OAREA", "AreaCode"],
-                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"]])
+                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"], ["OMORE", "ObjMore"]])
     m.load(`${dir}/${file}`, sections[section].org, space(sections[section].org));
 m.load(`${dir}/ACONV`, sections.AreaConv.org, has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
@@ -152,7 +152,7 @@ if (profile) {
     const all = JSON.parse(fs.readFileSync(symFile, "utf8"));
     for (const a of all.assemblies)
         for (const s of a.sections)
-            if (s.name === "ObjCode" && s.labels)
+            if ((s.name === "ObjCode" || s.name === "ObjMore") && s.labels)
                 for (const [k, v] of Object.entries(s.labels))
                     if (!k.includes(".") && !k.includes("@")) routines.push([v.value, k]);
     routines.sort((a, b) => a[0] - b[0]);

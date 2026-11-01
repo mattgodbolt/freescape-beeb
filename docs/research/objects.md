@@ -275,8 +275,8 @@ M, below). A polygon object's vertices go first, then its faces:
   rounded half up.
 - **The 2D clip** is 16-bit (inside the band everything projects within
   the guard band's range), and runs only the passes for edges a vertex is
-  beyond; the four passes are one routine (`clip_pass`) taking the side's
-  axis as offsets into the coordinates' arrays.
+  beyond; its four passes, each written out (`CLIP_PASS`), are in
+  `ObjMore`, outside the bank.
 - **The drawn test** (`clip.drawable`, on the polygon staged in the
   output): three vertices or more, one off the line through the first two,
   decided by the products' signs and zeros where it can be, then by the
@@ -338,7 +338,9 @@ Faces nearest first, in the rasteriser's input's shape
   rig's parts move) and `cache_reset` if it moves an object otherwise.
 - **Sections** (each placed by the build's memory map; the check build's
   in `mk/objects.mk`): `ObjCode` (this track's code, and the vertex pass's
-  and the cone's tables), `ObjConst` (the loops, the sine table, the
+  and the cone's tables), `ObjMore` (more of it, outside the code's bank:
+  main RAM on the live disc, which any bank paged sees; the 2D clip),
+  `ObjConst` (the loops, the sine table, the
   matrix's quarter squares), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
   `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjMemo` (the
   sort's memory, whole pages, only `objects_frame` and `cache_reset` touch
@@ -476,8 +478,10 @@ Kept:
 - **The sort**: each entry's memory row once a frame and a pass's place in
   a register; the memory kept across a cell that passes no box's L or H.
 - **For room** in the live disc's bank: the matrix's products and roundings
-  as subroutines (a build is a turn's alone), and the 2D clip's four passes
-  as one routine. Both cost some cycles for their bytes.
+  as subroutines (a build is a turn's alone), which costs a turn some
+  cycles; and, once track P's map gave the front end `ObjMore` in main RAM,
+  the 2D clip there with its four passes written out (for a while they were
+  one routine taking the side by offsets, smaller and slower).
 
 Measured and not kept:
 
@@ -500,7 +504,7 @@ What's left:
   the view, a reciprocal of nine or ten bits puts a crossing within a
   fraction of a pixel. It's a change to the model's crossings (a decision,
   with pixel figures against the model and the ZX oracle) and needs a
-  table's room outside the bank.
+  table's room outside the bank (`ObjMore` has some).
 - **The lines** (`edge_line`) are next; then the vertex pass's copies into
   the projection's arguments, which a projection reading the vertex arrays
   would save.
