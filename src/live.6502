@@ -1,87 +1,117 @@
 \ ***************************************************************************
-\ FREESCAPE for the BBC Master - Driller, live: the whole pipeline on the BBC
+\ FREESCAPE for the BBC Master - Driller, live: Driller's own logic and the
+\ whole pipeline on the BBC
 \
-\ Every frame, from the camera alone: the object pipeline (stages 1-7:
-\ src/objects.6502's objects_frame, from the area's records), then the
-\ rasteriser and writer (stages 8-10: src/raster.6502's raster_frame),
-\ between frame_begin and frame_end (src/screen.6502). Nothing of a view is
-\ worked out off the BBC. Driller's own data (decision 6: a tech demo,
-\ attributed on the screen): its database, in the player logic's bank as
-\ the logic keeps it, which area_enter builds each area's working copy from
-\ (src/area.6502).
+\ Driller's player logic (src/logic/, docs/research/logic6502.md) takes the
+\ keys a pass at a time, as the original does: its steps, turns, climbs,
+\ falls, walls, doorways and area edges, and the FCL. Every frame, from the
+\ camera alone, the object pipeline (stages 1-7: src/objects.6502's
+\ objects_frame, from the area's records), then the rasteriser and writer
+\ (stages 8-10: src/raster.6502's raster_frame), between frame_begin and
+\ frame_end (src/screen.6502). Nothing of a view is worked out off the BBC.
+\ Driller's own data (decision 6: a tech demo, attributed on the screen):
+\ its database, in the logic's bank as the logic keeps it, which area_enter
+\ builds each area's working copy from (src/area.6502).
 \
-\ The camera is free (the player's logic is another layer): cursor left
-\ and right (or Driller's Q and W) turn a step of 5 degrees a frame, cursor
-\ up and down (or O and K) walk LIVE_STEP world units along the view a
-\ frame, through anything; P and L look up and down, N and M roll; SPACE
-\ goes on to the next entrance, through all of them in the database's
-\ order, from area to area. With no key for DEMO_FIELDS fields it turns on
-\ the spot, a step a frame, and after a whole turn goes on to the next
-\ entrance.
+\ The logic moves a whole step or turn a pass; the frames between show it
+\ (decision 4): a pass's camera goes from where the last left it to where
+\ this one does over PASS_FIELDS fields, along the segment its move walked,
+\ a turn in its 5-degree steps (lv_setup, lv_camera). A held key's passes
+\ follow on without a gap. An area's change comes once the old area's
+\ frames of the walk into it are shown. The crosshair (B) is drawn over the
+\ view, by EOR as the original draws it.
 \
-\ Below the view, drawn into both buffers (src/text.6502): the area and the
-\ entrance; the frames a second and the fields a frame; the cycles a frame
-\ of stages 1-7 (objects_frame's call) and of stages 8-10 (raster_frame's),
-\ timed by User VIA T2 (clock); and the credit. Each figure is the mean over
-\ the frames since the figures were last drawn, every FIGURE_FIELDS fields.
+\ -D FREE_CAMERA=TRUE builds the free camera instead, for checking views:
+\ cursor left and right (or Q and W) turn a step of 5 degrees a frame,
+\ cursor up and down (or O and K) walk LIVE_STEP world units along the view
+\ a frame, through anything; P and L look, N and M roll; SPACE goes on to
+\ the next entrance; with no key for DEMO_FIELDS fields the camera turns on
+\ the spot and goes on to the next entrance after a whole turn.
+\
+\ Below the view, drawn into both buffers (src/text.6502): the area (and
+\ the entrance, or the game's end); the frames a second and the fields a
+\ frame; the cycles a frame of stages 1-7 (objects_frame's call) and of
+\ stages 8-10 (raster_frame's), timed by User VIA T2 (clock); the keys and
+\ the credit. Each figure is the mean over the frames since the figures
+\ were last drawn, every FIGURE_FIELDS fields. Every frame is drawn whole,
+\ the camera still or not, so the figures are always the pipeline's cost.
 \
 \ This file is the glue, and the only place that knows how the stages meet:
-\ the memory map, the paging, the camera, the area's patterns and the
-\ figures. docs/research/live.md has the design and the figures.
+\ the memory map, the paging, the camera, the area's patterns, the
+\ animation and the figures. docs/research/live.md has the design.
 \ ***************************************************************************
 
 INCLUDE "defs.6502"
 INCLUDE "zp.6502"
 INCLUDE "macros.6502"
 INCLUDE "../build/maths/consts.6502"
+INCLUDE "../build/logic6502/data.6502"
 
 IF DEFINED(BUILD)
     build_stamp = BUILD
 ELSE
     build_stamp = "DEV"
 ENDIF
+IF DEFINED(FREE_CAMERA)
+    LIVE_LOGIC = NOT(FREE_CAMERA)   ; the camera Driller's logic moves, or a free one
+ELSE
+    LIVE_LOGIC = TRUE
+ENDIF
 
 \ ---------------------------------------------------------------------------
-\ The memory map.
+\ The memory map (docs/research/live.md, "Memory"; every boundary ASSERTed
+\ at the end of this file).
 \
 \ Sideways RAM:
-\   BANK_DB      the player logic's database bank as the logic builds it
-\                (build/logic6502's LOGIC, src/logic/bank.6502: Driller's
-\                database at its top), which area_enter builds each area's
-\                working copy from
-\   BANK_DATA    LiveData (the names, patterns, entrances and steps:
-\                tools/mklive.py, LDATA), the text's font (TextRAM), and the
-\                working copy's conversion (AreaConv, ACONV: src/area.6502)
+\   BANK_DB      the logic's LOGIC_BANK: Driller's database at its top, which
+\                the logic walks and area_enter builds each area's working
+\                copy from, and the logic's code that reads it (Logic,
+\                src/logic/bank.6502); in the gap between them, this file's
+\                glue (LiveGlue: the animation and the crosshair, or the
+\                free camera)
+\   BANK_DATA    the logic's LOGIC_CODE_BANK: the rest of the logic's code
+\                (LogicCode), then LiveData (the areas' names and patterns:
+\                tools/mklive.py, LDATA; and the figures' code), the text's
+\                font (TextRAM), and the working copy's conversion
+\                (AreaConv, ACONV: src/area.6502)
 \   BANK_OBJ     the object pipeline's code (ObjCode, with the maths' code,
 \                which patches itself)
 \   BANK_RASTER  the rasteriser's code, row runs and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
-\   the maths' tables and the transform's f64 table (ObjTables), copied in
-\   at start from where !BOOT loaded them (HAZEL_LOAD on); then the
-\   pipeline's work (ObjWork, the camera with it)
+\   the maths' tables (the logic's multiplies share their quarter squares)
+\   and the transform's f64 table (ObjTables), copied in at start from where
+\   !BOOT loaded them (HAZEL_LOAD on); then the pipeline's work (ObjWork,
+\   the camera with it)
 \ Main RAM, below &3000 (which ACCCON's X switches):
 \   &0E00 on: this code (LIVE), area_init's and area_enter's (AreaCode: they
 \   page the banks in, so can't be in one), the pipeline's tables
-\   (ObjConst) and the area's working copy (ObjArea)
+\   (ObjConst), the area's working copy (ObjArea), the logic's variables
+\   (LogicWork), and the front end's room (ObjMore), to &3000
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
 \   array for array, so no copy goes between them
-\ Main RAM's &3000 on, below the screen: the transform's cache (ObjCache),
-\   which only objects_frame reads and writes, so live_loop clears ACCCON's
-\   X before it (frame_begin sets X for the buffer drawn, after)
+\ Main RAM's &3000 on, below the screen: the transform's cache (ObjCache)
+\   and the sort's memory (ObjMemo), which only objects_frame reads and
+\   writes, so live_loop clears ACCCON's X before it (frame_begin sets X for
+\   the buffer drawn, after)
+\ Shadow RAM's &3000 on: the logic's lists by face (LogicFaces), which only
+\   its passes read and write, so lv_pass sets ACCCON's X round each
 \
 \ A routine in a bank is called with its bank paged (PAGE_IN); area_enter puts
-\ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too.
+\ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too. The logic's entries
+\ (src/logic/call.6502) page their own banks and leave one in.
 
 BANK_DB     = 4                 ; src/logic/vars.6502's LOGIC_BANK
-BANK_DATA   = 5                 ; (its LOGIC_CODE_BANK, which the logic will share)
+BANK_DATA   = 5                 ; ... and its LOGIC_CODE_BANK
 BANK_RASTER = 6
 BANK_OBJ    = 7
+BANK_GLUE   = BANK_DB           ; (LiveGlue's)
 AREA_DB_BANK   = BANK_DB        ; (src/area.6502's)
 AREA_CONV_BANK = BANK_DATA
-SECTION LiveData, org = &8000, guard = &C000, filename = "LDATA", cmos = TRUE
-ENDSECTION
-INCLUDE "../build/live/data.6502"
+IF LIVE_LOGIC
+    OBJ_LOGIC    = TRUE         ; (src/area.6502, src/objects.6502: what's hidden is the logic's)
+    AREA_GLOBALS = Globals      ; (the globals' records are the logic's, which moves the rig's parts)
+ENDIF
 \ (ROMSEL_COPY, the OS's copy of romsel, is src/area.6502's, outside
 \ baron's pool)
 
@@ -108,10 +138,30 @@ SECTION ObjMemo, org = obj_cache_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
 ASSERT HAZEL_LOAD + (obj_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
-\ The banks. The logic's database bank, as the logic builds it.
-SECTION LogicBank, org = &8000, guard = &C000, filename = "LOGIC"
-    INCBIN "../build/logic6502/LOGIC"
+\ The logic, in this build's map: its variables after the area's working
+\ copy, its keys' bitmap this file's, its quarter squares the maths' in
+\ HAZEL, its lists by face in shadow RAM's &3000 on, three of its hooks
+\ this file's.
+LOGIC_WORK_ORG    = obj_area_end
+LOGIC_WORK_GUARD  = &3000
+LOGIC_SQUARES     = sq_lo
+IF LIVE_LOGIC
+    LOGIC_KEYS        = lv_lkeys
+    LOGIC_HOOK_WAIT   = lv_hook_wait
+    LOGIC_HOOK_WALKED = lv_hook_walked
+    LOGIC_HOOK_LOADED = lv_hook_loaded
+ENDIF
+\ (the same table: n * n DIV 4 for n from 0 to 511, low bytes then high)
+ASSERT LEN(MATHS_SQ) = 512 AND MAX(ABS(MATHS_SQ - (0..511) * (0..511) DIV 4)) = 0 AND sq_hi = sq_lo + 512
+LOGIC_FACES_ORG   = &3000
+SECTION LogicFaces, org = LOGIC_FACES_ORG, guard = SCREEN, virtual = TRUE
 ENDSECTION
+INCLUDE "logic/vars.6502"
+INCLUDE "logic/bank.6502"
+ASSERT LOGIC_BANK = BANK_DB AND LOGIC_CODE_BANK = BANK_DATA
+ASSERT IX_HIDDEN = &60          ; (src/area.6502's: bit 6 invisible, bit 5 destroyed)
+
+\ The banks.
 SECTION ObjCode, org = &8000, guard = &C000, filename = "OCODE", cmos = TRUE
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
@@ -139,10 +189,15 @@ SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION RasterState, org = raster_work_end, guard = &C000, virtual = TRUE
 ENDSECTION
+SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
+ENDSECTION
 SECTION TextRAM, org = live_data_end, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION AreaConv, org = text_ram_end, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
+SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE", cmos = TRUE
+ENDSECTION
+INCLUDE "../build/live/data.6502"
 
 \ Main RAM.
 SECTION AreaCode, org = live_end, load = &FFFF0000 OR live_end, filename = "LAREA", guard = &3000, cmos = TRUE
@@ -150,6 +205,12 @@ ENDSECTION
 SECTION ObjConst, org = area_code_end, load = &FFFF0000 OR area_code_end, filename = "OCONST", guard = &3000
 ENDSECTION
 SECTION ObjArea, org = obj_const_end, guard = &3000, virtual = TRUE
+ENDSECTION
+\ (LogicWork after it: src/logic/vars.6502, LOGIC_WORK_ORG above)
+\ ObjMore: the front end's room, the rest of main RAM below &3000, for its
+\ code or tables (docs/research/live.md, "Memory"). It's read whatever bank
+\ is paged and whatever ACCCON's X.
+SECTION ObjMore, org = logic_work_end, load = &FFFF0000 OR logic_work_end, filename = "OMORE", guard = &3000, cmos = TRUE
 ENDSECTION
 \ RasterIn ends at RASTER_IN_END, its vertices (from rs_vxl) page-aligned
 \ straight after its faces' arrays, as ObjOut's are.
@@ -186,10 +247,13 @@ ASSERT LIVE_PATTERNS <= RS_PATTERNS
 
 \ !BOOT: the banks (*SRLOAD's Q loads through user memory, a whole file at
 \ once, which is free until LIVE loads), then main RAM's and HAZEL's files.
+\ LGLUE goes into the gap in LOGIC, so after it.
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| FREESCAPE for the BBC Master: Driller, live ", build_stamp, 13
     EQUS "*SRLOAD LOGIC 8000 ", AS_STRING(BANK_DB), " Q", 13
-    EQUS "*SRLOAD LDATA 8000 ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD LGLUE ", ~logic_db_code_end, " ", AS_STRING(BANK_DB), " Q", 13
+    EQUS "*SRLOAD LOGICC 8000 ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD LDATA ", ~logic_code_end, " ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD ACONV ", ~text_ram_end, " ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD OCODE 8000 ", AS_STRING(BANK_OBJ), " Q", 13
     EQUS "*SRLOAD RRUNS 8000 ", AS_STRING(BANK_RASTER), " Q", 13
@@ -198,6 +262,8 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*LOAD OTABLE", 13
     EQUS "*LOAD OCONST", 13
     EQUS "*LOAD LAREA", 13
+    EQUS "*LOAD LOGICW", 13
+    EQUS "*LOAD OMORE", 13
     EQUS "*RUN LIVE", 13
 ENDSECTION
 
@@ -211,7 +277,7 @@ usrvia_t2ch = &FE69
 
 \ The text's lines: {character row, logical colour}, below the view.
 TL_NAME     = 0
-TL_ENTRANCE = 1
+TL_ENTRANCE = 1                 ; (the entrance, or with the logic the game's end)
 TL_FPS      = 2
 TL_FPF      = 3
 TL_FRONT    = 5
@@ -222,14 +288,19 @@ DEMO_COL    = 12                ; "demo" on the entrance's line
 FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(REPEATED(TEXT_COLS - LEN(s) - (TEXT_COLS - LEN(s)) DIV 2, ' '))
 FUNCTION label(s) = s + CHR(REPEATED(TEXT_COLS - LEN(s), ' '))
 FIXED_FROM  = TL_FPS            ; the fixed lines, from here to the end
+IF LIVE_LOGIC
+    KEYS_TEXT = {centred("O K Q W P L N M"), centred("R F U A Z S X B")}
+ELSE
+    KEYS_TEXT = {centred("cursors P L N M"), centred("SPACE: next")}
+ENDIF
 FIXED_TEXT = {
     label("frames/sec"),
     label("fields/frm"),
     label("cycles a frame:"),
     label("1-7 objects"),
     label("8-10 fill"),
-    centred("cursors P L N M"),
-    centred("SPACE: next"),
+    KEYS_TEXT[0],
+    KEYS_TEXT[1],
     centred("Driller (c)"),
     centred("Incentive"),
     centred("Software 1987,"),
@@ -243,6 +314,7 @@ NEXT
 ASSERT LIVE_TEXT_COLS = TEXT_COLS
 ENTRANCE_TEXT = "entrance "
 ASSERT LEN(ENTRANCE_TEXT) + 2 < DEMO_COL AND DEMO_COL + 4 = TEXT_COLS
+OVER_TEXT = centred("game over")
 
 DEMO_FIELDS   = 500             ; fields without a key before the demo
 FIGURE_FIELDS = 100             ; fields between the figures' updates
@@ -250,6 +322,14 @@ FIGURE_FIELDS = 100             ; fields between the figures' updates
 FIELDS_100S = 200000000 DIV FIELD_CYCLES
 FIELD_US2 = FIELD_US            ; (clock's window, below)
 ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
+
+\ The pace (decision 4, docs/research/live.md, "The pace"): a pass's frames
+\ take PASS_FIELDS fields, so a key held takes 50 / PASS_FIELDS passes a
+\ second: Driller's default step (250 world units) and turn (15 degrees)
+\ each that often.
+PASS_FIELDS   = 44
+MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a frame of its
+ASSERT PASS_FIELDS < 128
 
 \ start: the font read while the OS is there, the machine taken, HAZEL
 \ filled, everything set up, then the frames, for ever.
@@ -270,20 +350,41 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
     JSR area_init
     PAGE_IN BANK_DATA
     JSR live_init
-    JSR text_flush                              ; (both buffers, before anything is shown)
     JSR frame_init
+IF LIVE_LOGIC
+    JSR lv_start                                ; Driller's start: the logic's camera, its area
+ELSE
+    PAGE_IN BANK_GLUE
+    JSR live_first                              ; the first entrance
+ENDIF
+    PAGE_IN BANK_DATA
+    JSR text_flush                              ; (both buffers, before anything is shown)
     JSR input_init
     JSR irq_install
     JSR clock_init
     \ (on into live_loop)
 
-\ live_loop: a frame at a time. The keys move the camera, objects_frame
-\ makes the faces in rs_*'s arrays, and raster_frame draws them, between
-\ frame_begin and frame_end; the text when the beam allows, and the
-\ figures (live_measure) from the clock round each.
+\ live_loop: a frame at a time. The logic's pass when one is due, and the
+\ frame's camera (or the free camera's keys), objects_frame makes the faces
+\ in rs_*'s arrays, and raster_frame draws them, between frame_begin and
+\ frame_end, with the crosshair over them; the text when the beam allows,
+\ and the figures (live_measure) from the clock round each.
 .live_loop
-    PAGE_IN BANK_DATA
+IF LIVE_LOGIC
+    JSR read_counters
+    LDA count_fields : STA lv_now
+    LDA count_fields+1 : STA lv_now+1
+    LDA lv_request : BEQ passing
+    JSR lv_requested
+.passing
+    JSR lv_pass
+    PAGE_IN BANK_GLUE
+    JSR lv_camera
+ELSE
+    PAGE_IN BANK_GLUE
     JSR live_keys
+ENDIF
+    PAGE_IN BANK_DATA
     JSR text_sync
     \ stages 1-7
     LDX #LV_CAM_BYTES - 1
@@ -295,24 +396,36 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
     LDA #ACCCON_X : TRB acccon                  ; (main RAM's &3000 on: the cache)
     JSR objects_frame
 .live_front_done                                ; (tools/livecheck.mjs times objects_frame to here)
-    JSR clock : LDX #T_FRONT : JSR clock_to
+    JSR clock
+    PAGE_IN BANK_GLUE
+    LDX #T_FRONT : JSR clock_to
     LDA out_nf : STA rs_nfaces
     \ stages 8-10
     PAGE_IN BANK_DATA
     JSR text_sync
-    PAGE_IN BANK_RASTER
     JSR frame_begin
+IF LIVE_LOGIC
+    PAGE_IN BANK_GLUE
+    JSR lv_cross_off                            ; (the crosshair this buffer had, off)
+ENDIF
+    PAGE_IN BANK_RASTER
     JSR clock : LDX #T_FILL : JSR clock_from
     JSR raster_frame
 .live_fill_done                                 ; (... and raster_frame to here)
-    JSR clock : LDX #T_FILL : JSR clock_to
-    PAGE_IN BANK_DATA
+    JSR clock
+    PAGE_IN BANK_GLUE
+    LDX #T_FILL : JSR clock_to
+IF LIVE_LOGIC
+    JSR lv_cross_on                             ; (and the crosshair now, if it's shown)
+ENDIF
     JSR live_measure
+    PAGE_IN BANK_DATA
     LDA lv_named : BNE named
-    LDA #(TL_ENTRANCE + 1) * TEXT_COLS : JSR text_wait    ; a new entrance's lines with its first frame
+    LDA #(TL_ENTRANCE + 1) * TEXT_COLS : JSR text_wait    ; a new area's lines with its first frame
     INC lv_named
 .named
     JSR text_catch_up
+.live_frame_done                                ; (tools/livecheck.mjs: the frame's made)
     JSR frame_end
     JMP live_loop
 
@@ -320,6 +433,8 @@ INCLUDE "screen.6502"
 INCLUDE "irq.6502"
 INCLUDE "input.6502"
 INCLUDE "text.6502"
+INCLUDE "logic/call.6502"
+INCLUDE "logic/hooks.6502"
 
 SECTION Work
     \ the camera, as objects_frame takes it (src/matrix.6502's cam_*)
@@ -331,15 +446,8 @@ SECTION Work
 .lv_pitch       SKIP 1
 .lv_roll        SKIP 1
 LV_CAM_BYTES = P% - lv_cam
-.lv_entrance    SKIP 1      ; the entrance last gone to (its index, LIVE_ENTRANCES of them)
-.lv_want        SKIP 1      ; the entrance to go to: lv_entrance but when poked
 .lv_area        SKIP 1      ; the area entered (its index in the records' directory)
-.lv_named       SKIP 1      ; non-zero once the entrance's lines are drawn
-.lv_demo        SKIP 1      ; non-zero: the demo's turning
-.lv_turned      SKIP 1      ; the demo's steps at this entrance
-.lv_key_f       SKIP 2      ; fields at the last key
-.lv_keys        SKIP KEYS_BYTES     ; live_keys': the keys held or made since the last frame
-.lv_any         SKIP 1      ; ... non-zero if there are any
+.lv_named       SKIP 1      ; non-zero once the area's lines are drawn
 ENDSECTION
 ASSERT cam_y = cam_x + 2 AND cam_z = cam_x + 4 AND cam_yaw = cam_x + 6
 ASSERT cam_pitch = cam_x + 7 AND cam_roll = cam_x + 8 AND LV_CAM_BYTES = 9
@@ -391,46 +499,17 @@ ASSERT LO(hazel_tables_end) = 0
 REGIONS = P% - regions
 }
 
-\ live_init: the fixed lines, the background, and the first entrance.
-.live_init
-{
-    LDX #FIXED_FROM * TEXT_COLS
-    LDY #0
-.fixed
-    LDA fixed_text,Y : JSR text_set
-    INX : INY : CPY #FIXED_BYTES : BNE fixed
-    STZ rs_sky : STZ rs_ground : STZ rs_horizon
-    LDA #&FF : STA lv_area
-    STZ lv_demo : STZ lv_turned
-    STZ lv_key_f : STZ lv_key_f+1
-    JSR figures_blank
-    LDA #0
-    JMP live_go
-.fixed_text
-    EQUS SUM(FIXED_TEXT)
-FIXED_BYTES = P% - fixed_text
-}
-
-\ ---------------------------------------------------------------------------
-\ live_go: entrance A (0 .. LIVE_ENTRANCES - 1): its area entered if it
-\ isn't already (the records' copy, the patterns, the rasteriser told), its
-\ camera, and its lines of text. With BANK_DATA paged, as it's left.
-.live_go
+\ lv_enter_area: area A (its index in the records' directory) entered: its
+\ patterns, the records' working copy, the rasteriser told, its lines of
+\ text. Returns with BANK_GLUE paged.
+.lv_enter_area
 {
     ZA_AUTO2 p
-    STA lv_entrance : STA lv_want
-    TAX
-    LDA en_xl,X : STA lv_x : LDA en_xh,X : STA lv_x+1
-    LDA en_yl,X : STA lv_y : LDA en_yh,X : STA lv_y+1
-    LDA en_zl,X : STA lv_z : LDA en_zh,X : STA lv_z+1
-    LDA en_yaw,X : STA lv_yaw
-    LDA en_pitch,X : STA lv_pitch
-    LDA en_roll,X : STA lv_roll
-    STZ lv_turned
-    LDA en_area,X : CMP lv_area : BEQ text
     STA lv_area
+    PAGE_IN BANK_DATA
     \ the area's patterns: ld_pats + 4 LIVE_PATTERNS area
     ASSERT LIVE_PATTERNS * 4 = 64
+    LDA lv_area
     STZ p+1
     ASL A : ASL A : ASL A : ASL A : ROL p+1 : ASL A : ROL p+1 : ASL A : ROL p+1
     CLC : ADC #LO(ld_pats) : STA p
@@ -440,12 +519,346 @@ FIXED_BYTES = P% - fixed_text
     LDA (p),Y : STA rs_pat,Y
     DEY : BPL pattern
     PAGE_IN BANK_OBJ
+    LDA #ACCCON_X : TRB acccon                  ; (its cache_reset clears the sort's memory, main RAM's &3000 on)
     LDA lv_area : JSR area_enter
     PAGE_IN BANK_RASTER
     JSR raster_forget
     PAGE_IN BANK_DATA
-.text
-    \ the area's name: ld_names + TEXT_COLS area
+    JSR live_lines
+    PAGE_IN BANK_GLUE
+    RTS
+}
+
+IF LIVE_LOGIC
+\ ---------------------------------------------------------------------------
+\ Driller's logic, in main RAM, as its entries change the bank paged.
+
+SECTION Work
+.lv_now         SKIP 2      ; fields at the frame's start
+.lv_lkeys       SKIP KEYS_BYTES     ; the logic's keys: held, or gone down since the last pass
+.lv_until       SKIP 2      ; fields before which no pass comes: its frames and its waits
+.lv_minute      SKIP 2      ; fields when the clock's minute ends
+.lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer)
+.lv_switch      SKIP 1      ; non-zero: the area changes once the old area's frames are shown
+.lv_request     SKIP 1      ; non-zero: tools/livecheck.mjs has set the logic's state (lv_requested)
+    \ what the hooks saw in the pass
+.lv_walks       SKIP 1      ; moves walked
+.lv_walk_d      SKIP 6      ; the first's: where it stopped less where it began, x y z
+.lv_walk_jet    SKIP 1      ; ... and InJet as it walked
+.lv_loaded      SKIP 1      ; non-zero: an area loaded
+.lv_wait        SKIP 1      ; the fields the original would have waited
+    \ the animation (lv_setup, lv_camera)
+.an_on          SKIP 1      ; non-zero: the frames show a pass
+.an_t0          SKIP 2      ; fields at its start ...
+.an_end         SKIP 2      ; ... and its end, PASS_FIELDS on
+.an_p0          SKIP 6      ; the camera's position before the pass: x y z ...
+.an_a0          SKIP 3      ; ... and angles: yaw pitch roll (lv_cam's order)
+.an_d           SKIP 6      ; the way it goes, x y z
+.an_da          SKIP 3      ; the angles' turns, the short way: signed
+.an_hold        SKIP 1      ; non-zero: y holds until the end (the probe's step)
+    \ the crosshair in each buffer (draw_buffer's index): shown, x, y
+.lv_xon         SKIP 2
+.lv_xx          SKIP 2
+.lv_xy          SKIP 2
+ENDSECTION
+ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
+ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2
+
+\ lv_start: the game's start, as LOGICW and LOGIC load it: the logic's
+\ index, its area and camera. The clock's first minute from now.
+.lv_start
+    STZ lv_now : STZ lv_now+1                   ; (frame_init's fields)
+    STZ lv_request
+    STZ lv_xon : STZ lv_xon+1
+    LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
+    LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
+    \ (on into lv_requested)
+
+\ lv_requested: the logic's state set from outside (tools/livecheck.mjs
+\ writes it, then lv_request): its index made again, its area entered, and
+\ its camera shown as it is, with nothing between.
+.lv_requested
+    STZ lv_request
+    JSR logic_go_init
+    STZ lv_over
+    LDA lv_now : STA lv_until
+    LDA lv_now+1 : STA lv_until+1
+    \ (on into lv_switched)
+
+\ lv_switched: the area the logic has loaded entered (AreaId's: unless
+\ it's none of the records'), the screen's colours as its redraw would
+\ take them, the objects' flags; its camera from the next frame.
+.lv_switched
+{
+    STZ lv_switch : STZ an_on
+    PAGE_IN BANK_DATA
+    LDX AreaId : BMI none
+    LDA ld_area_of,X : BMI none
+    JSR lv_enter_area
+.none
+    LDA AreaChanged : BEQ shown
+    JSR logic_go_colours
+.shown
+    JMP logic_go_shown
+}
+ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
+
+\ lv_pass: a pass of the logic when one is due, with the keys held or gone
+\ down since the last pass, and the frames that show it (lv_setup). None is
+\ due until the last pass's frames are shown and its waits done (lv_until);
+\ an area's change waits for the last of the old area's frames, and takes
+\ the frame (lv_switched); none comes once the game's over. A minute of the
+\ clock goes in just before the pass it ends, as the original's interrupt
+\ would count it in its input's wait.
+.lv_pass
+{
+    LDA lv_now : CMP lv_until : LDA lv_now+1 : SBC lv_until+1 : BPL due
+    RTS
+.due
+    LDA lv_switch : BEQ here
+    JMP lv_switched
+.here
+    LDA lv_over : BEQ alive
+    RTS
+.alive
+    LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BMI timed
+    LDA lv_minute : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
+    LDA lv_minute+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
+    JSR logic_go_minute
+.timed
+    LDX #KEYS_BYTES - 1
+.key
+    JSR key_take : ORA keys,X : STA lv_lkeys,X
+    DEX : BPL key
+    \ the camera before
+    LDX #5
+.was
+    LDA PlayerX,X : STA an_p0,X
+    DEX : BPL was
+    LDA Yaw : JSR mod72 : STA an_a0
+    LDA Pitch : JSR mod72 : STA an_a0+1
+    LDA Roll : JSR mod72 : STA an_a0+2
+    STZ lv_walks : STZ lv_loaded : STZ lv_wait
+    LDA #ACCCON_X : TSB acccon                  ; (LogicFaces: shadow RAM's)
+    JSR logic_go_pass
+    TAX
+    LDA #ACCCON_X : TRB acccon
+    TXA
+.live_passed                                    ; (tools/livecheck.mjs: A, the pass's answer)
+    BEQ done
+    CMP #2 : BNE ran
+    STA lv_over
+    PAGE_IN BANK_DATA
+    JSR live_lines                              ; ("game over")
+.ran
+    LDA lv_now : CLC : ADC lv_wait : STA lv_until
+    LDA lv_now+1 : ADC #0 : STA lv_until+1
+    LDA lv_loaded : BNE away
+    JSR logic_go_shown                          ; (with an area's change, once it's entered)
+.away
+    PAGE_IN BANK_GLUE
+    JMP lv_setup
+.done
+    RTS
+}
+
+\ The hooks (src/logic/hooks.6502) this disc fills in, called from the
+\ logic's banks. They page nothing.
+
+\ lv_hook_wait (hook_wait): the original waits A frames of its interrupt
+\ here (the size keys, the crosshair's, the FCL's DELAY); the next pass
+\ waits that many fields more from this one.
+.lv_hook_wait
+{
+    CLC : ADC lv_wait : BCC fits
+    LDA #&FF
+.fits
+    STA lv_wait
+    RTS
+}
+
+\ lv_hook_walked (hook_walked): the first move's segment, where it stopped
+\ less where it began, and InJet as it walked; and the moves counted.
+.lv_hook_walked
+{
+    LDA lv_walks : BNE counted
+    LDX #4
+.axis
+    LDA TargetX,X : SEC : SBC PlayerX,X : STA lv_walk_d,X
+    LDA TargetX+1,X : SBC PlayerX+1,X : STA lv_walk_d+1,X
+    DEX : DEX : BPL axis
+    LDA InJet : STA lv_walk_jet
+.counted
+    INC lv_walks
+    RTS
+}
+ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
+
+\ lv_hook_loaded (hook_loaded): an area is loading.
+.lv_hook_loaded
+    LDA #1 : STA lv_loaded
+    RTS
+
+\ mod72: A mod 72. The logic's angles are bytes, and the database can make
+\ any byte one: a GOTO to an id an entrance shares with an object before it
+\ (area 2's 16 is a cuboid's too) puts the camera at that object, its size
+\ for its angles. The renderer takes each mod 72, as the model's entrance
+\ cameras do (tools/model/camera.py's from_entrance). Keeps X and Y.
+.mod72
+{
+.again
+    CMP #STEPS_TURN : BCC done
+    SBC #STEPS_TURN
+    BRA again
+.done
+    RTS
+}
+ENDIF
+
+\ ---------------------------------------------------------------------------
+\ The clock: User VIA T2 counting down at 1MHz, round from 0 to &FFFF and
+\ on, and the fields counted. A span's length in microseconds is its T2
+\ difference modulo 65536, and the fields it saw say which: a span with
+\ n fields flagged in it is more than (n - 1) fields long and less than
+\ n + 1, a window narrower than T2's wrap.
+T_FRONT = 0                     ; spans: stages 1-7's ...
+T_FILL  = 4                     ; ... and 8-10's (clock_from's and clock_to's X)
+
+SECTION Work
+.clk_t          SKIP 2      ; clock's: T2 ...
+.clk_f          SKIP 2      ; ... and the fields, counting a sync flagged and not yet taken
+.span_t         SKIP 8      ; each span's start, then its length in microseconds (low 16 bits)
+.span_us        SKIP 8      ; each span's length: microseconds, 24-bit, then a spare byte
+.win_us         SKIP 8      ; each span's lengths added up since the figures, 32-bit
+.win_n          SKIP 1      ; frames since the figures
+.win_f0         SKIP 2      ; fields and frames shown when the figures were last drawn
+.win_s0         SKIP 2
+ENDSECTION
+
+\ clock_init: T2 started, one-shot (so free-running down), its interrupt
+\ left off.
+.clock_init
+    LDA usrvia_acr : AND #&DF : STA usrvia_acr
+    LDA #&FF : STA usrvia_t2cl : STA usrvia_t2ch
+    RTS
+
+\ clock: the time now in clk_t and clk_f. Keeps X.
+.clock
+{
+    PHP : SEI
+.again
+    LDA usrvia_t2ch : STA clk_t+1
+    LDA usrvia_t2cl : STA clk_t
+    LDA usrvia_t2ch : CMP clk_t+1 : BNE again   ; (the low byte wrapped between)
+    LDA fields : STA clk_f
+    LDA fields+1 : STA clk_f+1
+    LDA sysvia_ifr : AND #2 : BEQ counted       ; a sync flagged, not yet counted
+    INCW clk_f
+.counted
+    PLP
+    RTS
+}
+
+\ clock_from: span X starts now (clk_*): its start's T2 and fields kept.
+.clock_from
+    LDA clk_t : STA span_t,X
+    LDA clk_t+1 : STA span_t+1,X
+    LDA clk_f : STA span_us,X
+    LDA clk_f+1 : STA span_us+1,X
+    RTS
+
+\ clock_to: span X ends now: its length in microseconds into span_us,X
+\ (24 bits), and added to win_us,X. With n the fields seen and d the T2
+\ difference, the length is lo + ((d - lo) AND &FFFF), lo = (n - 1) FIELD_US.
+\ In BANK_GLUE (main RAM is the front end's): called with it paged, after
+\ the clock's read in main RAM.
+ASSERT FIELD_US = 78 * 256      ; ((n - 1) FIELD_US: (n - 1) 78, a byte up)
+SECTION LiveGlue
+.clock_to
+{
+    ZA_AUTO 3, lo
+    ZA_AUTO2 d
+    \ d = T2's fall
+    LDA span_t,X : SEC : SBC clk_t : STA d
+    LDA span_t+1,X : SBC clk_t+1 : STA d+1
+    \ n - 1, then lo = (n - 1) 78 256, 24-bit signed
+    LDA clk_f : SEC : SBC span_us,X : STA lo+1
+    LDA clk_f+1 : SBC span_us+1,X : STA lo+2
+    LDA lo+1 : SEC : SBC #1 : STA lo+1
+    LDA lo+2 : SBC #0 : STA lo+2
+    STZ lo
+    JSR times78
+    \ the length: lo + ((d - lo) AND &FFFF)
+    LDA d : SEC : SBC lo : STA d
+    LDA d+1 : SBC lo+1 : STA d+1
+    LDA lo : CLC : ADC d : STA span_us,X
+    LDA lo+1 : ADC d+1 : STA span_us+1,X
+    LDA lo+2 : ADC #0 : STA span_us+2,X
+    \ and the window's sum
+    LDA win_us,X : CLC : ADC span_us,X : STA win_us,X
+    LDA win_us+1,X : ADC span_us+1,X : STA win_us+1,X
+    LDA win_us+2,X : ADC span_us+2,X : STA win_us+2,X
+    LDA win_us+3,X : ADC #0 : STA win_us+3,X
+    RTS
+\ times78: lo+1..lo+2, a signed 16-bit count of fields, times 78 in place.
+.times78
+    ZA_AUTO2 m
+    LDA lo+1 : STA m : LDA lo+2 : STA m+1
+    \ 78 = 64 + 8 + 4 + 2: m 2 (1 + 2 + 4 + 32)
+    ASL m : ROL m+1                             ; 2m
+    LDA m : STA lo+1 : LDA m+1 : STA lo+2
+    ASL m : ROL m+1                             ; 4m
+    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
+    ASL m : ROL m+1                             ; 8m
+    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
+    ASL m : ROL m+1 : ASL m : ROL m+1 : ASL m : ROL m+1   ; 64m
+    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
+    RTS
+}
+ENDSECTION
+ASSERT 78 = 2 + 4 + 8 + 64
+
+\ read_counters: fields and frames (src/zp.6502), which the interrupt
+\ changes, read whole.
+SECTION Work
+.count_fields   SKIP 2
+.count_frames   SKIP 2
+ENDSECTION
+.read_counters
+    PHP : SEI
+    LDA fields : STA count_fields : LDA fields+1 : STA count_fields+1
+    LDA frames : STA count_frames : LDA frames+1 : STA count_frames+1
+    PLP
+    RTS
+
+\ ---------------------------------------------------------------------------
+\ In BANK_DATA, after LiveData: the lines, called with that bank paged, and
+\ paging nothing.
+SECTION LiveData
+
+\ live_init: the fixed lines, and the background; no area yet.
+.live_init
+{
+    LDX #FIXED_FROM * TEXT_COLS
+    LDY #0
+.fixed
+    LDA fixed_text,Y : JSR text_set
+    INX : INY : CPY #FIXED_BYTES : BNE fixed
+    STZ rs_sky : STZ rs_ground : STZ rs_horizon
+    LDA #&FF : STA lv_area
+    JMP figures_blank
+.fixed_text
+    EQUS SUM(FIXED_TEXT)
+FIXED_BYTES = P% - fixed_text
+}
+
+\ live_lines: the area's name (lv_area's: ld_names + TEXT_COLS area), and
+\ with the logic "game over" below it once it is; drawn before the next
+\ frame is handed over (lv_named). (The free camera's entrance_text draws
+\ the line below.)
+.live_lines
+{
+    ZA_AUTO2 p
     ASSERT TEXT_COLS = 16
     LDA lv_area : STZ p+1
     ASL A : ASL A : ASL A : ROL p+1 : ASL A : ROL p+1
@@ -456,7 +869,585 @@ FIXED_BYTES = P% - fixed_text
 .name
     LDA (p),Y : JSR text_set
     INX : INY : CPY #TEXT_COLS : BNE name
-    JMP entrance_text
+IF LIVE_LOGIC
+    LDY #0
+.over
+    LDA lv_over : BEQ blank
+    LDA over_text,Y
+    BRA put
+.blank
+    LDA #' '
+.put
+    JSR text_set
+    INX : INY : CPY #TEXT_COLS : BNE over
+    STZ lv_named
+ENDIF
+    RTS
+IF LIVE_LOGIC
+.over_text
+    EQUS OVER_TEXT
+ENDIF
+}
+ASSERT TL_ENTRANCE = TL_NAME + 1 AND LEN(OVER_TEXT) = TEXT_COLS
+
+\ figures_blank: the figures as blanks, until there are some.
+.figures_blank
+{
+    LDY #0
+.line
+    LDX blank_cells,Y
+    LDA #' '
+    JSR text_set : INX : JSR text_set : INX : JSR text_set : INX : JSR text_set
+    INY : CPY #4 : BNE line
+    RTS
+.blank_cells
+    EQUB TL_FPS * TEXT_COLS + NUMBER_COL, TL_FPF * TEXT_COLS + NUMBER_COL
+    EQUB TL_FRONT * TEXT_COLS + NUMBER_COL, TL_FILL * TEXT_COLS + NUMBER_COL
+}
+
+ENDSECTION
+
+\ ---------------------------------------------------------------------------
+\ In BANK_GLUE (LiveGlue, in the logic's database bank, between its code
+\ and the database): the figures, the frames between passes and the
+\ crosshair, or the free camera. Called with that bank paged; what they
+\ call in main RAM leaves it paged.
+SECTION LiveGlue
+
+\ ---------------------------------------------------------------------------
+\ live_measure (after each frame's spans): the frame added to the window,
+\ and every FIGURE_FIELDS fields the figures drawn from it: frames a second
+\ and fields a frame from the frames shown (flips), and each span's mean
+\ cycles, in thousands; then a new window.
+.live_measure
+{
+    INC win_n
+    JSR read_counters
+    LDA count_fields : SEC : SBC win_f0 : STA div_n
+    LDA count_fields+1 : SBC win_f0+1 : STA div_n+1
+    LDA div_n : CMP #LO(FIGURE_FIELDS) : LDA div_n+1 : SBC #HI(FIGURE_FIELDS) : BCS figures
+    RTS
+.figures
+    LDA count_frames : SEC : SBC win_s0 : STA mul_b
+    LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
+    ORA mul_b : BEQ restart                     ; (no flip yet: none to measure)
+    \ fields a frame, tenths: (10 df + dn / 2) / dn
+    LDA mul_b : STA div_d : LDA mul_b+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
+    LDA #10 : STA mul_a : STZ mul_a+1
+    LDA div_n : STA mul_b : LDA div_n+1 : STA mul_b+1
+    JSR fig_ratio
+    LDX #TL_FPF * TEXT_COLS + NUMBER_COL
+    JSR tenths
+    \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
+    LDA count_frames : SEC : SBC win_s0 : STA mul_b
+    LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
+    LDA #LO(FIELDS_100S) : STA mul_a : LDA #HI(FIELDS_100S) : STA mul_a+1
+    LDA div_n : STA div_d : LDA div_n+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
+    LDA #10 : JSR div_times
+    JSR fig_ratio
+    LDX #TL_FPS * TEXT_COLS + NUMBER_COL
+    JSR tenths
+    \ each span's mean cycles in thousands: 2 us / (1000 n) = us / (500 n)
+    LDY #T_FRONT : LDX #TL_FRONT * TEXT_COLS + NUMBER_COL : JSR kilo
+    LDY #T_FILL : LDX #TL_FILL * TEXT_COLS + NUMBER_COL : JSR kilo
+.restart
+    LDA count_fields : STA win_f0 : LDA count_fields+1 : STA win_f0+1
+    LDA count_frames : STA win_s0 : LDA count_frames+1 : STA win_s0+1
+    STZ win_n
+    LDX #7
+.zero
+    STZ win_us,X
+    DEX : BPL zero
+    RTS
+\ kilo: span Y's window as thousands of cycles a frame, into cell X on.
+.kilo
+    PHX
+    LDA win_us,Y : STA quot : LDA win_us+1,Y : STA quot+1
+    LDA win_us+2,Y : STA quot+2 : LDA win_us+3,Y : STA quot+3
+    LDA win_n : STA div_d : STZ div_d+1 : STZ div_d+2 : STZ div_d+3
+    LDA #250 : JSR div_times                    ; 500 n: 250 n, then twice
+    ASL div_d : ROL div_d+1 : ROL div_d+2
+    JSR fig_divide
+    PLX
+    JMP thousands
+}
+
+\ ---------------------------------------------------------------------------
+\ The arithmetic for the figures, which runs once in FIGURE_FIELDS.
+SECTION Work
+.mul_a          SKIP 2      ; fig_ratio's factors ...
+.mul_b          SKIP 2
+.div_d          SKIP 4      ; ... the divisor ...
+.div_n          SKIP 2      ; (live_measure's fields)
+.quot           SKIP 4      ; ... the product, then the quotient
+.rem            SKIP 4
+ENDSECTION
+
+\ div_times: div_d (24-bit) times A, in place. A >= 1.
+.div_times
+{
+    ZA_AUTO 3, base
+    ZA_AUTO1 k
+    STA k
+    LDA div_d : STA base : LDA div_d+1 : STA base+1 : LDA div_d+2 : STA base+2
+    STZ div_d : STZ div_d+1 : STZ div_d+2
+.bit
+    LSR k : BCC skip
+    LDA div_d : CLC : ADC base : STA div_d
+    LDA div_d+1 : ADC base+1 : STA div_d+1
+    LDA div_d+2 : ADC base+2 : STA div_d+2
+.skip
+    ASL base : ROL base+1 : ROL base+2
+    LDA k : BNE bit
+    RTS
+}
+
+\ fig_ratio: quot = (mul_a mul_b + div_d DIV 2) DIV div_d, rounded; mul_b lost.
+.fig_ratio
+{
+    STZ quot : STZ quot+1 : STZ quot+2 : STZ quot+3
+    LDX #16
+.mbit
+    LSR mul_b+1 : ROR mul_b : BCC mskip
+    LDA quot+2 : CLC : ADC mul_a : STA quot+2
+    LDA quot+3 : ADC mul_a+1 : STA quot+3
+.mskip
+    ROR quot+3 : ROR quot+2 : ROR quot+1 : ROR quot
+    DEX : BNE mbit
+    \ (on into fig_divide)
+}
+\ fig_divide: quot = (quot + div_d DIV 2) DIV div_d, 32-bit, rounded; div_d
+\ isn't 0.
+.fig_divide
+{
+    LDA div_d+3 : LSR A : STA rem+3
+    LDA div_d+2 : ROR A : STA rem+2
+    LDA div_d+1 : ROR A : STA rem+1
+    LDA div_d : ROR A
+    CLC : ADC quot : STA quot
+    LDA rem+1 : ADC quot+1 : STA quot+1
+    LDA rem+2 : ADC quot+2 : STA quot+2
+    LDA rem+3 : ADC quot+3 : STA quot+3
+    STZ rem : STZ rem+1 : STZ rem+2 : STZ rem+3
+    LDX #32
+.bit
+    ASL quot : ROL quot+1 : ROL quot+2 : ROL quot+3
+    ROL rem : ROL rem+1 : ROL rem+2 : ROL rem+3
+    LDA rem : CMP div_d : LDA rem+1 : SBC div_d+1
+    LDA rem+2 : SBC div_d+2 : LDA rem+3 : SBC div_d+3
+    BCC next
+    LDA rem : SBC div_d : STA rem               ; (C is set)
+    LDA rem+1 : SBC div_d+1 : STA rem+1
+    LDA rem+2 : SBC div_d+2 : STA rem+2
+    LDA rem+3 : SBC div_d+3 : STA rem+3
+    INC quot
+.next
+    DEX : BNE bit
+    RTS
+}
+
+\ digits: quot's low 16 bits, at most 999 (more is shown as 999), as three
+\ digits in dg (hundreds first).
+SECTION Work
+.dg             SKIP 3
+ENDSECTION
+.digits
+{
+    ZA_AUTO2 v
+    LDA quot+2 : ORA quot+3 : BNE most
+    LDA quot : STA v : LDA quot+1 : STA v+1
+    LDA v : CMP #LO(1000) : LDA v+1 : SBC #HI(1000) : BCC fits
+.most
+    LDA #LO(999) : STA v : LDA #HI(999) : STA v+1
+.fits
+    LDY #0
+.hundreds
+    LDA v : CMP #100 : LDA v+1 : SBC #0 : BCC tens
+    LDA v : SEC : SBC #100 : STA v
+    LDA v+1 : SBC #0 : STA v+1
+    INY : BRA hundreds
+.tens
+    STY dg
+    LDY #0
+    LDA v
+.ten
+    CMP #10 : BCC units
+    SBC #10 : INY
+    BRA ten
+.units
+    STY dg+1 : STA dg+2
+    RTS
+}
+
+\ tenths: quot as "dd.d" (the first blank if it's 0) from cell X.
+.tenths
+{
+    JSR digits
+    LDA dg : BEQ blank
+    ORA #'0'
+    BRA first
+.blank
+    LDA #' '
+.first
+    JSR text_set : INX
+    LDA dg+1 : ORA #'0' : JSR text_set : INX
+    LDA #'.' : JSR text_set : INX
+    LDA dg+2 : ORA #'0' : JMP text_set
+}
+
+\ thousands: quot as "dddk", leading zeros blank, from cell X.
+.thousands
+{
+    JSR digits
+    LDY #0
+.digit
+    LDA dg,Y : BNE some
+    CPY #2 : BEQ some                           ; (the units' digit always)
+    LDA #' '
+    BRA put
+.some
+    LDA dg,Y : ORA #'0'
+    \ once a digit shows, so do those after it
+    PHA : LDA #&FF : STA dg,Y : PLA
+.put
+    JSR text_set : INX
+    INY : CPY #3 : BNE next
+    LDA #'k' : JMP text_set
+.next
+    LDA dg-1,Y : CMP #&FF : BNE digit
+    LDA dg,Y : ORA #'0'
+    PHA : LDA #&FF : STA dg,Y : PLA
+    BRA put
+}
+
+IF LIVE_LOGIC
+\ lv_setup (lv_pass's, after a pass that ran): the frames that show it,
+\ from where the last pass left the camera (an_p0, an_a0) to where the
+\ logic has it now, over PASS_FIELDS fields (decision 4). The angles turn
+\ the short way, in steps of one (5 degrees). The position goes along the
+\ segment the move walked when the pass had one move and ended within the
+\ margin's push (Margin, on each axis) of its end: from there it's put
+\ where the logic has it at the end. On the probe's step y holds until the
+\ end, as a climb or fall comes at the crossing that ends the step. Any
+\ other pass that moves goes straight. A pass that loaded an area shows
+\ its walk, if it had just one, in the old area, its angles as they were,
+\ and the new area comes after (lv_switch). A pass that changed nothing shows
+\ nothing. A held key's passes follow on from the last's end, without a
+\ gap.
+.lv_setup
+{
+    LDA lv_loaded : BEQ same_area
+    LDA lv_walks : CMP #1 : BEQ away_walked
+    LDA #1 : STA lv_switch                      ; no walk to show: the new area at once
+    RTS
+.away_walked
+    LDX #2
+.held
+    STZ an_da,X
+    DEX : BPL held
+    JMP walked
+.same_area
+    \ did the camera move or turn?
+    LDX #5
+.position
+    LDA PlayerX,X : CMP an_p0,X : BNE moves
+    DEX : BPL position
+    LDA Yaw : JSR mod72 : CMP an_a0 : BNE moves
+    LDA Pitch : JSR mod72 : CMP an_a0+1 : BNE moves
+    LDA Roll : JSR mod72 : CMP an_a0+2 : BNE moves
+    RTS
+.moves
+    \ the angles' turns, the short way: (a1 - a0) mod 72, in -35 .. 36
+    LDA Yaw : JSR mod72 : LDX #0 : JSR turn
+    LDA Pitch : JSR mod72 : LDX #1 : JSR turn
+    LDA Roll : JSR mod72 : LDX #2 : JSR turn
+    \ the walk, if there's one and the pass ended near its end
+    LDA lv_walks : CMP #1 : BNE straight
+    LDX #4
+.near
+    \ (an_p0 + walk - the logic's), within Margin either way
+    LDA an_p0,X : CLC : ADC lv_walk_d,X : STA an_d,X
+    LDA an_p0+1,X : ADC lv_walk_d+1,X : STA an_d+1,X
+    LDA an_d,X : SEC : SBC PlayerX,X : STA an_d,X
+    LDA an_d+1,X : SBC PlayerX+1,X : STA an_d+1,X
+    BPL plus
+    LDA #0 : SEC : SBC an_d,X : STA an_d,X
+    LDA #0 : SBC an_d+1,X : STA an_d+1,X
+.plus
+    LDA an_d+1,X : BNE straight
+    LDA Margin : CMP an_d,X : BCC straight
+    DEX : DEX : BPL near
+.walked
+    LDX #5
+.walk
+    LDA lv_walk_d,X : STA an_d,X
+    DEX : BPL walk
+    LDA lv_walk_jet : EOR #1 : AND #1 : STA an_hold   ; (InJet is 0 or 1)
+    BRA start
+.straight
+    LDX #4
+.line
+    LDA PlayerX,X : SEC : SBC an_p0,X : STA an_d,X
+    LDA PlayerX+1,X : SBC an_p0+1,X : STA an_d+1,X
+    DEX : DEX : BPL line
+    STZ an_hold
+.start
+    LDA lv_loaded : BEQ timed
+    LDA #1 : STA lv_switch
+.timed
+    \ from the last pass's end if this runs straight on from it (its last
+    \ frame not yet shown: the pass came in the frame its time ran out),
+    \ else now
+    LDA an_on : BEQ fresh
+    LDA an_end : STA an_t0 : LDA an_end+1 : STA an_t0+1
+    BRA on
+.fresh
+    LDA lv_now : STA an_t0 : LDA lv_now+1 : STA an_t0+1
+.on
+    LDA an_t0 : CLC : ADC #PASS_FIELDS : STA an_end
+    LDA an_t0+1 : ADC #0 : STA an_end+1
+    LDA #1 : STA an_on
+    \ no pass before the end (or the waits, if they're longer)
+    LDA lv_until : CMP an_end : LDA lv_until+1 : SBC an_end+1 : BPL waits
+    LDA an_end : STA lv_until : LDA an_end+1 : STA lv_until+1
+.waits
+    RTS
+    \ turn: an_da,X = (A - an_a0,X) mod 72, the short way
+.turn
+    SEC : SBC an_a0,X
+    BPL positive
+    CLC : ADC #72                               ; (0 .. 71)
+.positive
+    CMP #37 : BCC set
+    SEC : SBC #72                               ; (-35 .. -1)
+.set
+    STA an_da,X
+    RTS
+}
+ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
+
+\ lv_camera (every frame): the frame's camera into lv_cam: the logic's,
+\ or, while a pass's frames show, the fraction of the way PASS_FIELDS
+\ fields take: f = 256 e / PASS_FIELDS at e fields on (pace_f); each
+\ coordinate an_p0 + sign(d) ((|d| f) >> 8), y an_p0's if an_hold; each
+\ angle an_a0 + sign(t) ((|t| f + 128) >> 8), mod 72.
+.lv_camera
+{
+    ZA_AUTO1 f, k
+    ZA_AUTO2 m
+    LDA an_on : BEQ logic
+    LDA lv_now : SEC : SBC an_t0 : TAX
+    LDA lv_now+1 : SBC an_t0+1 : BNE done        ; (an_t0 is never after now)
+    CPX #PASS_FIELDS : BCC going
+.done
+    STZ an_on
+.logic
+    LDX #5
+.p
+    LDA PlayerX,X : STA lv_cam,X
+    DEX : BPL p
+    LDA Yaw : JSR mod72 : STA lv_yaw
+    LDA Pitch : JSR mod72 : STA lv_pitch
+    LDA Roll : JSR mod72 : STA lv_roll
+    RTS
+.going
+    LDA pace_f,X : STA f
+    LDX #4
+.axis
+    LDA an_p0,X : STA lv_cam,X
+    LDA an_p0+1,X : STA lv_cam+1,X
+    CPX #2 : BNE along
+    LDA an_hold : BNE next                      ; (y holds)
+.along
+    \ m = |d| f >> 8, then lv_cam +- m
+    LDA an_d+1,X : PHP
+    BPL mag
+    LDA #0 : SEC : SBC an_d,X : STA m
+    LDA #0 : SBC an_d+1,X : STA m+1
+    BRA scale
+.mag
+    LDA an_d,X : STA m
+    LDA an_d+1,X : STA m+1
+.scale
+    JSR times_f
+    PLP : BMI minus
+    LDA lv_cam,X : CLC : ADC m : STA lv_cam,X
+    LDA lv_cam+1,X : ADC m+1 : STA lv_cam+1,X
+    BRA next
+.minus
+    LDA lv_cam,X : SEC : SBC m : STA lv_cam,X
+    LDA lv_cam+1,X : SBC m+1 : STA lv_cam+1,X
+.next
+    DEX : DEX : BPL axis
+    \ the angles
+    LDX #2
+.angle
+    LDA an_da,X : PHP
+    BPL amag
+    EOR #&FF : INC A
+.amag
+    STA m : STZ m+1
+    JSR times_f                                 ; |t| f >> 8 ...
+    LDA k : BPL rounded                         ; ... and the bit below it
+    INC m
+.rounded
+    LDA an_a0,X
+    PLP : BMI aminus
+    CLC : ADC m
+    CMP #72 : BCC put
+    SBC #72
+    BRA put
+.aminus
+    SEC : SBC m
+    BCS put
+    ADC #72
+.put
+    STA lv_yaw,X
+    DEX : BPL angle
+    RTS
+    \ times_f: m = (m f) >> 8, m 16-bit; k the bits below (bit 7 the half)
+.times_f
+{
+    ZA_AUTO1 p0, p1, p2, g
+    STZ p0 : STZ p1 : STZ p2
+    LDA f : STA g
+    LDY #8
+.bit
+    LSR g : BCC skip
+    LDA p1 : CLC : ADC m : STA p1
+    LDA p2 : ADC m+1 : STA p2
+.skip
+    ROR p2 : ROR p1 : ROR p0
+    DEY : BNE bit
+    LDA p1 : STA m : LDA p2 : STA m+1
+    LDA p0 : STA k
+    RTS
+}
+.pace_f
+    EQUB (0..PASS_FIELDS - 1) * 256 DIV PASS_FIELDS
+}
+ASSERT lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2 AND STEPS_TURN = 72
+
+\ The crosshair (CrossOn, CrossX, CrossY: the logic's; B shows and hides
+\ it): the original's ($AAA0) at half the width, drawn by EOR over the view
+\ as it's drawn: its centre the view's pixel ((CrossX - 1) DIV 2,
+\ VIEW_H - CrossY), each arm across a pixel at two from it, each up and
+\ down two lines at two and three, each pixel's colour turned to its
+\ opposite (EOR 7). Each buffer's crosshair is taken off again before the
+\ rasteriser next draws there (lv_cross_off), so the buffer holds what the
+\ rasteriser drew, which it relies on (raster_forget's note).
+.lv_cross_off
+{
+    LDX draw_buffer
+    LDA lv_xon,X : BEQ none
+    STZ lv_xon,X
+    LDY lv_xy,X
+    LDA lv_xx,X
+    JMP cross_eor
+.none
+    RTS
+}
+.lv_cross_on
+{
+    LDX draw_buffer
+    LDA CrossOn : STA lv_xon,X : BEQ none
+    LDA CrossX : STA lv_xx,X
+    LDY CrossY : TYA : STA lv_xy,X
+    LDA CrossX
+    JMP cross_eor
+.none
+    RTS
+}
+\ cross_eor: the crosshair at CrossX = A, CrossY = Y EORed into the buffer
+\ drawn, each pixel inside the view.
+CROSS_LEFT  = mode2_byte(7, 0)
+CROSS_RIGHT = mode2_byte(0, 7)
+.cross_eor
+{
+    ZA_AUTO1 bc, r, px, py
+    ZA_AUTO2 at
+    DEC A : LSR A : STA bc
+    STY r : LDA #VIEW_H : SEC : SBC r : STA r
+    LDX #CROSS_N - 1
+.pixel
+    LDA bc : CLC : ADC cross_dx,X : STA px
+    CMP #VIEW_W : BCS next
+    LDA r : CLC : ADC cross_dy,X : STA py
+    CMP #VIEW_H : BCS next
+    \ VIEW_ADDR + (py DIV 8) SCREEN_ROW + 8 (px DIV 2) + py MOD 8
+    STZ at+1
+    LDA px : AND #&FE
+    ASL A : ROL at+1
+    ASL A : ROL at+1
+    STA at
+    LDA py : AND #7 : ORA at : STA at
+    LDA py : LSR A : LSR A : AND #&FE : CLC : ADC at+1 : STA at+1
+    LDA at : CLC : ADC #LO(VIEW_ADDR) : STA at
+    LDA at+1 : ADC #HI(VIEW_ADDR) : STA at+1
+    LDA px : LSR A
+    LDA #CROSS_RIGHT : BCS right
+    LDA #CROSS_LEFT
+.right
+    EOR (at) : STA (at)
+.next
+    DEX : BPL pixel
+    RTS
+.cross_dx   EQUB CROSS_DX AND &FF
+.cross_dy   EQUB CROSS_DY AND &FF
+}
+CROSS_DX = {-2, 2, 0, 0, 0, 0}
+CROSS_DY = {0, 0, -3, -2, 2, 3}
+CROSS_N  = LEN(CROSS_DX)
+ASSERT LEN(CROSS_DY) = CROSS_N AND SCREEN_ROW = 512
+ASSERT VIEW_W < 254 AND VIEW_H < 253          ; (an arm off an edge wraps past the view)
+
+ELSE
+\ ---------------------------------------------------------------------------
+\ The free camera.
+
+SECTION Work
+.lv_entrance    SKIP 1      ; the entrance last gone to (its index, LIVE_ENTRANCES of them)
+.lv_want        SKIP 1      ; the entrance to go to: lv_entrance but when poked
+.lv_demo        SKIP 1      ; non-zero: the demo's turning
+.lv_turned      SKIP 1      ; the demo's steps at this entrance
+.lv_key_f       SKIP 2      ; fields at the last key
+.lv_keys        SKIP KEYS_BYTES     ; live_keys': the keys held or made since the last frame
+.lv_any         SKIP 1      ; ... non-zero if there are any
+ENDSECTION
+
+\ live_no_logic: never called. It reaches the logic's entries as the
+\ logic's disc does, since this one doesn't, so that baron places their
+\ zero page (the logic is assembled the same for both, so the map is).
+.live_no_logic
+    ZA_ENTRY
+    JSR logic_go_init : JSR logic_go_minute : JSR logic_go_pass
+    JSR logic_go_colours : JSR logic_go_shown
+    RTS
+
+\ live_first: the demo off, and the first entrance.
+.live_first
+    STZ lv_demo : STZ lv_turned
+    STZ lv_key_f : STZ lv_key_f+1
+    LDA #0
+    \ (on into live_go)
+
+\ live_go: entrance A (0 .. LIVE_ENTRANCES - 1): its area entered if it
+\ isn't already, its camera, and its lines of text.
+.live_go
+{
+    STA lv_entrance : STA lv_want
+    TAX
+    LDA en_xl,X : STA lv_x : LDA en_xh,X : STA lv_x+1
+    LDA en_yl,X : STA lv_y : LDA en_yh,X : STA lv_y+1
+    LDA en_zl,X : STA lv_z : LDA en_zh,X : STA lv_z+1
+    LDA en_yaw,X : STA lv_yaw
+    LDA en_pitch,X : STA lv_pitch
+    LDA en_roll,X : STA lv_roll
+    STZ lv_turned
+    LDA en_area,X : CMP lv_area : BEQ text
+    JSR lv_enter_area
+.text
+    \ (on into entrance_text)
 }
 
 \ entrance_text: the entrance's line: its id, and "demo" if it's on; drawn
@@ -505,7 +1496,6 @@ FIXED_BYTES = P% - fixed_text
     EQUS "demo"
 }
 
-\ ---------------------------------------------------------------------------
 \ live_keys: the camera moved by the keys held, or by the demo; SPACE (or
 \ the demo, after a turn) to the next entrance. Turns before looks, rolls
 \ and steps, as the original acts (decision 19). The keys are Driller's
@@ -519,7 +1509,6 @@ LIVE_KEYS = {
     {K_O, A_ON}, {K_7, A_ON}, {K_K, A_BACK}, {K_6, A_BACK}
 }
 LIVE_KEY_COUNT = LEN(LIVE_KEYS)
-STEPS_TURN = 72                 ; a whole turn, in 5-degree steps
 .live_keys
 {
     ZA_AUTO1 held
@@ -671,344 +1660,8 @@ ASSERT LIVE_STEP < 128 AND STEPS_TURN < 128
     LDA #0 : STA lv_cam,X
     BRA fine
 }
-
-\ ---------------------------------------------------------------------------
-\ The clock: User VIA T2 counting down at 1MHz, round from 0 to &FFFF and
-\ on, and the fields counted. A span's length in microseconds is its T2
-\ difference modulo 65536, and the fields it saw say which: a span with
-\ n fields flagged in it is more than (n - 1) fields long and less than
-\ n + 1, a window narrower than T2's wrap.
-T_FRONT = 0                     ; spans: stages 1-7's ...
-T_FILL  = 4                     ; ... and 8-10's (clock_from's and clock_to's X)
-
-SECTION Work
-.clk_t          SKIP 2      ; clock's: T2 ...
-.clk_f          SKIP 2      ; ... and the fields, counting a sync flagged and not yet taken
-.span_t         SKIP 8      ; each span's start, then its length in microseconds (low 16 bits)
-.span_us        SKIP 8      ; each span's length: microseconds, 24-bit, then a spare byte
-.win_us         SKIP 8      ; each span's lengths added up since the figures, 32-bit
-.win_n          SKIP 1      ; frames since the figures
-.win_f0         SKIP 2      ; fields and frames shown when the figures were last drawn
-.win_s0         SKIP 2
-ENDSECTION
-
-\ clock_init: T2 started, one-shot (so free-running down), its interrupt
-\ left off.
-.clock_init
-    LDA usrvia_acr : AND #&DF : STA usrvia_acr
-    LDA #&FF : STA usrvia_t2cl : STA usrvia_t2ch
-    RTS
-
-\ clock: the time now in clk_t and clk_f. Keeps X.
-.clock
-{
-    PHP : SEI
-.again
-    LDA usrvia_t2ch : STA clk_t+1
-    LDA usrvia_t2cl : STA clk_t
-    LDA usrvia_t2ch : CMP clk_t+1 : BNE again   ; (the low byte wrapped between)
-    LDA fields : STA clk_f
-    LDA fields+1 : STA clk_f+1
-    LDA sysvia_ifr : AND #2 : BEQ counted       ; a sync flagged, not yet counted
-    INCW clk_f
-.counted
-    PLP
-    RTS
-}
-
-\ clock_from: span X starts now (clk_*): its start's T2 and fields kept.
-.clock_from
-    LDA clk_t : STA span_t,X
-    LDA clk_t+1 : STA span_t+1,X
-    LDA clk_f : STA span_us,X
-    LDA clk_f+1 : STA span_us+1,X
-    RTS
-
-\ clock_to: span X ends now: its length in microseconds into span_us,X
-\ (24 bits), and added to win_us,X. With n the fields seen and d the T2
-\ difference, the length is lo + ((d - lo) AND &FFFF), lo = (n - 1) FIELD_US.
-ASSERT FIELD_US = 78 * 256      ; ((n - 1) FIELD_US: (n - 1) 78, a byte up)
-.clock_to
-{
-    ZA_AUTO 3, lo
-    ZA_AUTO2 d
-    \ d = T2's fall
-    LDA span_t,X : SEC : SBC clk_t : STA d
-    LDA span_t+1,X : SBC clk_t+1 : STA d+1
-    \ n - 1, then lo = (n - 1) 78 256, 24-bit signed
-    LDA clk_f : SEC : SBC span_us,X : STA lo+1
-    LDA clk_f+1 : SBC span_us+1,X : STA lo+2
-    LDA lo+1 : SEC : SBC #1 : STA lo+1
-    LDA lo+2 : SBC #0 : STA lo+2
-    STZ lo
-    JSR times78
-    \ the length: lo + ((d - lo) AND &FFFF)
-    LDA d : SEC : SBC lo : STA d
-    LDA d+1 : SBC lo+1 : STA d+1
-    LDA lo : CLC : ADC d : STA span_us,X
-    LDA lo+1 : ADC d+1 : STA span_us+1,X
-    LDA lo+2 : ADC #0 : STA span_us+2,X
-    \ and the window's sum
-    LDA win_us,X : CLC : ADC span_us,X : STA win_us,X
-    LDA win_us+1,X : ADC span_us+1,X : STA win_us+1,X
-    LDA win_us+2,X : ADC span_us+2,X : STA win_us+2,X
-    LDA win_us+3,X : ADC #0 : STA win_us+3,X
-    RTS
-\ times78: lo+1..lo+2, a signed 16-bit count of fields, times 78 in place.
-.times78
-    ZA_AUTO2 m
-    LDA lo+1 : STA m : LDA lo+2 : STA m+1
-    \ 78 = 64 + 8 + 4 + 2: m 2 (1 + 2 + 4 + 32)
-    ASL m : ROL m+1                             ; 2m
-    LDA m : STA lo+1 : LDA m+1 : STA lo+2
-    ASL m : ROL m+1                             ; 4m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
-    ASL m : ROL m+1                             ; 8m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
-    ASL m : ROL m+1 : ASL m : ROL m+1 : ASL m : ROL m+1   ; 64m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
-    RTS
-}
-ASSERT 78 = 2 + 4 + 8 + 64
-
-\ read_counters: fields and frames (src/zp.6502), which the interrupt
-\ changes, read whole.
-SECTION Work
-.count_fields   SKIP 2
-.count_frames   SKIP 2
-ENDSECTION
-.read_counters
-    PHP : SEI
-    LDA fields : STA count_fields : LDA fields+1 : STA count_fields+1
-    LDA frames : STA count_frames : LDA frames+1 : STA count_frames+1
-    PLP
-    RTS
-
-\ ---------------------------------------------------------------------------
-\ The figures, in BANK_DATA after LiveData (main RAM is full): called with
-\ that bank paged, and paging nothing.
-SECTION LiveData
-
-\ ---------------------------------------------------------------------------
-\ live_measure (after each frame's spans): the frame added to the window,
-\ and every FIGURE_FIELDS fields the figures drawn from it: frames a second
-\ and fields a frame from the frames shown (flips), and each span's mean
-\ cycles, in thousands; then a new window.
-.live_measure
-{
-    INC win_n
-    JSR read_counters
-    LDA count_fields : SEC : SBC win_f0 : STA div_n
-    LDA count_fields+1 : SBC win_f0+1 : STA div_n+1
-    LDA div_n : CMP #LO(FIGURE_FIELDS) : LDA div_n+1 : SBC #HI(FIGURE_FIELDS) : BCS figures
-    RTS
-.figures
-    LDA count_frames : SEC : SBC win_s0 : STA mul_b
-    LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
-    ORA mul_b : BEQ restart                     ; (no flip yet: none to measure)
-    \ fields a frame, tenths: (10 df + dn / 2) / dn
-    LDA mul_b : STA div_d : LDA mul_b+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
-    LDA #10 : STA mul_a : STZ mul_a+1
-    LDA div_n : STA mul_b : LDA div_n+1 : STA mul_b+1
-    JSR fig_ratio
-    LDX #TL_FPF * TEXT_COLS + NUMBER_COL
-    JSR tenths
-    \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
-    LDA count_frames : SEC : SBC win_s0 : STA mul_b
-    LDA count_frames+1 : SBC win_s0+1 : STA mul_b+1
-    LDA #LO(FIELDS_100S) : STA mul_a : LDA #HI(FIELDS_100S) : STA mul_a+1
-    LDA div_n : STA div_d : LDA div_n+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
-    LDA #10 : JSR div_times
-    JSR fig_ratio
-    LDX #TL_FPS * TEXT_COLS + NUMBER_COL
-    JSR tenths
-    \ each span's mean cycles in thousands: 2 us / (1000 n) = us / (500 n)
-    LDY #T_FRONT : LDX #TL_FRONT * TEXT_COLS + NUMBER_COL : JSR kilo
-    LDY #T_FILL : LDX #TL_FILL * TEXT_COLS + NUMBER_COL : JSR kilo
-.restart
-    LDA count_fields : STA win_f0 : LDA count_fields+1 : STA win_f0+1
-    LDA count_frames : STA win_s0 : LDA count_frames+1 : STA win_s0+1
-    STZ win_n
-    LDX #7
-.zero
-    STZ win_us,X
-    DEX : BPL zero
-    RTS
-\ kilo: span Y's window as thousands of cycles a frame, into cell X on.
-.kilo
-    PHX
-    LDA win_us,Y : STA quot : LDA win_us+1,Y : STA quot+1
-    LDA win_us+2,Y : STA quot+2 : LDA win_us+3,Y : STA quot+3
-    LDA win_n : STA div_d : STZ div_d+1 : STZ div_d+2 : STZ div_d+3
-    LDA #250 : JSR div_times                    ; 500 n: 250 n, then twice
-    ASL div_d : ROL div_d+1 : ROL div_d+2
-    JSR fig_divide
-    PLX
-    JMP thousands
-}
-
-\ figures_blank: the figures as blanks, until there are some.
-.figures_blank
-{
-    LDY #0
-.line
-    LDX blank_cells,Y
-    LDA #' '
-    JSR text_set : INX : JSR text_set : INX : JSR text_set : INX : JSR text_set
-    INY : CPY #4 : BNE line
-    RTS
-.blank_cells
-    EQUB TL_FPS * TEXT_COLS + NUMBER_COL, TL_FPF * TEXT_COLS + NUMBER_COL
-    EQUB TL_FRONT * TEXT_COLS + NUMBER_COL, TL_FILL * TEXT_COLS + NUMBER_COL
-}
-
-\ ---------------------------------------------------------------------------
-\ The arithmetic for the figures, which runs once in FIGURE_FIELDS.
-SECTION Work
-.mul_a          SKIP 2      ; fig_ratio's factors ...
-.mul_b          SKIP 2
-.div_d          SKIP 4      ; ... the divisor ...
-.div_n          SKIP 2      ; (live_measure's fields)
-.quot           SKIP 4      ; ... the product, then the quotient
-.rem            SKIP 4
-ENDSECTION
-
-\ div_times: div_d (24-bit) times A, in place. A >= 1.
-.div_times
-{
-    ZA_AUTO 3, base
-    ZA_AUTO1 k
-    STA k
-    LDA div_d : STA base : LDA div_d+1 : STA base+1 : LDA div_d+2 : STA base+2
-    STZ div_d : STZ div_d+1 : STZ div_d+2
-.bit
-    LSR k : BCC skip
-    LDA div_d : CLC : ADC base : STA div_d
-    LDA div_d+1 : ADC base+1 : STA div_d+1
-    LDA div_d+2 : ADC base+2 : STA div_d+2
-.skip
-    ASL base : ROL base+1 : ROL base+2
-    LDA k : BNE bit
-    RTS
-}
-
-\ fig_ratio: quot = (mul_a mul_b + div_d DIV 2) DIV div_d, rounded; mul_b lost.
-.fig_ratio
-{
-    STZ quot : STZ quot+1 : STZ quot+2 : STZ quot+3
-    LDX #16
-.mbit
-    LSR mul_b+1 : ROR mul_b : BCC mskip
-    LDA quot+2 : CLC : ADC mul_a : STA quot+2
-    LDA quot+3 : ADC mul_a+1 : STA quot+3
-.mskip
-    ROR quot+3 : ROR quot+2 : ROR quot+1 : ROR quot
-    DEX : BNE mbit
-    \ (on into fig_divide)
-}
-\ fig_divide: quot = (quot + div_d DIV 2) DIV div_d, 32-bit, rounded; div_d
-\ isn't 0.
-.fig_divide
-{
-    LDA div_d+3 : LSR A : STA rem+3
-    LDA div_d+2 : ROR A : STA rem+2
-    LDA div_d+1 : ROR A : STA rem+1
-    LDA div_d : ROR A
-    CLC : ADC quot : STA quot
-    LDA rem+1 : ADC quot+1 : STA quot+1
-    LDA rem+2 : ADC quot+2 : STA quot+2
-    LDA rem+3 : ADC quot+3 : STA quot+3
-    STZ rem : STZ rem+1 : STZ rem+2 : STZ rem+3
-    LDX #32
-.bit
-    ASL quot : ROL quot+1 : ROL quot+2 : ROL quot+3
-    ROL rem : ROL rem+1 : ROL rem+2 : ROL rem+3
-    LDA rem : CMP div_d : LDA rem+1 : SBC div_d+1
-    LDA rem+2 : SBC div_d+2 : LDA rem+3 : SBC div_d+3
-    BCC next
-    LDA rem : SBC div_d : STA rem               ; (C is set)
-    LDA rem+1 : SBC div_d+1 : STA rem+1
-    LDA rem+2 : SBC div_d+2 : STA rem+2
-    LDA rem+3 : SBC div_d+3 : STA rem+3
-    INC quot
-.next
-    DEX : BNE bit
-    RTS
-}
-
-\ digits: quot's low 16 bits, at most 999 (more is shown as 999), as three
-\ digits in dg (hundreds first).
-SECTION Work
-.dg             SKIP 3
-ENDSECTION
-.digits
-{
-    ZA_AUTO2 v
-    LDA quot+2 : ORA quot+3 : BNE most
-    LDA quot : STA v : LDA quot+1 : STA v+1
-    LDA v : CMP #LO(1000) : LDA v+1 : SBC #HI(1000) : BCC fits
-.most
-    LDA #LO(999) : STA v : LDA #HI(999) : STA v+1
-.fits
-    LDY #0
-.hundreds
-    LDA v : CMP #100 : LDA v+1 : SBC #0 : BCC tens
-    LDA v : SEC : SBC #100 : STA v
-    LDA v+1 : SBC #0 : STA v+1
-    INY : BRA hundreds
-.tens
-    STY dg
-    LDY #0
-    LDA v
-.ten
-    CMP #10 : BCC units
-    SBC #10 : INY
-    BRA ten
-.units
-    STY dg+1 : STA dg+2
-    RTS
-}
-
-\ tenths: quot as "dd.d" (the first blank if it's 0) from cell X.
-.tenths
-{
-    JSR digits
-    LDA dg : BEQ blank
-    ORA #'0'
-    BRA first
-.blank
-    LDA #' '
-.first
-    JSR text_set : INX
-    LDA dg+1 : ORA #'0' : JSR text_set : INX
-    LDA #'.' : JSR text_set : INX
-    LDA dg+2 : ORA #'0' : JMP text_set
-}
-
-\ thousands: quot as "dddk", leading zeros blank, from cell X.
-.thousands
-{
-    JSR digits
-    LDY #0
-.digit
-    LDA dg,Y : BNE some
-    CPY #2 : BEQ some                           ; (the units' digit always)
-    LDA #' '
-    BRA put
-.some
-    LDA dg,Y : ORA #'0'
-    \ once a digit shows, so do those after it
-    PHA : LDA #&FF : STA dg,Y : PLA
-.put
-    JSR text_set : INX
-    INY : CPY #3 : BNE next
-    LDA #'k' : JMP text_set
-.next
-    LDA dg-1,Y : CMP #&FF : BNE digit
-    LDA dg,Y : ORA #'0'
-    PHA : LDA #&FF : STA dg,Y : PLA
-    BRA put
-}
+ENDIF
+STEPS_TURN = 72                 ; a whole turn, in 5-degree steps
 
 ENDSECTION
 
@@ -1028,8 +1681,17 @@ ENDSECTION
 SECTION ObjArea
 .obj_area_end
 ENDSECTION
+SECTION LogicWork
+.logic_work_end
+ENDSECTION
+SECTION ObjMore
+.obj_more_end
+ENDSECTION
 SECTION ObjCache
 .obj_cache_end
+ENDSECTION
+SECTION ObjMemo
+.obj_memo_end
 ENDSECTION
 SECTION ObjWork
 .obj_work_end
@@ -1058,16 +1720,39 @@ ENDSECTION
 SECTION LiveData
 .live_data_end
 ENDSECTION
+SECTION AreaConv
+.area_conv_end
+ENDSECTION
+SECTION LiveGlue
+.live_glue_end
+ENDSECTION
+SECTION LogicFaces
+.logic_faces_end
+ENDSECTION
 SECTION Work
 .work_end
 ENDSECTION
 obj_area_start = obj_const_end
-ASSERT obj_work_end <= &E000 AND raster_state_end <= &C000 AND text_ram_end <= &C000
-ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat
-ASSERT obj_cache_end <= SCREEN
-\ Read in the frame: never in &3000-&7FFF, which ACCCON's X switches.
-ASSERT obj_area_end <= &3000 AND raster_in_end <= &3000
+
+\ The map's boundaries.
+\ HAZEL: the tables, then the work, below the MOS's &E000.
+ASSERT obj_work_end <= &E000
 \ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
+\ The banks: each section after the last in its bank, below &C000.
+ASSERT raster_state_end <= &C000
+ASSERT live_data_end <= text_ram_end AND text_ram_end <= area_conv_end AND area_conv_end <= &C000
+ASSERT logic_code_end <= live_data_end
+ASSERT logic_db_code_end <= live_glue_end AND live_glue_end <= LOGIC_DB
+\ Main RAM: LIVE, AreaCode, ObjConst, ObjArea, LogicWork, ObjMore, to &3000:
+\ never in &3000-&7FFF, which ACCCON's X switches, as the frame reads them.
+ASSERT obj_area_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
+ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
+\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's page.
+ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
+\ Main RAM's &3000 on (with X clear): the cache and the sort's memory.
+ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= SCREEN
+\ Shadow RAM's &3000 on (with X set): the logic's lists by face.
+ASSERT logic_faces_end <= SCREEN AND LOGIC_FACES_ORG >= &3000
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
