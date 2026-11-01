@@ -1,0 +1,414 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the column fill's kernels
+\ (docs/research/colfill.md)
+\
+\ The inner loops a column fill would run, as it would run them, so that
+\ tools/colfillprice.mjs can time each path in headless jsbeeb and price the
+\ column fill from the model's counts (tools/model/colfill.py) before any of
+\ it is built. Nothing here goes on a disc. mk/raster.mk assembles it alone,
+\ into main RAM, the view at VIEW_ADDR as on the screen.
+\
+\ - The column routines: for each half of the view's byte columns (either
+\   side of CF_SPLIT, so a column's offset, 8 a column, fits X) a run of
+\   `LDA cp+(line AND 3) : STA line's address,X` for dithered patterns and
+\   one of `STA line's address,X` for solid ones, a slot a line and one
+\   more at VIEW_H, then RTS. A run [c_t, c_b) enters at c_t's slot with an
+\   RTS planted on c_b's; each routine keeps its plant (pl, pp) until a run
+\   ends elsewhere, and a run to the bottom ends on the routine's own RTS
+\   when the plant is above it. The kernels time half 0's; half 1's are the
+\   same code at another base, assembled to show they fit.
+\ - A byte column's nodes: runs of lines [ns, ne), nk their kind (0 open),
+\   nn the next (0 none), head each column's first (0: full).
+\ - A face's column table: ct and cb, each pixel column's first line and
+\   end line.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+
+OP_LDA_ZP   = &A5
+OP_STA_ABSX = &9D
+OP_RTS      = &60
+CF_SPLIT    = VIEW_BYTES DIV 2      ; tools/model/colfill.py's COL_SPLIT
+ASSERT 8 * CF_SPLIT <= 256 AND 8 * (VIEW_BYTES - CF_SPLIT) <= 256
+ASSERT VIEW_H < 128
+
+\ Zero page, fixed: the kernels own it all.
+cp      = &70       ; 4: the run's pattern bytes, by line AND 3
+c_t     = &74       ; a run's first line
+c_b     = &75       ; its end
+pl      = &76       ; 4: each routine's planted line (d0, d1, s0, s1)
+pp      = &7A       ; 8: each routine's planted slot, a pointer
+cv_lo   = &82       ; the face's run in this column
+cv_hi   = &83
+cv_prev = &84       ; the node before the one looked at (0: the head)
+cv_col  = &85       ; the byte column
+cv_end  = &86       ; the half's last byte column + 1
+cv_px   = &87       ; its first pixel column (2 cv_col)
+cv_x    = &88       ; its offset in the half (8 a column)
+cv_node = &89
+nfree   = &8A       ; the next free node
+nopen   = &8B       ; columns not full
+mp      = &8C       ; 2: a merged byte's row
+mb      = &8E       ; a merged byte
+ml      = &90       ; 2: the left pixel's pattern
+mr      = &92       ; 2: the right pixel's
+r_y     = &94       ; the line loop's line
+f_yend  = &95       ; the segment's end
+ch_p    = &96       ; 2: each chain's pixel boundary (8.8's high byte)
+ch_xl   = &98       ; 2: ... its low byte
+ch_gl   = &9A       ; 2: each chain's gradient
+ch_gh   = &9C       ; 2
+pa      = &9E       ; 2: each chain's boundary on the line before
+
+\ The nodes' fields and the columns' heads, the face's column table.
+ns      = &3000
+ne      = &3100
+nk      = &3200
+nn      = &3300
+head    = &3400
+ct      = &3500
+cb      = &3600
+cr_scratch = &3700  ; what the solid routines' slot at VIEW_H stores into
+
+SECTION KernCode, org = &1000, guard = &3000, filename = "CKERN", cmos = TRUE
+
+\ ---------------------------------------------------------------------------
+\ The column routines, each from a page.
+
+MACRO DITHERED base
+    FOR y = 0..<VIEW_H
+        LDA cp + (y AND 3)
+        STA base + (y DIV 8) * SCREEN_ROW + (y MOD 8), X
+    NEXT
+    LDA cp                          ; the slot at VIEW_H
+    RTS
+ENDMACRO
+MACRO SOLID base
+    FOR y = 0..<VIEW_H
+        STA base + (y DIV 8) * SCREEN_ROW + (y MOD 8), X
+    NEXT
+    STA cr_scratch, X               ; the slot at VIEW_H
+    RTS
+ENDMACRO
+
+    ALIGN 256
+.cr_d0  DITHERED VIEW_ADDR
+    ALIGN 256
+.cr_d1  DITHERED VIEW_ADDR + 8 * CF_SPLIT
+    ALIGN 256
+.cr_s0  SOLID VIEW_ADDR
+    ALIGN 256
+.cr_s1  SOLID VIEW_ADDR + 8 * CF_SPLIT
+
+\ Each line's slot in each routine (VIEW_H's too).
+.en_d_lo
+FOR y = 0..VIEW_H
+    EQUB LO(cr_d0 + 5 * y)
+NEXT
+.en_d0_hi
+FOR y = 0..VIEW_H
+    EQUB HI(cr_d0 + 5 * y)
+NEXT
+.en_d1_hi
+FOR y = 0..VIEW_H
+    EQUB HI(cr_d1 + 5 * y)
+NEXT
+.en_s_lo
+FOR y = 0..VIEW_H
+    EQUB LO(cr_s0 + 3 * y)
+NEXT
+.en_s0_hi
+FOR y = 0..VIEW_H
+    EQUB HI(cr_s0 + 3 * y)
+NEXT
+ASSERT LO(cr_d0) = 0 AND LO(cr_d1) = 0 AND LO(cr_s0) = 0
+
+\ A merged byte's row: line y of byte column 0 of half 0.
+.mrow_lo
+FOR y = 0..<VIEW_H
+    EQUB LO(VIEW_ADDR + (y DIV 8) * SCREEN_ROW + (y MOD 8))
+NEXT
+.mrow0_hi
+FOR y = 0..<VIEW_H
+    EQUB HI(VIEW_ADDR + (y DIV 8) * SCREEN_ROW + (y MOD 8))
+NEXT
+
+\ RUN routine, i, lo, hi, op, solid: the run [c_t, c_b) of the column whose
+\ offset is in X, through routine i (pl + i, pp + 2 i its plant); the
+\ dithered routines take the pattern from cp, the solid ones cp's first
+\ byte. Clobbers A and Y; keeps X.
+MACRO RUN routine, i, lo, hi, op, solid
+    LDY c_b : CPY pl + i : BEQ planted
+    CPY #VIEW_H : BNE move
+    LDA pl + i : CMP c_t : BCC planted  ; above the run: the routine's own RTS ends it
+.move
+    LDA #op : STA (pp + 2 * i)          ; the old plant out
+    STY pl + i
+    LDA lo,Y : STA pp + 2 * i
+    LDA hi,Y : STA pp + 2 * i + 1
+    LDA #OP_RTS : STA (pp + 2 * i)
+.planted
+    LDY c_t
+    LDA lo,Y : STA go + 1
+    LDA hi,Y : STA go + 2
+    IF solid
+        LDA cp
+    ENDIF
+.go JSR routine
+ENDMACRO
+
+\ ---------------------------------------------------------------------------
+\ The kernels, each called by the harness with its inputs in place.
+
+\ A run in half 0, dithered and solid.
+.k_run_d0
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    RTS
+.k_run_s0
+    LDX cv_x
+    RUN cr_s0, 2, en_s_lo, en_s0_hi, OP_STA_ABSX, TRUE
+    RTS
+
+\ One merged byte, line c_t of the column at offset cv_x in half 0, its
+\ left pixel from pattern (ml) and its right from (mr).
+.k_merge1
+    LDA c_t : AND #3 : TAY
+    LDA (ml),Y : AND #PIX_LEFT : STA mb
+    LDA (mr),Y : AND #PIX_RIGHT : ORA mb : STA mb
+    LDY c_t
+    LDA mrow_lo,Y : STA mp
+    LDA mrow0_hi,Y : STA mp + 1
+    LDY cv_x
+    LDA mb : STA (mp),Y
+    RTS
+
+\ The lines [c_t, c_b) merged, one at a time.
+.k_merge_lines
+{
+.line
+    LDA c_t : AND #3 : TAY
+    LDA (ml),Y : AND #PIX_LEFT : STA mb
+    LDA (mr),Y : AND #PIX_RIGHT : ORA mb : STA mb
+    LDY c_t
+    LDA mrow_lo,Y : STA mp
+    LDA mrow0_hi,Y : STA mp + 1
+    LDY cv_x
+    LDA mb : STA (mp),Y
+    INC c_t : LDA c_t : CMP c_b : BNE line
+    RTS
+}
+
+\ The four phases' merged bytes into cp, for a run of them through the
+\ dithered routine.
+.k_merge4
+    FOR k = 0..3
+        LDY #k
+        LDA (ml),Y : AND #PIX_LEFT : STA cp + k
+        LDA (mr),Y : AND #PIX_RIGHT : ORA cp + k : STA cp + k
+    NEXT
+    RTS
+
+\ The frame's columns: each one node [0, VIEW_H), open.
+.k_init
+{
+    LDX #VIEW_BYTES
+    STX nfree
+    STX nopen
+    LDA #VIEW_H
+.each
+    STZ ns,X : STA ne,X : STZ nk,X : STZ nn,X
+    TXA : STA head - 1,X : LDA #VIEW_H
+    DEX : BNE each
+    INC nfree
+    RTS
+}
+
+\ A face's byte columns [cv_col, cv_end) of half 0 (cv_px, cv_x the first's
+\ pixel column and offset), its pattern dithered in cp, from its column
+\ table: the path where a column's two pixel columns take the same lines,
+\ over open nodes. (The other paths come to the harness as differing.)
+.k_cover_d0
+{
+.col
+    LDX cv_col
+    LDA head,X : BEQ next               ; full
+    TAX                                 ; X: the column's first node
+    LDY cv_px
+    LDA ct,Y : CMP ct + 1,Y : BNE differ
+    STA cv_lo
+    LDA cb,Y : CMP cb + 1,Y : BNE differ
+    STA cv_hi
+    STZ cv_prev
+.walk
+    \ Past the nodes that end at or above the face's first line.
+    LDA cv_lo : CMP ne,X : BCC found
+    STX cv_prev
+    LDA nn,X : TAX : BNE walk
+.next
+    INC cv_px : INC cv_px
+    LDA cv_x : CLC : ADC #8 : STA cv_x
+    INC cv_col
+    LDA cv_col : CMP cv_end : BNE col
+    RTS
+.differ
+    BRK                                 ; (not timed)
+.found
+    \ X is a node [s, e) with e > lo; the face overlaps it unless s >= hi.
+    LDA ns,X : CMP cv_hi : BCS next
+    LDY nk,X : BNE differ               ; half-open (not timed)
+    CMP cv_lo : BCS at_s
+    JMP inside
+.at_s
+    STA c_t
+    LDA cv_hi : CMP ne,X : BCS whole
+    \ [s, hi): the node becomes [hi, e).
+    STA c_b : STA ns,X
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    BRA next
+.whole
+    \ [s, e): the node goes; on to the next if the face goes past it.
+    LDA ne,X : STA c_b
+    LDY cv_prev : BEQ at_head
+    LDA nn,X : STA nn,Y
+    BRA unlinked
+.at_head
+    LDY cv_col
+    LDA nn,X : STA head,Y : BNE unlinked
+    DEC nopen
+.unlinked
+    STX cv_node
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    LDA c_b : CMP cv_hi : BCS next_far
+    LDX cv_node
+    LDA nn,X : TAX : BEQ next_far
+    JMP found
+.next_far
+    JMP next
+.inside
+    \ s < lo.
+    LDA cv_lo : STA c_t
+    LDA ne,X : CMP cv_hi : BCC to_end
+    BEQ at_hi
+    JMP split
+.at_hi
+    \ e = hi: as to_end, but the face ends here.
+    STA c_b
+    LDA cv_lo : STA ne,X
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    JMP next
+.to_end
+    \ [lo, e) with e < hi: the node becomes [s, lo); on to the next.
+    STA c_b
+    LDA cv_lo : STA ne,X
+    STX cv_prev
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    LDX cv_prev
+    LDA nn,X : TAX : BEQ none_after
+    JMP found
+.none_after
+    JMP next
+.split
+    \ [lo, hi) inside: a new node [hi, e) after it, and it becomes [s, lo).
+    LDY nfree : INC nfree
+    LDA cv_hi : STA ns,Y : STA c_b
+    LDA ne,X : STA ne,Y
+    LDA #0 : STA nk,Y
+    LDA nn,X : STA nn,Y
+    TYA : STA nn,X
+    LDA cv_lo : STA ne,X
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    JMP next
+}
+
+\ The line loop for one segment, lines [r_y, f_yend): each chain stepped
+\ (its BRA patched to its step, or past it for a vertical edge), and the
+\ columns it passes on the line put in the column table: chain 0 is the
+\ left (moving left, the columns it passes start on the line: ct; moving
+\ right, they end: cb), chain 1 the right (the other way about).
+.k_lines
+.kl_line
+.kl_sa
+    BRA kl_step_a                       ; patched: kl_step_a or kl_a_done
+.kl_step_a
+    CLC
+    LDA ch_xl : ADC ch_gl : STA ch_xl
+    LDA ch_p : ADC ch_gh : STA ch_p
+    CMP pa : BEQ kl_a_done : BCC kl_a_left
+    \ Moved right: the columns [pa, p) end on this line.
+    LDX pa : LDA r_y
+.kl_ar
+    STA cb,X : INX : CPX ch_p : BNE kl_ar
+    STX pa
+    BRA kl_a_done
+.kl_a_left
+    \ Moved left: the columns [p, pa) start on it.
+    TAX : LDA r_y
+.kl_al
+    STA ct,X : INX : CPX pa : BNE kl_al
+    LDA ch_p : STA pa
+.kl_a_done
+.kl_sb
+    BRA kl_step_b                       ; patched: kl_step_b or kl_b_done
+.kl_step_b
+    CLC
+    LDA ch_xl + 1 : ADC ch_gl + 1 : STA ch_xl + 1
+    LDA ch_p + 1 : ADC ch_gh + 1 : STA ch_p + 1
+    CMP pa + 1 : BEQ kl_b_done : BCC kl_b_left
+    \ Moved right: the columns [pa, p) start on this line.
+    LDX pa + 1 : LDA r_y
+.kl_br
+    STA ct,X : INX : CPX ch_p + 1 : BNE kl_br
+    STX pa + 1
+    BRA kl_b_done
+.kl_b_left
+    \ Moved left: the columns [p, pa) end on it.
+    TAX : LDA r_y
+.kl_bl
+    STA cb,X : INX : CPX pa + 1 : BNE kl_bl
+    LDA ch_p + 1 : STA pa + 1
+.kl_b_done
+    INC r_y : LDA r_y : CMP f_yend : BEQ kl_end
+    JMP kl_line
+.kl_end
+    RTS
+
+\ One run of a column table's stores, line r_y's, columns [X, cv_end): the
+\ line loop's store loop alone, for its cost a column.
+.k_stores
+{
+    LDA r_y
+.al STA ct,X : INX : CPX cv_end : BNE al
+    RTS
+}
+
+\ The background over byte columns [cv_col, cv_end) of half 0, the sky's
+\ pattern dithered in cp: each open node a run.
+.k_bg_d0
+{
+.col
+    LDX cv_col
+    LDY head,X : BEQ next
+.node
+    LDA nk,Y : BNE half
+    LDA ns,Y : STA c_t
+    LDA ne,Y : STA c_b
+    STY cv_node
+    LDX cv_x
+    RUN cr_d0, 0, en_d_lo, en_d0_hi, OP_LDA_ZP, FALSE
+    LDY cv_node
+    LDA nn,Y : TAY : BNE node
+.next
+    LDA cv_x : CLC : ADC #8 : STA cv_x
+    INC cv_col
+    LDA cv_col : CMP cv_end : BNE col
+    RTS
+.half
+    BRK                                 ; (not timed)
+}
+ENDSECTION

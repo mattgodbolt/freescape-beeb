@@ -3,6 +3,8 @@
 
     rasterscenes.py OUT.json
     rasterscenes.py --driller DB.json OUT.json    Driller's entrance views
+    rasterscenes.py --cameras DB.json LIVE.json OUT.json CHECK.json[:N]...
+                                                  the live discs' frames
 
 Random convex polygons in sixteenths, scenes shaped like Driller's (boxes
 with vertical sides seen by a level camera), and the edge cases: slivers,
@@ -514,9 +516,53 @@ def held_writes(frames):
                 f["painter"]["written"] = written
 
 
+def camera_views(db_path, live_path, out, checks):
+    """The live discs' frames as scenes: each distinct area and camera in
+    tools/livecheck.mjs's --json records (checks: each "FILE" or "FILE:N",
+    every Nth frame of it), rendered by the whole-view model (render.py)
+    with the area's objects as they start, so the fills can be compared on
+    the frames the disc draws. Derived from the originals, so built, never
+    committed."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.model import camera as cam, parts, render
+
+    db = json.loads(Path(db_path).read_text())
+    layout = json.loads(Path(live_path).read_text())["areas"]
+    by_id = {a["id"]: a for a in db["areas"]}
+    seen, scenes, skipped = set(), [], []
+    for spec in checks:
+        path, _, every = spec.partition(":")
+        frames = json.loads(Path(path).read_text())["frames"][::int(every or 1)]
+        for f in frames:
+            key = (f["area"], tuple(f["camera"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            area = by_id[layout[f["area"]]["id"]]
+            v = render.render(db, area, cam.Camera(*f["camera"]))
+            try:
+                scenes.append(build({
+                    "name": f"{Path(path).stem}-{f['n']}",
+                    "sky": list(parts.sky(area)), "ground": list(parts.ground(area)),
+                    "horizon": None,
+                    "faces": [(list(parts.pattern(area, x.colour)), [list(p) for p in x.poly]) for x in v.faces],
+                }))
+            except SystemExit as e:
+                # A view the model's own check refuses (its exact edges
+                # against its brute force) isn't a fair test of either fill.
+                skipped.append(f"{e} (area {f['area']}, camera {f['camera']})")
+    Path(out).write_text(json.dumps({"scenes": scenes}) + "\n")
+    print(f"{len(scenes)} views of the live discs' frames, checked against the model's brute force; "
+          f"{len(skipped)} left out, the model's check failing:")
+    for s in skipped:
+        print(f"  {s}")
+
+
 def main():
     if len(sys.argv) == 4 and sys.argv[1] == "--driller":
         return driller_views(sys.argv[2], sys.argv[3])
+    if len(sys.argv) >= 6 and sys.argv[1] == "--cameras":
+        return camera_views(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:])
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
     def built(s):
