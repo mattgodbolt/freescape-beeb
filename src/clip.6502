@@ -357,12 +357,6 @@ ZA_AUTO1 lerp_lo
 \ In two dimensions: the polygon in pa_* (p_n vertices, 16-bit signed view
 \ coordinates).
 
-\ ADDK al, ah, k: pa's 16-bit coordinate al/ah,X plus k (signed, small)
-MACRO ADDK al, ah, k
-    LDA al,X : CLC : ADC #LO(k) : STA al,X
-    LDA ah,X : ADC #HI(k) : STA ah,X
-ENDMACRO
-
 \ COPY2D: pa's vertex X copied to vertex Y
 MACRO COPY2D
     LDA pa_xl,X : STA pa_xl,Y
@@ -371,9 +365,16 @@ MACRO COPY2D
     LDA pa_yh,X : STA pa_yh,Y
 ENDMACRO
 
+\ QUAD_OFF l, h, tab: pa's coordinate (l, h) at X plus tab's offset for X
+\ (four low bytes, then four high)
+MACRO QUAD_OFF l, h, tab
+    LDA l,X : CLC : ADC tab,X : STA l,X
+    LDA h,X : ADC tab+4,X : STA h,X
+ENDMACRO
+
 \ line_quad: the line from vertex 0 to vertex 1 as the polygon a one-pixel
-\ line covers (the model's line_quad): half a pixel each way across its
-\ major axis.
+\ line covers (the model's line_quad): a, b, b, a, moved half a pixel each
+\ way across its major axis.
 .line_quad
 {
     ZA_AUTO2 dx, dy
@@ -405,17 +406,15 @@ ENDMACRO
     \ |dx| >= |dy|: across is y
     LDA dx : CMP dy
     LDA dx+1 : SBC dy+1
+    LDX #3
     BCC steep
-    LDX #0 : ADDK pa_yl, pa_yh, -HALF
-    LDX #1 : ADDK pa_yl, pa_yh, -HALF
-    LDX #2 : ADDK pa_yl, pa_yh, HALF
-    LDX #3 : ADDK pa_yl, pa_yh, HALF
+.flat
+    QUAD_OFF pa_yl, pa_yh, quad_across
+    DEX : BPL flat
     RTS
 .steep
-    LDX #0 : ADDK pa_xl, pa_xh, -HALF
-    LDX #1 : ADDK pa_xl, pa_xh, -HALF
-    LDX #2 : ADDK pa_xl, pa_xh, HALF
-    LDX #3 : ADDK pa_xl, pa_xh, HALF
+    QUAD_OFF pa_xl, pa_xh, quad_across
+    DEX : BPL steep
     RTS
 }
 ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
@@ -429,16 +428,20 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
     LDY #2 : COPY2D
     LDY #3 : COPY2D
     LDA #4 : STA p_n
-    LDX #0 : ADDK pa_xl, pa_xh, -HALF
-    ADDK pa_yl, pa_yh, -HALF
-    LDX #1 : ADDK pa_xl, pa_xh, HALF
-    ADDK pa_yl, pa_yh, -HALF
-    LDX #2 : ADDK pa_xl, pa_xh, HALF
-    ADDK pa_yl, pa_yh, HALF
-    LDX #3 : ADDK pa_xl, pa_xh, -HALF
-    ADDK pa_yl, pa_yh, HALF
+    LDX #3
+.corner
+    QUAD_OFF pa_xl, pa_xh, quad_x
+    QUAD_OFF pa_yl, pa_yh, quad_across
+    DEX : BPL corner
     RTS
 }
+\ the quads' offsets: across a line (and a square's y), and a square's x
+.quad_across
+    EQUB LO(-HALF), LO(-HALF), LO(HALF), LO(HALF)
+    EQUB HI(-HALF), HI(-HALF), HI(HALF), HI(HALF)
+.quad_x
+    EQUB LO(-HALF), LO(HALF), LO(HALF), LO(-HALF)
+    EQUB HI(-HALF), HI(HALF), HI(HALF), HI(-HALF)
 
 \ clip_cut: r = the crossing's other coordinate, P's + lerp(Q's - P's) by
 \ t from fp >= 0 at P and fq < 0 at Q (16-bit signed each, so fp - fq fits
