@@ -171,37 +171,42 @@ def compose(pal, img):
 # placeholders (its score's empty holes, its step and turn boxes, its pitch
 # strip's ticks, the save and load buttons where the position goes); the
 # labels and the credit in the panel's own font; markers for the heading's
-# and the pitch's middles. Colours are the ST's (0 black, 2 yellow, 7
-# orange); text is in a logical colour (TEXT_INK), drawn solid.
+# and the pitch's middles. Colours are the ST's (0 black, 2 yellow, 4 dark
+# red, 7 orange, 11 purple); text is in a logical colour (LABEL_INK), drawn
+# solid.
 BLACK, YELLOW, DARK_RED, ORANGE, PURPLE = 0, 2, 4, 7, 11
 FILLS = [                   # ST colour, x0, y0, x1, y1 (inclusive)
     (BLACK, 88, 121, 115, 128),         # the score's box
     (BLACK, 5, 169, 56, 184),           # the shield's and energy's box
     (BLACK, 0, 134, 19, 158),           # the position's, for the save and load buttons
-    (BLACK, 23, 142, 36, 159),          # the step's and turn's, under the heading
-    (BLACK, 38, 129, 47, 158),          # the pitch's tape, and beside it ...
-    (PURPLE, 46, 129, 46, 158),         # ... its bar ...
-    (ORANGE, 46, 143, 47, 143),         # ... and its middle
-    (PURPLE, 24, 134, 35, 140),         # the heading's tape
-    (BLACK, 24, 133, 35, 133),          # over and under it
-    (BLACK, 24, 141, 35, 141),
-    (YELLOW, 30, 133, 30, 133),         # its middle
-    (YELLOW, 30, 141, 30, 141),
+    (BLACK, 23, 143, 36, 159),          # the step's and turn's, under the heading
+    (BLACK, 38, 128, 47, 159),          # the pitch's tape, and beside it ...
+    (PURPLE, 46, 128, 46, 159),         # ... its bar ...
+    (ORANGE, 46, 144, 47, 144),         # ... and its middle
+    (PURPLE, 24, 135, 35, 141),         # the heading's tape
+    (BLACK, 24, 134, 35, 134),          # over and under it
+    (BLACK, 24, 142, 35, 142),
+    (YELLOW, 30, 134, 30, 134),         # its middle
+    (YELLOW, 30, 142, 30, 142),
     (DARK_RED, 80, 115, 91, 116),       # the lights
     (BLACK, 0, 186, 71, 191),           # the strip along the bottom
     (BLACK, 54, 154, 76, 159),          # the vehicle's name, under its picture
     (BLACK, 0, 0, panel.WIDTH - 1, 7),  # the row over the view
 ]
 CREDIT = "DRILLER (C) INCENTIVE SOFTWARE 1987"
-LABELS = [                  # text, x (or None: centred), line, logical colour
-    (CREDIT, None, 1, 3),
-    ("TECH DEMO", 2, 187, 1),
-    ("FPS", 55, 187, 1),
-    ("SHIELD", 33, 171, 1),
-    ("ENERGY", 33, 178, 1),
-    ("X", 0, 137, 1),
-    ("Y", 0, 144, 1),
-    ("Z", 0, 151, 1),
+# The ST's labels are red, which through PAL (and on an RGB monitor, at
+# three pixels a glyph) blurs into the console: white reads on both, and
+# stands apart from the values' yellow.
+LABEL_INK = 7
+LABELS = [                  # text, x (or None: centred), line
+    (CREDIT, None, 1),
+    ("TECH DEMO", 2, 187),
+    ("FPS", 55, 187),
+    ("SHIELD", 33, 171),
+    ("ENERGY", 33, 178),
+    ("X", 0, 136),
+    ("Y", 0, 144),
+    ("Z", 0, 152),
 ]
 
 
@@ -215,7 +220,8 @@ def paint(pic):
 
 def texts(rows):
     """LABELS into the picture's pixels (logical colours, rows of WIDTH)."""
-    for text, x, y, ink in LABELS:
+    ink = LABEL_INK
+    for text, x, y in LABELS:
         px = panel.text_pixels(text)
         w = len(px[0])
         if x is None:
@@ -322,13 +328,16 @@ BAR_ST_RED, BAR_ST_YELLOW = 8, 20   # pixels of the cut inside the ST's bar's re
 
 
 def check_layout():
-    """Every cell on the screen, off the view, on a byte, and on no other."""
+    """Every cell on the screen, off the view, on a byte, inside a
+    character row, and on no other."""
     seen = {}
     for f in panel.FIELDS:
         h = panel.TABLES[f[5]][0]
         for i, (x, y) in enumerate(panel.cell_places(f)):
             if x % 2:
                 raise SystemExit(f"{f[0]}: cell {i} isn't on a byte")
+            if y % 8 + h > 8:
+                raise SystemExit(f"{f[0]}: cell {i} crosses a character row")
             for k in range(h):
                 for px in range(x, x + 4):
                     if not (0 <= px < panel.WIDTH and 0 <= y + k < panel.LINES) or panel.in_view(px, y + k):
@@ -533,16 +542,19 @@ def assembly(build, packed):
     L += [f"    EQUB LO(pt_{t})" for t, _i, _p in kinds]
     L.append(".pk_thi")
     L += [f"    EQUB HI(pt_{t})" for t, _i, _p in kinds]
-    lines = []                  # each kind's ink and paper lines, shared where alike
-    for _t, ink, paper in kinds:
-        for run in (ink, paper):
-            if run not in lines:
-                lines.append(run)
-    for part, idx in (("i", 1), ("p", 2)):
+    # each kind's paper by line, and its paper EOR its ink (what a lit
+    # pixel changes), shared where alike
+    runs = [(paper, tuple(i ^ p for i, p in zip(ink, paper))) for _t, ink, paper in kinds]
+    lines = []
+    for run in runs:
+        for r in run:
+            if r not in lines:
+                lines.append(r)
+    for part, idx in (("p", 0), ("d", 1)):
         L.append(f".pk_{part}lo")
-        L += [f"    EQUB LO(pl_{lines.index(k[idx])})" for k in kinds]
+        L += [f"    EQUB LO(pl_{lines.index(r[idx])})" for r in runs]
         L.append(f".pk_{part}hi")
-        L += [f"    EQUB HI(pl_{lines.index(k[idx])})" for k in kinds]
+        L += [f"    EQUB HI(pl_{lines.index(r[idx])})" for r in runs]
     for i, run in enumerate(lines):
         L += equb(f"pl_{i}", run)
     for t in panel.TABLES:

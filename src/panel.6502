@@ -81,7 +81,10 @@ SECTION Work
 .panel_behind   SKIP 1              ; panel_catch_up's calls since the panel was last all drawn
 .panel_lines    SKIP 2 * PANEL_MAX_H    ; panel_draw's: a glyph cell's bytes, the left column's then the right's
 .panel_num      SKIP 3              ; panel_number's
+.panel_cache    SKIP PC_BYTES       ; ... each number as last shown (PC_SCORE ..), the vehicle's and the area's
 ENDSECTION
+PC_SCORE = 0 : PC_STEP = 3 : PC_TURN = 6 : PC_X = 9 : PC_Z = 12 : PC_Y = 15
+PC_VEHICLE = 18 : PC_AREA = 19 : PC_BYTES = 20
 
 \ panel_set: cell X to show A. Keeps A, X and Y. (In the section the
 \ includer includes this file in, which must be main RAM's, below &3000:
@@ -149,12 +152,16 @@ SECTION PanelData
     INY : BNE in
     INC dst+1 : BPL page
     LDA #ACCCON_X : TRB acccon
-    \ nothing shown, nothing wanted
+    \ nothing shown, nothing wanted, no number
     LDX #PANEL_CELLS - 1
 .cell
     LDA #&FF : STA panel_shown,X
     STZ panel_want,X
     DEX : BPL cell
+    LDX #PC_BYTES - 1
+.number
+    STA panel_cache,X
+    DEX : BPL number
     LDA #1 : STA panel_gen
     STZ panel_seen : STZ panel_left : STZ panel_free : STZ panel_behind
     RTS
@@ -181,6 +188,7 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
 .draw
     PHX
     JSR panel_draw
+.drawn                                          ; (tools/livecheck.mjs times panel_draw to here)
     PLX
     LDA panel_want,X : STA panel_shown,X
 .same
@@ -233,10 +241,11 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
 \ panel_draw: cell X's wanted value into both buffers; ACCCON's X as it
 \ was. A glyph cell: each line's nibble (bit 3 the leftmost pixel) as two
 \ bytes, each pixel the kind's ink for the line where it's lit, else its
-\ paper (paper EOR ((paper EOR ink) AND mask)); a tile: its eight bytes.
+\ paper: paper EOR ((paper EOR ink) AND mask), the kind keeping paper and
+\ paper EOR ink a line; a tile: its eight bytes.
 .panel_draw
 {
-    ZA_AUTO2 at, g, ink, paper, p
+    ZA_AUTO2 at, right, g, diff, paper
     ZA_AUTO1 h, was, d, v
     LDA pc_lo,X : STA at
     LDA pc_hi,X : STA at+1
@@ -256,7 +265,7 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
 .glyph
     LDY pc_kind,X
     LDA pk_h,Y : STA h
-    LDA pk_ilo,Y : STA ink : LDA pk_ihi,Y : STA ink+1
+    LDA pk_dlo,Y : STA diff : LDA pk_dhi,Y : STA diff+1
     LDA pk_plo,Y : STA paper : LDA pk_phi,Y : STA paper+1
     LDA pk_tlo,Y : STA g : LDA pk_thi,Y : STA g+1
     LDX pk_stride,Y                             ; g + v stride
@@ -269,12 +278,14 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
     \ the cell's lines, left column then right
     LDY #0
 .line
-    LDA (ink),Y : EOR (paper),Y : STA d
-    LDA (g),Y : LSR A : LSR A : TAX
-    LDA d : AND pair,X : EOR (paper),Y : STA panel_lines,Y
-    LDA (g),Y : AND #3 : TAX
-    LDA d : AND pair,X : EOR (paper),Y : STA panel_lines + PANEL_MAX_H,Y
+    LDA (diff),Y : STA d
+    LDA (g),Y : TAX
+    LDA d : AND mask_left,X : EOR (paper),Y : STA panel_lines,Y
+    LDA d : AND mask_right,X : EOR (paper),Y : STA panel_lines + PANEL_MAX_H,Y
     INY : CPY h : BNE line
+    \ the right column's address
+    LDA at : CLC : ADC #8 : STA right
+    LDA at+1 : ADC #0 : STA right+1
     LDA #ACCCON_X : TSB acccon
     JSR put
     LDA #ACCCON_X : TRB acccon
@@ -284,23 +295,15 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
     TSB acccon
 .main
     RTS
-\ put: the cell's lines at at, into the buffer X selects: down the byte
-\ column, on to the next character row's first line after its eighth.
+\ put: the cell's lines at at and right, down their byte columns, into the
+\ buffer X selects (every cell is inside a character row: tools/mkpanel.py
+\ checks).
 .put
-    LDA at : STA p : LDA at+1 : STA p+1
-    LDX #0
+    LDY #0
 .put_line
-    LDA panel_lines,X : STA (p)
-    LDY #8 : LDA panel_lines + PANEL_MAX_H,X : STA (p),Y
-    INX : CPX h : BEQ put_done
-    LDA p : AND #7 : CMP #7 : BEQ put_row
-    INC p                                       ; (lines 0-6 of a column: no carry)
-    BRA put_line
-.put_row
-    LDA p : CLC : ADC #LO(SCREEN_ROW - 7) : STA p
-    LDA p+1 : ADC #HI(SCREEN_ROW - 7) : STA p+1
-    BRA put_line
-.put_done
+    LDA panel_lines,Y : STA (at),Y
+    LDA panel_lines + PANEL_MAX_H,Y : STA (right),Y
+    INY : CPY h : BNE put_line
     RTS
 \ tile: the tile's eight bytes down its byte column, into the buffer X selects
 .tile
@@ -309,9 +312,16 @@ PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
     LDA (g),Y : STA (at),Y
     DEY : BPL tile_line
     RTS
-\ A line's two pixels (bits 1 and 0 of a nibble's half) as a byte's mask.
-.pair
-    EQUB 0, PIX_RIGHT, PIX_LEFT, PIX_LEFT OR PIX_RIGHT
+\ A line's four pixels (a nibble, bit 3 the leftmost) as the left byte's
+\ mask and the right's.
+.mask_left
+    FOR n = 0..15
+        EQUB WHERE((n AND 8) <> 0, PIX_LEFT, 0) OR WHERE((n AND 4) <> 0, PIX_RIGHT, 0)
+    NEXT
+.mask_right
+    FOR n = 0..15
+        EQUB WHERE((n AND 2) <> 0, PIX_LEFT, 0) OR WHERE((n AND 1) <> 0, PIX_RIGHT, 0)
+    NEXT
 }
 
 \ ---------------------------------------------------------------------------
@@ -332,20 +342,20 @@ ENDSECTION
     ZA_AUTO2 nm
     \ the score: 24 bits, seven digits
     LDA Score : STA panel_num : LDA Score+1 : STA panel_num+1 : LDA Score+2 : STA panel_num+2
-    LDX #PF_SCORE : LDA #PN_SCORE : JSR panel_number
+    LDX #PF_SCORE : LDY #PC_SCORE : LDA #PN_SCORE : JSR panel_number
     \ the step: three digits; the turn, in degrees: two, and the sign
     LDA Step : JSR panel_byte
-    LDX #PF_STEP : LDA #PN_STEP : JSR panel_number
+    LDX #PF_STEP : LDY #PC_STEP : LDA #PN_STEP : JSR panel_number
     LDA Turn : ASL A : ASL A : CLC : ADC Turn : JSR panel_byte    ; (5 Turn, a byte, as $B7C9)
-    LDX #PF_TURN : LDA #PN_TURN - 1 : JSR panel_number
+    LDX #PF_TURN : LDY #PC_TURN : LDA #PN_TURN - 1 : JSR panel_number
     LDA #PC_DEGREE : JSR panel_set
     \ the position, over the area's scale: x, z, y
     LDA PANEL_POS : STA panel_num : LDA PANEL_POS+1 : STA panel_num+1
-    LDX #PF_X : JSR position
+    LDX #PF_X : LDY #PC_X : JSR position
     LDA PANEL_POS+4 : STA panel_num : LDA PANEL_POS+5 : STA panel_num+1
-    LDX #PF_Z : JSR position
+    LDX #PF_Z : LDY #PC_Z : JSR position
     LDA PANEL_POS+2 : STA panel_num : LDA PANEL_POS+3 : STA panel_num+1
-    LDX #PF_Y : JSR position
+    LDX #PF_Y : LDY #PC_Y : JSR position
     \ the energy and shield
     LDA Energy : LDX #PF_ENERGY : JSR panel_bar
     LDA Shield : LDX #PF_SHIELD : JSR panel_bar
@@ -398,6 +408,8 @@ ENDIF
     CMP #5 : BCC vehicle
     LDA #4
 .vehicle
+    CMP panel_cache + PC_VEHICLE : BEQ lights   ; (as last shown)
+    STA panel_cache + PC_VEHICLE
     STA t
     \ its name: pm_vehicle + 5 t
     ASL A : ASL A : CLC : ADC t : TAY
@@ -424,6 +436,8 @@ ENDIF
     LDA ShootMode : JSR light
     \ the area's name
     LDA panel_area : CMP #PANEL_AREAS : BCS no_name
+    CMP panel_cache + PC_AREA : BEQ no_name     ; (as last shown)
+    STA panel_cache + PC_AREA
     JSR names
 .no_name
 IF NOT(PANEL_FREE)
@@ -444,9 +458,12 @@ IF NOT(PANEL_FREE)
 ENDIF
 .valued                                         ; (tools/livecheck.mjs: the panel's values are set)
     RTS
-\ position: panel_num's word over AreaScale, four digits, into cells X on
+\ position: panel_num's word over AreaScale, four digits, into cells X
+\ on (its place in panel_cache Y)
 .position
+    PHY
     LDA AreaScale : JSR panel_divide
+    PLY
     STZ panel_num+2
     LDA #PN_X : JMP panel_number
 \ light: cell X on if A isn't 0
@@ -518,11 +535,23 @@ ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
 
 \ panel_number: panel_num (24 bits) as A digits, leading zeros, its low
 \ ones if it's longer (as the original's $9390), into cells X on; X ends
-\ past them.
+\ past them. Y is the number's place in panel_cache, which keeps the
+\ number last shown there: the same number again leaves its cells as they
+\ are (panel_init fills the cache with &FF, which no number has: the score
+\ stops at &7FFFFF, the rest are words).
 .panel_number
 {
     ZA_AUTO1 n, k
     STA n
+    LDA panel_num : CMP panel_cache,Y : BNE changed
+    LDA panel_num+1 : CMP panel_cache+1,Y : BNE changed
+    LDA panel_num+2 : CMP panel_cache+2,Y : BNE changed
+    TXA : CLC : ADC n : TAX
+    RTS
+.changed
+    LDA panel_num : STA panel_cache,Y
+    LDA panel_num+1 : STA panel_cache+1,Y
+    LDA panel_num+2 : STA panel_cache+2,Y
     \ panel_num mod 10^n: POWERS[7 - n] is 10^n
     LDA #7 : SEC : SBC n : TAY
     JSR times

@@ -277,8 +277,17 @@ cpu.debugInstruction.add((addr, opcode) => {
         lastTaking = now();
     } else if (addr === PANEL_WAITING && bank === BANK_DATA) {
         panelWaits++;
+    } else if (addr === PANEL_VALUES && bank === BANK_DATA) {
+        valuesFrom = now();
     } else if (addr === PANEL_VALUED && bank === BANK_DATA) {
+        if (valuesFrom !== null) valuesCycles.push(now() - valuesFrom);
+        valuesFrom = null;
         onValued();
+    } else if (addr === PANEL_DRAW && bank === BANK_DATA) {
+        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS };
+    } else if (addr === PANEL_DRAWN && bank === BANK_DATA && drawFrom) {
+        (drawFrom.tile ? tileCycles : glyphCycles).push(now() - drawFrom.t);
+        drawFrom = null;
     } else if (addr === IDLE) {
         onIdle();
     } else if (addr === CLOCK_READ) {
@@ -365,6 +374,12 @@ cpu.debugInstruction.add((addr, opcode) => {
 const BANK_DATA = sym("BANK_DATA");
 const PANEL_WANT = sym("panel_want"), PANEL_SHOWN = sym("panel_shown"), PANEL_CELLS = sym("PANEL_CELLS");
 const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALUED = sym("panel_values.valued");
+// what the panel costs: each panel_values (from its call to .valued), and
+// each cell's draw (panel_draw, from its call to panel_sync's .drawn)
+const PANEL_VALUES = sym("panel_values"), PANEL_DRAW = sym("panel_draw"), PANEL_DRAWN = sym("panel_sync.drawn");
+const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_CELL_US = sym("PANEL_CELL_US");
+const valuesCycles = [], glyphCycles = [], tileCycles = [];
+let valuesFrom = null, drawFrom = null;
 const PF = (f) => [sym(`PF_${f}`), sym(`PN_${f}`)];
 const [PF_NAME, PN_NAME] = PF("NAME"), [PF_MESSAGE, PN_MESSAGE] = PF("MESSAGE"), [PF_FPS, PN_FPS] = PF("FPS");
 const panelBuild = JSON.parse(fs.readFileSync(path.join(root, "build/panel/panel.json"), "utf8"));
@@ -1186,9 +1201,18 @@ valued.forEach((v, n) => {
         `(the cells ${v.want.join(",")}; the model's ${want.join(",")}; from ${JSON.stringify(v.mem)})`);
     else valuedOk++;
 });
+// Each cell's draw must fit the beam's window it was begun in: PANEL_CELL_US.
+const drawMost = Math.max(0, ...glyphCycles, ...tileCycles);
+if (drawMost > 2 * PANEL_CELL_US) fail(`a cell took ${drawMost} cycles to draw, past PANEL_CELL_US (${PANEL_CELL_US} us)`);
+const cyc = (xs) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return s.length ? `${s[s.length >> 1]} / ${s[Math.min(s.length - 1, Math.ceil(0.9 * s.length) - 1)]} / ${s.at(-1)}` : "-";
+};
 console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} sets of cells, ${statesOk} the model's ` +
     `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's; drawn as wanted when settled ` +
     `${panelSettled} times; ${linesChecked} frames with their area's name and message; ${panelWaits} waits for the beam`);
+console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${cyc(valuesCycles)} (${valuesCycles.length}); ` +
+    `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length})`);
 
 // --- The figures, by what each frame did: an area's first frame, the
 // angles changed (the transform's cache refilled), the camera moved (the

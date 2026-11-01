@@ -239,10 +239,11 @@ def heading_cells(yaw):
 # turn, a tick at every step and the angle from level every six (30
 # degrees, folded at 90 as the ST's strip folds its own), in two columns of
 # cells: the tens and the units with the ticks. The window is PITCH_CELLS
-# cells of PITCH_H lines; the logic's pitch is at its line PITCH_MID.
-PITCH_H = 6
-PITCH_CELLS = 5
-PITCH_MID = 14
+# cells of PITCH_H lines, a character row each; the logic's pitch is at its
+# line PITCH_MID.
+PITCH_H = 8
+PITCH_CELLS = 4
+PITCH_MID = 16
 PITCH_LINES = 2 * STEPS
 
 
@@ -273,12 +274,12 @@ def pitch_cells(pitch):
     return [(top + PITCH_H * j) % PITCH_LINES for j in range(PITCH_CELLS)]
 
 
-# Lights: a cell two lines high, lit or not.
+# Lights: a cell two lines high, three pixels lit or none.
 LIGHT_H = 2
 
 
 def light_table():
-    return [[0, 0], [0x6, 0x6]]
+    return [[0, 0], [0xE, 0xE]]
 
 
 TABLES = {
@@ -304,7 +305,8 @@ def table_lines(name):
 # table, and its ink: a logical colour, or None for the bars' (the ST's
 # bars' own, line by line: tools/mkpanel.py). The paper is the picture
 # under the cell, which tools/mkpanel.py makes one colour a line under each
-# cell. docs/research/panel.md has the layout.
+# cell. Every cell lies inside a character row, so its lines are one byte
+# apart (tools/mkpanel.py checks). docs/research/panel.md has the layout.
 YELLOW, RED, GREEN, WHITE, BLACK = 3, 1, 2, 7, 0
 
 FIELDS = [
@@ -314,16 +316,16 @@ FIELDS = [
     ("name",     62, 178, 14, True,  "font",    YELLOW),
     ("shield",    6, 170,  6, True,  "bar",     None),
     ("energy",    6, 178,  6, True,  "bar",     None),
-    ("heading",  24, 135,  3, True,  "heading", YELLOW),
-    ("pitch0",   38, 129,  5, False, "pitch0",  YELLOW),
-    ("pitch1",   42, 129,  5, False, "pitch1",  YELLOW),
+    ("heading",  24, 136,  3, True,  "heading", YELLOW),
+    ("pitch0",   38, 128,  4, False, "pitch0",  YELLOW),
+    ("pitch1",   42, 128,  4, False, "pitch1",  YELLOW),
     ("step",     24, 146,  3, True,  "font",    YELLOW),
     ("turn",     24, 153,  3, True,  "font",    YELLOW),
-    ("x",         4, 137,  4, True,  "font",    YELLOW),
+    ("x",         4, 136,  4, True,  "font",    YELLOW),
     ("z",         4, 144,  4, True,  "font",    YELLOW),
-    ("y",         4, 151,  4, True,  "font",    YELLOW),
+    ("y",         4, 152,  4, True,  "font",    YELLOW),
     ("vehicle",  56, 155,  5, True,  "font",    YELLOW),
-    ("fps",      38, 187,  4, True,  "font",    WHITE),
+    ("fps",      38, 187,  4, True,  "font",    YELLOW),
     ("cross",    80, 115,  1, True,  "light",   YELLOW),
     ("shoot",    86, 115,  1, True,  "light",   WHITE),
 ]
