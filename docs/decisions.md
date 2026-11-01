@@ -533,3 +533,12 @@ pattern byte changes every line, so every store needs a load. The row
 fill stays; `make colfill` keeps the study checked. A column fill for busy
 views alone would need dithers that don't change line to line, which
 changes the picture (decision 8).
+
+## 45. The cone's side crossings by reciprocal (2026-11-01, autonomous; amends 41)
+
+The cone's crossings on the view's sides take the 2D clip's nine-bit
+reciprocal (`clip.side_d`), rounded and capped at the side's length,
+instead of a division. Against the model before it: 382 of 3,515,200
+pixels differ over the entrance views and walks (at most 43 in one view),
+no draw order changes; against the ZX oracle away from edges, 1,293,937 of
+1,294,548 pixels agree (1,294,087 of 1,294,706 before).

@@ -102,6 +102,9 @@ includes.)
 - Anything that touches the front end's data at main RAM `&3000` up to
   `SCREEN` (`ObjMemo`, `ObjConst`, `ObjArea`, the area's working copy)
   needs ACCCON X clear, or it reads and writes shadow RAM instead.
+- Baron's ZA_ENTRY input warning accepts a value as supplied only if some
+  path writes it before the read: a loop's back edge counts, but in a
+  written-out sequence the first call must take the writing path.
 - Labels inside a baron macro's expansion stay private, even when a named
   label comes just before the macro's call.
 - `ZA_AUTO` zero page is shared between routines: read a routine's variable

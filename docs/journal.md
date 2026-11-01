@@ -582,3 +582,20 @@ p90 / max on the 65 views drawn fresh, the row fill measured 110,119 /
 258,327 / 371,188. Not built (decision 44). The study also found two
 free-camera frames in area 4 that fail the model's own exact-edges check;
 the disc drew the model's view for them.
+
+## 2026-11-01: the front end's sixth round (track V)
+
+Four changes (`docs/research/objects.md`): the sort starts from the last
+frame's order (its median 6,248 cycles a step to 722); a level camera's
+edge normals in closed form; vertex orders written out; the band test's
+middle path and the drawn test's signs first; the cone's lines square to
+two sides; side crossings by reciprocal (decision 45). Measured with
+`objectcheck --entrance` (median / p90 / max): a step from 133,992 /
+176,870 / 219,529 cycles to 121,789 / 160,683 / 191,793; a turn from
+170,659 / 215,159 / 292,572 to 162,298 / 209,373 / 287,771; over the 648
+level views at every yaw, the median from 104,545 to 99,604. On the live
+disc, stages 1-7 walking from a median 1.03 fields to 0.93. The floor is
+now 16,147 cycles of a step's median, a third of the cone. This round's
+agent was paused once, because its shell writes inside its worktree (under
+`.claude/`) stopped for Matt's permission; it finished with files changed
+only through the editing tools, and nothing more stopped.

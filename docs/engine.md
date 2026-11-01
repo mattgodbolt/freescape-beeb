@@ -186,8 +186,8 @@ In order. Formats are the model's; the 6502 matches them exactly.
    the face's image with nothing cut away (`tools/model/clip.py`), so there
    is no near plane for polygons, and no far plane. An edge with both ends
    behind the eye has no line (the image is inside its plane already); a
-   line's crossing with a side of the rectangle is that line's own, one
-   division; and two consecutive edges' lines meet at their shared vertex's
+   line's crossing with a side of the rectangle is that line's own, by the
+   2D clip's nine-bit reciprocal (decision 45); and two consecutive edges' lines meet at their shared vertex's
    projected image when the projection takes it. A line or a point with
    an end outside the band is clipped in 3D to `ZNEAR` and the planes
    `x = ±z`, `2y = ±z` first.
