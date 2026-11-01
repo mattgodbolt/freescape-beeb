@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""The live disc's data (src/live.6502), and the model's views of the
-cameras its check saw (tools/livecheck.mjs).
+"""The live disc's data (src/live.6502), the passes its check drives, and
+the model's views of the cameras its check saw (tools/livecheck.mjs).
 
     mklive.py DB.json AREAS.json OUTDIR
+    mklive.py --trace SNAP.z80 OUT.json SCENARIO...
     mklive.py DB.json --render < cameras.json > views.json
 
 The first form writes into OUTDIR:
@@ -12,19 +13,26 @@ The first form writes into OUTDIR:
                 centred) and its patterns (sky, then colour indices 1-15,
                 four bytes each: tools/model/colours.py's, decision 8b) in
                 the database's order of areas (AREAS.json's, which
-                area_enter takes an area's index in); every entrance's area
-                (its index in that order), Driller's id and camera
-                (tools/model/camera.py's from_entrance), in the database's
-                order; and the step along the view for each yaw;
+                area_enter takes an area's index in), and each area id's
+                index in it; and, for the free camera's build, in section
+                LiveGlue, every entrance's area (its index in that order),
+                Driller's id and camera (tools/model/camera.py's
+                from_entrance), in the database's order, and the step along
+                the view for each yaw;
     live.json   the same entrances, for the check.
 
 The step is the model's walk (tools/objectcases.py's): LIVE_STEP world units
 along the yaw, floor(LIVE_STEP sin / 64) across and floor(LIVE_STEP cos /
 64) along z, from the original's sine table.
 
-The second form reads a list of {"area": its directory index, "camera": [x,
-y, z, yaw, pitch, roll]} and writes, for each, the model's view
-(tools/model/render.py) as VIEW_H rows of VIEW_BYTES bytes in hex.
+The second form writes the scenarios' passes, and a tour of every entrance,
+as tools/logic/ takes them (trace(), below).
+
+The third reads a list of {"area": its directory index, "camera": [x, y, z,
+yaw, pitch, roll]}, with the objects' "hidden" flags and the "cross" if the
+logic's disc drew them, and writes, for each, the model's view
+(tools/model/render.py, with the crosshair over it) as VIEW_H rows of
+VIEW_BYTES bytes in hex.
 
 Derived from the originals (make data, make colours), so built, never
 committed (decision 6).
@@ -40,6 +48,7 @@ from tools.model import camera as cam, parts, render, view, writer  # noqa: E402
 
 TEXT_COLS = view.read_defs()["SCREEN_COLS"] // 4
 LIVE_STEP = 32                      # world units a frame's step: half a cell
+AREA_IDS = 128                      # the logic's area ids are below this (tools/mklogicdata.py's check)
 
 
 def centred(text):
@@ -97,6 +106,17 @@ def generate(db, layout, out):
         for c in range(1, 16):
             pats += list(parts.pattern(a, c))
     L += equb("ld_pats", pats)
+    # Each area id's index in that order, &FF for none: the logic names an
+    # area by its id (AreaId).
+    of = [0xFF] * AREA_IDS
+    for i, a in enumerate(areas):
+        assert 0 < a["id"] < AREA_IDS, a["id"]
+        of[a["id"]] = i
+    L.append(f"LIVE_AREA_IDS = {AREA_IDS}")
+    L += equb("ld_area_of", of)
+    L.append("ENDSECTION")
+    # The free camera's (src/live.6502's FREE_CAMERA build), in its glue.
+    L += ["", "IF NOT(LIVE_LOGIC)", "SECTION LiveGlue"]
     for name, f in (("en_area", lambda v: v["area"]), ("en_id", lambda v: v["entrance"]),
                     ("en_xl", lambda v: v["camera"][0] & 255), ("en_xh", lambda v: v["camera"][0] >> 8),
                     ("en_yl", lambda v: v["camera"][1] & 255), ("en_yh", lambda v: v["camera"][1] >> 8),
@@ -107,7 +127,7 @@ def generate(db, layout, out):
     # The step for each yaw, signed bytes.
     L += equb("st_dx", ((LIVE_STEP * sin[y]) // 64 & 255 for y in range(cam.STEPS)))
     L += equb("st_dz", ((LIVE_STEP * cos[y]) // 64 & 255 for y in range(cam.STEPS)))
-    L.append("ENDSECTION")
+    L += ["ENDSECTION", "ENDIF"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "data.6502").write_text("\n".join(L) + "\n")
     (out / "live.json").write_text(json.dumps({
@@ -117,14 +137,187 @@ def generate(db, layout, out):
     print(f"live: {len(ens)} entrances in {len(areas)} areas")
 
 
+def mode2_left(c):
+    """src/defs.6502's: logical colour c as a MODE 2 byte's left pixel."""
+    return ((c & 8) << 4) | ((c & 4) << 3) | ((c & 2) << 2) | ((c & 1) << 1)
+
+
+CROSS_DX = (-2, 2, 0, 0, 0, 0)
+CROSS_DY = (0, 0, -3, -2, 2, 3)
+
+
+def crosshair(rows, cross_x, cross_y):
+    """The crosshair as src/live.6502 draws it (lv_cross_on): the original's
+    ($AAA0) at half the width, EORed over the view's rows (lists of bytes):
+    its centre the pixel ((CrossX - 1) DIV 2, VIEW_H - CrossY), an arm a
+    pixel across at two each side, two lines up and down at two and three,
+    each pixel inside the view turned to its opposite colour (EOR 7)."""
+    bc = ((cross_x - 1) & 0xFF) >> 1
+    r = (view.VIEW_H - cross_y) & 0xFF
+    for dx, dy in zip(CROSS_DX, CROSS_DY):
+        px, py = (bc + dx) & 0xFF, (r + dy) & 0xFF
+        if px < view.VIEW_W and py < view.VIEW_H:
+            rows[py][px >> 1] ^= mode2_left(7) >> (px & 1)
+
+
 def render_cameras(db, layout_areas, cameras):
+    """Each request's view: {"area": its directory index, "camera": [x, y,
+    z, yaw, pitch, roll]}, and with the logic "hidden" (each object's, in
+    the logic's index order: the area's records, then the globals) and
+    "cross" ([CrossX, CrossY] if it's shown)."""
     by_id = {a["id"]: a for a in db["areas"]}
     out = []
     for c in cameras:
         area = by_id[layout_areas[c["area"]]["id"]]
-        v = render.render(db, area, cam.Camera(*c["camera"]))
-        out.append([row.hex() for row in writer.view_bytes(v.lines)])
+        d = db
+        hidden = c.get("hidden")
+        if hidden is not None:
+            objs = area["objects"]
+            if len(hidden) != len(objs) + len(db["globals"]):
+                raise SystemExit(f"area {area['id']}: {len(hidden)} objects' flags for "
+                                 f"{len(objs)} records and {len(db['globals'])} globals")
+            area = dict(area, objects=[dict(o, initially_invisible=h) for o, h in zip(objs, hidden)])
+            d = dict(db, globals=[dict(o, initially_invisible=h) for o, h in zip(db["globals"], hidden[len(objs):])])
+        v = render.render(d, area, cam.Camera(*c["camera"]))
+        rows = [bytearray(row) for row in writer.view_bytes(v.lines)]
+        if c.get("cross"):
+            crosshair(rows, *c["cross"])
+        out.append([row.hex() for row in rows])
     return out
+
+
+# --- The check's passes ------------------------------------------------------
+
+KEYS_RUN = """
+B
+O
+B
+SPACE
+Q x3
+P x2
+SPACE
+A x2
+W
+Z x2
+X
+O
+U
+K
+"""
+
+def trace(snap, out_path, paths):
+    """What the live disc's logic must do, pass by pass, for
+    tools/livecheck.mjs: tools/logic/ (decision 18's fix on) run on each
+    scenario as tools/logictrace.py runs it, and a tour of every entrance
+    by the FCL's GOTO, each from the in-play snapshot. Each step as
+    logictrace.py's, and for a pass: "walks", each move's walk (where it
+    began and where it stopped, before the margin's push, and InJet, as
+    hook_walked sees them), and "loaded", whether an area loaded; for any
+    step, "then": what the disc's renderer changes before the next pass
+    (the screen's colours, $A77A, once an area has loaded: lv_switched).
+    A step the original would hang in ends its run: the disc would hang
+    too."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import logictrace
+    from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen
+    from logic.hooks import Hooks
+    from logic.oracle import Original, SCRIPT
+    from logic.passes import run_pass
+    from logic.state import VARS, State, database
+    lmove.FIX_CORNER = True     # decision 18: the port's logic
+    seen = {"walks": [], "loaded": False, "first": False}
+    real_move, real_keep, real_load = lmove.move, lmove.keep_clear, larea.load_area
+
+    def move(s):
+        seen["first"] = True
+        return real_move(s)
+
+    def keep_clear(s):
+        if seen["first"]:
+            seen["first"] = False
+            seen["walks"].append([s.PlayerX, s.PlayerY, s.PlayerZ, s.TargetX, s.TargetY, s.TargetZ, s.InJet])
+        return real_keep(s)
+
+    def load_area(s):
+        seen["loaded"] = True
+        return real_load(s)
+    lmove.move, lmove.keep_clear, larea.load_area = move, keep_clear, load_area
+
+    mem = Original(snap).memory()
+    where = logictrace.regions(mem)
+
+    def then(s):
+        before = bytes(s.mem)
+        if s.AreaChanged:
+            lfcl.screen_update(s, Hooks())
+        return logictrace.changes(before, s.mem, where)
+
+    def run(steps):
+        s = State(mem)
+        out = []
+        for st in steps:
+            if st.kind == "expect":
+                continue
+            before = bytes(s.mem)
+            rec = {"line": st.line}
+            seen["walks"], seen["loaded"] = [], False
+            if st.kind == "frames":
+                rec["frames"] = st.n
+            elif st.kind == "poke":
+                rec["poke"] = [st.addr, [v & 0xFF for v in st.values]]
+                for i, v in enumerate(st.values):
+                    s.mem[st.addr + i] = v & 0xFF
+            elif st.kind == "fcl":
+                rec["fcl"] = list(st.code)
+                s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
+                s.ShotFlag = 1 if st.shot else 0
+                lfcl.run(s, SCRIPT, len(st.code), Hooks())
+            else:
+                rec["keys"] = logictrace.rows(st.keys)
+                rec["names"] = list(st.keys)
+                rec["tick"] = bool(st.tick)
+                try:
+                    alive = run_pass(s, st.keys, st.tick, Hooks())
+                except lmove.Freeze:
+                    break
+                rec["result"] = 2 if alive == "over" else 1
+                rec["walks"] = seen["walks"]
+                rec["loaded"] = seen["loaded"]
+            rec["changes"] = logictrace.changes(before, s.mem, where)
+            rec["then"] = then(s)
+            out.append(rec)
+            if rec.get("result") == 2 or (rec.get("result") == 1 and s.GameOver):
+                break               # the game is over: the original goes to its end
+        return out
+
+    runs = []
+    for p in paths:
+        runs.append({"name": Path(p).stem, "steps": run(lscen.load(p))})
+    # The keys the scenarios above don't press, in the disc's own run: the
+    # crosshair hidden and shown (B), moved in shooting mode (SPACE), the
+    # turn's and the step's sizes, turning round.
+    runs.append({"name": "keys", "steps": run(lscen.parse(KEYS_RUN, "keys"))})
+    # The tour: every entrance, by the FCL's GOTO, in the database's order,
+    # a couple of frames each.
+    db = json.loads((ROOT / "build/data/driller.json").read_text())
+    tour = []
+    for area, e, _ in cam.entrance_views(db):
+        tour.append(lscen.Step("fcl", f"tour:{area['id']}:{e['id']}", code=[0x12, area["id"], e["id"]], shot=False))
+        tour.append(lscen.Step("frames", f"tour:{area['id']}:{e['id']}", n=2))
+    runs.append({"name": "tour", "steps": run(tour)})
+    start = State(mem)
+    if start.AreaChanged:
+        raise SystemExit("the snapshot has an area's change pending: the disc's start takes it (lv_start)")
+    vars_ = [{"name": n, "addr": a, "size": logictrace.size_of(sz), "kind": k} for n, a, sz, k, _ in VARS if k != "clock"]
+    lo, hi = database(mem)
+    Path(out_path).write_text(json.dumps({
+        "layout": {"vars": vars_, "database": [lo, hi]},
+        "start": [[a, mem[a]] for a in where],
+        "runs": runs,
+    }, separators=(",", ":")))
+    passes = sum(1 for r in runs for st in r["steps"] if "keys" in st)
+    print(f"live: {len(runs)} runs ({len(paths)} scenarios, the keys and the tour), "
+          f"{sum(len(r['steps']) for r in runs)} steps, {passes} passes")
 
 
 def main(argv):
@@ -132,6 +325,9 @@ def main(argv):
         db = json.loads(Path(argv[1]).read_text())
         req = json.load(sys.stdin)
         json.dump(render_cameras(db, req["areas"], req["cameras"]), sys.stdout)
+        return 0
+    if len(argv) >= 4 and argv[1] == "--trace":
+        trace(argv[2], argv[3], argv[4:])
         return 0
     if len(argv) != 4:
         print(__doc__, file=sys.stderr)

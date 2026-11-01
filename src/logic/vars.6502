@@ -6,7 +6,8 @@
 \ in main RAM where the frame can read them without paging: LogicWork, in
 \ the OS's pages &08-&0C, which the engine's machine leaves alone (its
 \ interrupt is the vertical sync's alone, so the OS's sound, buffers,
-\ soft keys and characters there go unused). The section is saved as a
+\ soft keys and characters there go unused), or wherever the includer puts
+\ it (LOGIC_WORK_ORG, below). The section is saved as a
 \ file holding each variable's first value, the original's in play at the
 \ start (area 1, entrance 19, on the probe): loading it starts a game.
 \
@@ -21,8 +22,16 @@
 \ Needs build/logic6502/data.6502 (tools/mklogicdata.py) first.
 \ ***************************************************************************
 
-LOGIC_WORK     = &0800      ; LogicWork: pages &08 ...
-LOGIC_WORK_END = &0D00      ; ... to &0C (&0D is the NMI's)
+\ LogicWork's place: the includer's (LOGIC_WORK_ORG, LOGIC_WORK_GUARD: the
+\ live disc puts it after the area's working copy, src/live.6502), or the
+\ OS's pages.
+IF DEFINED(LOGIC_WORK_ORG)
+    LOGIC_WORK     = LOGIC_WORK_ORG
+    LOGIC_WORK_END = LOGIC_WORK_GUARD
+ELSE
+    LOGIC_WORK     = &0800  ; LogicWork: pages &08 ...
+    LOGIC_WORK_END = &0D00  ; ... to &0C (&0D is the NMI's)
+ENDIF
 LOGIC_BANK     = 4          ; the sideways RAM bank of the database (src/logic/bank.6502)
 LOGIC_CODE_BANK = 5         ; ... and of the rest of the logic's code
 LOGIC_DB       = &C000 - DB_LEN     ; the database, at the bank's top

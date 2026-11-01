@@ -12,7 +12,7 @@
 \ ***************************************************************************
 
 \ mul88: (mlo, mhi) = A * Y, bytes, by quarter squares: A * Y =
-\ f(A + Y) - f(|A - Y|), f(n) = n * n DIV 4 (sq_lo and sq_hi, for n from
+\ f(A + Y) - f(|A - Y|), f(n) = n * n DIV 4 (lq_lo and lq_hi, for n from
 \ 0 to 510). Clobbers A, X; keeps Y.
 ZA_AUTO1 mlo, mhi
 .mul88
@@ -22,19 +22,19 @@ ZA_AUTO1 mlo, mhi
     STY f
     CLC : ADC f : TAX                           ; A + Y, and its bit 8 in C
     BCS high
-    LDA sq_lo,X : STA mlo
-    LDA sq_hi,X : STA mhi
+    LDA lq_lo,X : STA mlo
+    LDA lq_hi,X : STA mhi
     BRA less
 .high
-    LDA sq_lo + 256,X : STA mlo
-    LDA sq_hi + 256,X : STA mhi
+    LDA lq_lo + 256,X : STA mlo
+    LDA lq_hi + 256,X : STA mhi
 .less
     LDA u : SEC : SBC f : BCS diff              ; |A - Y|
     EOR #&FF : INC A
 .diff
     TAX
-    LDA mlo : SEC : SBC sq_lo,X : STA mlo
-    LDA mhi : SBC sq_hi,X : STA mhi
+    LDA mlo : SEC : SBC lq_lo,X : STA mlo
+    LDA mhi : SBC lq_hi,X : STA mhi
     RTS
 }
 
