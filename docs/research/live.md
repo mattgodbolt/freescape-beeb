@@ -244,7 +244,7 @@ The logic is Driller's pass for pass: only when passes come, and the sizes
 at the start, are the port's. `make logic` holds the transcription to the
 original from the original's start. `make logic6502` and `make live` start
 from the port's (`tools/logictrace.py`, `tools/mklive.py --trace`), the 6502's
-start held to it, and each scenario's run first pokes the original's sizes
+start checked against it, and each scenario's run first pokes the original's sizes
 back (`original_sizes`), so that it runs as `make logic` runs it: the
 scenarios were written for those sizes, and the fuzz found its walks with
 them. `tests/logic/pace.txt` brings the sizes down itself and holds turns
