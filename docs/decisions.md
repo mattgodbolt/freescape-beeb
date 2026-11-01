@@ -437,3 +437,43 @@ the conversion in bank 5, and the `f64` table in HAZEL.
 
 A rectangle's loop winds anticlockwise on both sides, like every other
 face's. No pixel changes.
+
+## 36. The pace, and the frames between passes (2026-10-31, autonomous; amends 4)
+
+The logic takes a pass every `PASS_FIELDS` fields while a key is held, so
+a held key gives a little over one step or turn a second, close to the
+original's pace of about one redraw a second (`docs/research/live.md`).
+The renderer draws every frame in between: a turn goes the short way in
+5° steps, any other move in a straight line along the segment the logic's
+move checked, at a fraction set by the fields elapsed; on the probe the
+height holds until the step ends, where the climb or fall happens; the end
+snaps to the logic's position. A doorway walk is shown in the old area,
+then the new area appears. Matt can change the pace.
+
+## 37. Keys tapped between passes still act (2026-10-31, autonomous)
+
+A pass takes the keys held, or pressed since the last pass, so a tap
+shorter than the time between passes isn't lost.
+
+## 38. The crosshair at half width (2026-10-31, autonomous)
+
+B shows or hides the original's crosshair, EORed into the view as the
+original does, at MODE 2's half width.
+
+## 39. The logic's angles taken mod 72 (2026-10-31, autonomous)
+
+The renderer takes the logic's angles modulo 72. Area 2's entrance 16
+shares its id with a cuboid, so a GOTO there takes the cuboid's bytes as
+the camera's and gives a roll of 127, as the original does; modulo 72 it
+draws.
+
+## 40. The live disc's memory, with the logic (2026-10-31, autonomous; amends 31 and 34)
+
+`docs/research/live.md` has the map, every boundary ASSERTed: the logic's
+database and its code in bank 4 with the live disc's glue, the rest of the
+logic, the font and the area conversion in bank 5, the rasteriser in bank
+6, the front end in bank 7; LogicWork and a section for the front end's
+growth (`ObjMore`) in main RAM; RasterIn in the OS's pages; the
+transform's cache and the sort's memory in main RAM at `&3000` (ACCCON X
+clear) and the logic's lists by face in shadow RAM at `&3000` (X set round
+each pass).

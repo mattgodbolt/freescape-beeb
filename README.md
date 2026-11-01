@@ -20,35 +20,41 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 ## Where it's up to
 
-*2026-10-31.* **The disc runs the whole engine on the BBC, live, and it's
-slow.** Every frame the Master works out Driller's view from the camera
-alone (the visible objects, the rotation, the projection, the clipping and
-the order) and fills it into MODE 2, double-buffered, flipping as soon as
-the beam leaves the view. Nothing is precomputed. Every frame it draws
-matches the Python model's render of the same camera, byte for byte.
+*2026-10-31.* **You can walk Driller on the BBC, with Driller's own
+logic, and every frame worked out live.** The disc starts at Driller's
+start, in Amethyst. Its keys are Driller's: O and K walk, Q and W turn
+(or the cursor keys), P and L look up and down, N and M roll, R and F
+rise and fall, U turns round, A and Z set the turn's size and S and X the
+step's, B shows the crosshair. You collide, climb, fall and go through
+doorways into other areas as in the original, because it is the
+original's logic, transcribed into 6502 and checked pass by pass against
+the original running headless. The renderer animates each step and turn
+in between the logic's moves, which come about once a second as the
+original's did.
 
-The camera is free for now: the cursor keys (or Q and W) turn and O and K
-walk, through anything; P and L look up and down, N and M roll; SPACE goes
-to the next of Driller's 65 entrances, across all its areas. Leave it
-alone and it turns on the spot by itself.
+Every frame, the Master works out the view from the camera alone (the
+visible objects, the rotation, the projection, the clipping and the
+order) and fills it into MODE 2, double-buffered, flipping as soon as the
+beam leaves the view. Every frame the disc's check sees matches the
+Python model's render of the same camera, byte for byte.
 
-![The live disc: the Master working out and drawing three of Driller's views, through PAL](docs/images/disc_live.png)
+![The disc: walking from Driller's start in Amethyst, through PAL](docs/images/disc_live.png)
 
-*The live disc in jsbeeb through PAL. The figures on the screen are the
-BBC's own timing of the whole frame, and of its two halves: stages 1-7
-(objects to clipped polygons) and stages 8-10 (the fill). Driller is
-Incentive Software's.*
+*The disc in jsbeeb through PAL: Driller's start, then a step, then a
+turn. The figures on the screen are the BBC's own timing of the whole
+frame and of its two halves: stages 1-7 (objects to clipped polygons) and
+8-10 (the fill). Driller is Incentive Software's.*
 
-**How fast:** measured on the disc's check (journal, 2026-10-31), a frame
-takes a median of about 11 fields, between four and five frames a second,
-of which about six fields are stages 1-7 and four and a half the fill. The original redrew about
-once every two-thirds of a second on the Spectrum. Every stage now matches
-the model exactly, so the work from here is speed: the front end has been
-restructured and the fill has had its optimisation rounds (each about a
-tenth off), and the projection has halved; the front end's clipping is the
-largest cost left. Driller's player logic is built in 6502 and checked pass by
-pass against the original's, and comes next, so you walk with Driller's own
-collision. `docs/journal.md` has the story as it goes.
+**How fast:** measured on the disc's check (journal, 2026-10-31), at the
+entrances a frame takes a median of about 8 fields standing and 13
+turning, between about six and four frames a second; up close to walls
+it's quicker. The original redrew about once every two-thirds of a second
+on the Spectrum. Every stage matches the model exactly, so the work from
+here is speed, on a stock Master: the front end's clipping is in
+optimisation rounds now, and the fill has its next structural changes
+lined up. Driller's game itself (the drilling rigs, the laser, the
+sensors, the panel and the sound) comes after. `docs/journal.md` has the
+story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
 

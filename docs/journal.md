@@ -488,3 +488,20 @@ live`), stages 1-7 went from a median 7.25 fields a frame to 6.22, walks
   a few dozen bytes: the old near clip's arithmetic, the guard band and the
   slow fills went, and a line's quad and a point's square went to tables,
   to make room.
+
+## 2026-10-31: walking Driller with its own logic (track P)
+
+The live disc runs Driller's logic in 6502 with the renderer
+(`docs/research/live.md`; decisions 36-40): a pass when one's due with the
+keys held or tapped since the last, the area entered and its colours on a
+change, the camera from the logic, and the frames between passes animated
+along what the logic's move checked. `make live` drove seven scenarios
+(walls, climbing, a fall, a fatal fall, doorways, the edge, rising), a run
+of other keys and a tour of all 65 entrances: 316 passes, each the
+transcription's state, walks and loads; 3,691 frames, each the model's
+render of its camera byte for byte (1,955 views). Measured (fields a
+frame, median): standing 7.70 and turning 12.94 at the entrances; up
+against walls in the scenarios, standing 2.00, walking 3.32, turning
+5.39. A bug the merge exposed: `area_enter`'s `cache_reset` cleared the
+sort's memory in shadow RAM when ACCCON X was set; fixed. It became
+`freescape.ssd`, and Driller's own start is now the disc's.

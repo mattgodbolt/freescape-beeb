@@ -88,6 +88,11 @@ includes.)
 
 (Add what bites, as it bites.)
 
+- A local label inside `{}` silently shadows a global of the same name
+  (`.keys` hid `keys`).
+- Anything that touches the sort's memory (`ObjMemo`, main RAM at `&3000`)
+  needs ACCCON X clear, or it writes shadow RAM instead.
+
 - Baron: fail on any warning (`tools/asm.sh`); `ASSERT` is built in;
   `FOR n = 0..15` is inclusive; put `ZA_UNREACHABLE` after an
   always-taken branch; a `;` comment mid-line on a colon-separated line
