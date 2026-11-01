@@ -30,7 +30,7 @@ ifneq ($(wildcard tools/model/render.py),)
 RASTER_DRILLER = node tools/rastercheck.mjs build/raster --scenes build/raster/driller.json
 RASTER_DRILLER_ALT = node tools/rastercheck.mjs build/raster-alt --scenes build/raster/driller.json
 raster: build/raster/driller.json
-build/raster/driller.json: build/data/driller.json $(COLOUR_MODEL) tools/rasterscenes.py $(wildcard tools/model/*.py) | build/raster
+build/raster/driller.json: build/data/driller.json $(COLOUR_MODEL) tools/rasterscenes.py build/raster/limits $(wildcard tools/model/*.py) | build/raster
 	$(PYTHON) -I tools/rasterscenes.py --driller $< $@
 endif
 
@@ -106,8 +106,16 @@ build/raster-alt/check.6502: mk/raster.mk | build/raster-alt
 build/raster-alt/RCODE build/raster-alt/RRUNS build/raster-alt/RCHECK build/raster-alt/symbols.json &: build/raster-alt/check.6502 $(RASTER_SRC)
 	$(ASM) --warn 2 -p build/raster-alt --symbols build/raster-alt/symbols.json $<
 
-build/raster/scenes.json: tools/rasterscenes.py $(RASTER_MODEL) src/defs.6502 | build/raster
+build/raster/scenes.json: tools/rasterscenes.py $(RASTER_MODEL) src/defs.6502 build/raster/limits | build/raster
 	$(PYTHON) -I tools/rasterscenes.py $@
+
+# The 6502's limits that the scenes' views depend on (tools/rasterscenes.py
+# reads them from src/raster.6502), rewritten only when they change, so an
+# edit to the code doesn't remake every scene.
+build/raster/limits: src/raster.6502 | build/raster
+	grep -E '^\s*(POOL_NODES|POOL_HELD|RS_PATTERNS|RS_HMAX)\s*=' $< > $@.new
+	cmp -s $@.new $@ || mv $@.new $@
+	rm -f $@.new
 
 build/raster build/raster-alt:
 	mkdir -p $@

@@ -37,7 +37,7 @@ RS_FACES    = 128                   ; faces in one frame, at most
 RS_VERTICES = 256                   ; vertices of all of them
 RS_PATTERNS = 64                    ; patterns (four bytes each)
 RS_HMAX     = 30000                 ; |rs_hx|, |rs_hy| at most
-POOL_NODES  = 254                   ; gaps a pool holds (1..POOL_NODES)
+POOL_NODES  = 127                   ; gaps a pool holds (1..POOL_NODES; decision 32)
 \ The painter build (docs/research/raster.md): the backmost face and the
 \ background through the span buffer, then the other faces back to front.
 RASTER_PAINTER_WAY = FALSE              ; the engine's way: the span buffer's
@@ -55,10 +55,12 @@ IF RASTER_PAINTER
     POOL_FIELD = 64
 ELSE
     POOL_HELD  = POOL_NODES
-    POOL_FIELD = 256
+    POOL_FIELD = 128
 ENDIF
 ASSERT POOL_HELD < POOL_FIELD AND 2 * VIEW_H DIV 4 <= POOL_HELD
 ASSERT VIEW_W < 128                 ; pixel positions are positive bytes
+ASSERT SUB * VIEW_W < 4096 AND SUB * VIEW_H < 4096  ; a vertex's high byte ASLed 4 times leaves C clear
+ASSERT RS_VERTICES = 256            ; a face's vertices wrap round mod 256
 
 \ ---------------------------------------------------------------------------
 \ The frame's inputs, which the stages before fill.
@@ -101,7 +103,8 @@ SECTION RasterWork
 .head       SKIP VIEW_H
 .hsplit     SKIP VIEW_H
     ALIGN 256
-.lo16       SKIP 256                ; n >> 4 (raster_init)
+.line7      SKIP 256                ; (n + 7) >> 4 (raster_init)
+.vk         SKIP RS_VERTICES        ; each vertex's line (raster_face)
 .k8         SKIP 256                ; n's bit length (raster_init)
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
 .rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
@@ -149,8 +152,7 @@ ZA_AUTO 2, ch_gl
 ZA_AUTO 2, ch_gh
 ZA_AUTO 2, ch_i
 ZA_AUTO 2, ch_end
-ZA_AUTO1 f_n, f_v0, f_ktop, f_kbot, f_yend
-ZA_AUTO2 f_ytop, f_ybot
+ZA_AUTO1 f_v0, f_vend, f_ktop, f_kbot, f_yend
 
 SECTION RasterCode
 
@@ -162,7 +164,7 @@ SECTION RasterCode
     ZA_AUTO2 i_q
     LDX #0
 .shift
-    TXA : LSR A : LSR A : LSR A : LSR A : STA lo16,X
+    TXA : CLC : ADC #SUB DIV 2 - 1 : ROR A : LSR A : LSR A : LSR A : STA line7,X
     \ X's bit length, and X shifted up until its top bit is set
     TXA : LDY #0
 .length
@@ -349,8 +351,9 @@ ENDIF
     LDA rs_fn,X : CMP #3 : BCS some
     RTS
 .some
-    STA f_n
+    STA f_vend
     LDA rs_fv,X : STA f_v0
+    CLC : ADC f_vend : STA f_vend       ; (mod 256: the chains wrap by compares)
     \ This face's pattern bytes for each phase, and their halves.
     LDA rs_fc,X : ASL A : ASL A : TAY
     FOR k = 0..3
@@ -358,36 +361,27 @@ ENDIF
         AND #PIX_LEFT : STA r_pva + k
         LDA r_pv + k : AND #PIX_RIGHT : STA r_pvb + k
     NEXT
-    \ The top vertex (the first of the highest) and the bottom's y.
-    LDX f_v0
-    STZ ch_i
-    LDA rs_vyl,X : STA f_ytop : STA f_ybot
-    LDA rs_vyh,X : STA f_ytop+1 : STA f_ybot+1
-    LDY #1
+    \ Each vertex's line, the first whose centre is at or below it,
+    \ (y + 7) >> 4; the top vertex, the first on the highest line (a chain
+    \ from any vertex on that line skips the edges to the others, which
+    \ cross no line); and the lines the face can cover, from the top's line
+    \ to the line before the bottom's.
+    LDA #&FF : STA f_ktop
+    STZ f_kbot
+    LDY f_v0
 .scan
-    INX
-    LDA rs_vyl,X : CMP f_ytop : LDA rs_vyh,X : SBC f_ytop+1 : BCS not_top
-    LDA rs_vyl,X : STA f_ytop : LDA rs_vyh,X : STA f_ytop+1
-    STY ch_i
+    LDX rs_vyl,Y
+    LDA rs_vyh,Y : ASL A : ASL A : ASL A : ASL A
+    ADC line7,X                         ; (C = 0 from the ASLs: y < 4096)
+    STA vk,Y
+    CMP f_ktop : BCS not_top
+    STA f_ktop : STY ch_i
 .not_top
-    LDA f_ybot : CMP rs_vyl,X : LDA f_ybot+1 : SBC rs_vyh,X : BCS not_bot
-    LDA rs_vyl,X : STA f_ybot : LDA rs_vyh,X : STA f_ybot+1
-.not_bot
-    INY : CPY f_n : BCC scan
-    \ The lines it can cover: from the first centre at or below its top to
-    \ the last above its bottom, (y + 7) DIV 16 of each.
-    LDA f_ybot : CLC : ADC #SUB DIV 2 - 1 : STA f_kbot
-    LDA f_ybot+1 : ADC #0
-    FOR i = 1..4
-        ASL f_kbot : ROL A
-    NEXT
+    CMP f_kbot : BCC not_bot
     STA f_kbot
-    LDA f_ytop : CLC : ADC #SUB DIV 2 - 1 : STA r_y
-    LDA f_ytop+1 : ADC #0
-    FOR i = 1..4
-        ASL r_y : ROL A
-    NEXT
-    STA r_y : STA f_ktop
+.not_bot
+    INY : CPY f_vend : BNE scan
+    LDA f_ktop : STA r_y
     CMP f_kbot : BCC lines
     RTS
 .lines
@@ -744,83 +738,61 @@ ASSERT sbg_3 - (sb3 + 2) = STEP_G AND sb_end3 - (sb3 + 2) = STEP_NONE
 
 \ ---------------------------------------------------------------------------
 \ chain_next: chain X's next edge that crosses line r_y or below, from its
-\ vertex ch_i on, and that edge's stepping.
-.chain_next
-{
-.walk
-    LDA ch_i,X : ZA_INDEXEDBY 0..1
-    STA e_u
-    LDY ch_dir,X : ZA_INDEXEDBY 0..1
-    BNE back
-    \ Forwards: the next vertex, wrapping.
-    INC A : CMP f_n : BCC got
-    LDA #0
-    BRA got
-.back
-    \ Backwards.
-    CMP #0 : BNE before
-    LDA f_n
-.before
-    DEC A
-.got
-    STA ch_i,X : ZA_INDEXEDBY 0..1
-    STA e_w
-    JSR edge_setup
-    BCC walk                            ; crosses no line from here: the next
-    RTS
-}
-
-\ edge_setup: the edge from vertex e_u to vertex e_w (relative to f_v0) as
-\ chain X's, which starts at line r_y. C = 0 when it crosses no line from
-\ r_y on; otherwise C = 1, with the chain's x on line r_y, the line it ends
-\ before and its gradient set, and the loop patched to step it. Keeps X.
+\ vertex ch_i on, set up as chain X's: its x on line r_y, the line it ends
+\ before and its gradient, and the line loop patched to step it. Keeps X.
 \
 \ tools/model/raster.py's edge_crossings is the rule (docs/research/
 \ raster.md): a vertical edge's boundary is (x + 7) >> 4; another's x is a
 \ DDA in 8.8, X = 16 (x0 - 8) + 255 plus or minus g t0 >> 4 on the first
 \ line, and g = |dx| r >> (8 + s) a line after (with dx's sign), where dy
 \ is n 2^s (n in [128, 255], rounded up) and r = 256 + f(n) its
-\ reciprocal, from recipf. The products by r are quarter squares (mulf).
-\ An edge no taller than a line has no gradient: its offset is
+\ reciprocal, from recipf. The products by r are quarter squares
+\ (product). An edge no taller than a line has no gradient: its offset is
 \ |dx| t0 r >> (12 + s).
 
-ZA_AUTO1 e_c, e_u, e_w, e_k1, e_t0, e_neg, e_sh
-ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g
+ZA_AUTO1 e_c, e_u, e_t0, e_neg, e_sh, e_f
+ZA_AUTO2 e_dx, e_dy, e_x, e_g
+ZA_AUTO2 m_v, m_r
+ZA_AUTO 3, m_p
+ZA_AUTO1 m_v2
 
-.edge_setup
+.chain_next
 {
     STX e_c
-    \ The end vertex's line first, (y + 7) >> 4: an edge ending at or above
-    \ r_y is done.
-    LDA e_w : CLC : ADC f_v0 : TAY
-    LDA rs_vyl,Y : ADC #SUB DIV 2 - 1 : TAX
-    LDA rs_vyh,Y : ADC #0
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,X
-    CMP r_y : BEQ none : BCS some
-.none
-    LDX e_c
-    CLC
-    RTS
-.some
-    STA e_k1
-    LDA e_u : CLC : ADC f_v0 : TAX
+.walk
+    LDY ch_i,X : ZA_INDEXEDBY 0..1
+    STY e_u
+    LDA ch_dir,X : ZA_INDEXEDBY 0..1
+    BNE back
+    \ Forwards: the next vertex, wrapping.
+    INY : CPY f_vend : BNE got
+    LDY f_v0
+    BRA got
+.back
+    \ Backwards.
+    CPY f_v0 : BNE before
+    LDY f_vend
+.before
+    DEY
+.got
+    STY ch_i,X : ZA_INDEXEDBY 0..1
+    \ An edge that ends at or above r_y crosses no line from here: the next.
+    LDA vk,Y : CMP r_y : BEQ walk : BCC walk
+    STA ch_end,X : ZA_INDEXEDBY 0..1
+    LDX e_u                             ; (X the edge's top vertex, Y its end)
     \ A vertical edge (the commonest, for a level camera's boxes): its
     \ boundary is ceil((x - 8) / 16) = (x + 7) >> 4 on every line.
     LDA rs_vxl,Y : CMP rs_vxl,X : BNE sloped
     LDA rs_vxh,Y : CMP rs_vxh,X : BNE sloped
-    LDA rs_vxl,X : ADC #SUB DIV 2 - 2   ; (C = 1 from the CMP: + 7)
-    TAY
-    LDA rs_vxh,X : ADC #0
-    ASL A : ASL A : ASL A : ASL A : ORA lo16,Y
+    LDY rs_vxl,X
+    LDA rs_vxh,X : ASL A : ASL A : ASL A : ASL A
+    ADC line7,Y                         ; (C = 0 from the ASLs: x < 4096)
     LDX e_c
     STA ch_p,X : ZA_INDEXEDBY 0..1
-    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
-    LDA #STEP_NONE : JSR patch_steps
-    SEC
-    RTS
+    LDA #STEP_NONE
+    JMP patch_steps
 .sloped
-    \ dy = y1 - y0; |dx| = |x1 - x0| and its sign (Y the end vertex, X the
-    \ start)
+    \ dy = y1 - y0; |dx| = |x1 - x0| and its sign
     SEC
     LDA rs_vyl,Y : SBC rs_vyl,X : STA e_dy
     LDA rs_vyh,Y : SBC rs_vyh,X : STA e_dy+1
@@ -831,18 +803,14 @@ ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g
     BPL positive
     SEC : LDA #0 : SBC e_dx : STA e_dx : LDA #0 : SBC e_dx+1 : STA e_dx+1
 .positive
-    \ t0 = (8 - y0) AND 15, and X0 = 16 (x0 - 8) + 255 = 16 x0 + 127
+    \ t0 = (8 - y0) AND 15, and X0 = 16 (x0 - 8) + 255 = 16 x0 + 127, whose
+    \ high byte is (x0 + 7) >> 4
     LDA #SUB DIV 2 : SEC : SBC rs_vyl,X : AND #SUB - 1 : STA e_t0
-    LDA rs_vxl,X : STA e_x
-    LDA rs_vxh,X
-    FOR i = 1..4
-        ASL e_x : ROL A
-    NEXT
-    STA e_x+1
-    LDA e_x : CLC : ADC #255 - SUB DIV 2 * 16 : STA e_x
-    BCC normalise
-    INC e_x+1
-.normalise
+    LDY rs_vxl,X
+    LDA rs_vxh,X : ASL A : ASL A : ASL A : ASL A
+    ADC line7,Y : STA e_x+1             ; (C = 0 from the ASLs)
+    TYA : ASL A : ASL A : ASL A : ASL A
+    CLC : ADC #255 - SUB DIV 2 * 16 : STA e_x
     \ dy as n 2^s, n in [128, 255]: e_sh = 8 + s
     LDY e_dy+1 : BNE wide
     LDY e_dy
@@ -853,16 +821,16 @@ ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g
     \ dy >= 256: s = the high byte's bit length, n = dy >> s rounded up
     LDA k8,Y : TAX
     CLC : ADC #8 : STA e_sh
-    LDA e_dy : STA e_q : STZ e_q+1
+    LDA e_dy : STA m_p : STZ m_p+1
     TYA
 .shr
-    LSR A : ROR e_q
+    LSR A : ROR m_p
     BCC kept
-    STX e_q+1                           ; (a bit went: round up)
+    STX m_p+1                           ; (a bit went: round up)
 .kept
     DEX : BNE shr
-    LDA e_q+1 : CMP #1                  ; C = a bit went
-    LDA e_q : ADC #0
+    LDA m_p+1 : CMP #1                  ; C = a bit went
+    LDA m_p : ADC #0
     BNE normed
     INC e_sh                            ; 256: 128 at one more shift
     LDA #128
@@ -871,70 +839,124 @@ ZA_AUTO2 e_dx, e_dy, e_x, e_q, e_g
     CPY #128 : BNE reciprocal
     DEC e_sh                            ; (512 v >> sh is 256 v >> sh - 1)
 .reciprocal
-    LDA recipf - 128,Y
-    JSR mulf_set
-    LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
+    LDA recipf - 128,Y : STA e_f
+    STA product.lo + 1 : STA product.hi + 1
     LDA e_dy+1 : BNE tall
-    LDA e_dy : CMP #SUB + 1 : BCS tall
+    LDA e_dy : CMP #SUB + 1 : BCC short
+.tall
+    \ The gradient g = |dx| r >> (8 + s), by a jump into the shifts with
+    \ A = m_p+1: up 8 - (8 + s) bits, or down s, and the top two bytes.
+    JSR product
+    LDA e_sh : ASL A : TAX
+    LDA m_p+1
+    JMP (shift_by - 2 * SHIFT_MIN,X)
+    ZA_CANJUMP up3, up2, up1, by8, dn1, dn2, dn3
+.short
     \ No taller than a line, so no more than one line and no gradient: the
     \ offset |dx| t0 r >> (12 + s).
+    LDA e_dx : STA m_v : LDA e_dx+1 : STA m_v+1
     LDA e_t0 : JSR mul4
-    LDA m_p : STA m_v : LDA m_p+1 : STA m_v+1
-    JSR mulf
+    LDA m_p : STA e_dx : LDA m_p+1 : STA e_dx+1
+    JSR product
     LDA e_sh : CLC : ADC #4 : JSR shr24
     BRA offset
-.tall
-    \ The gradient g = |dx| r >> (8 + s), and the offset g t0 >> 4.
-    JSR mulf
-    LDA e_sh : JSR shr24
-    LDA m_r : STA e_g : STA m_v
-    LDA m_r+1 : STA e_g+1 : STA m_v+1
-    LDA e_t0 : JSR mul4
-    LDY m_p
-    LDA m_p+1 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA m_r
-    LDY m_p+1
-    LDA m_p+2 : ASL A : ASL A : ASL A : ASL A : ORA lo16,Y : STA m_r+1
+.up3 ASL m_p : ROL A : ROL m_p+2
+.up2 ASL m_p : ROL A : ROL m_p+2
+.up1 ASL m_p : ROL A : ROL m_p+2
+.by8 STA e_g : STA e_dx
+    LDA m_p+2 : STA e_g+1 : STA e_dx+1
+    \ The offset g t0 >> 4 = (g 16 t0) >> 8, which is product's g (256 +
+    \ 16 t0) >> 8, less g.
+    LDA e_t0 : ASL A : ASL A : ASL A : ASL A
+    STA e_f : STA product.lo + 1 : STA product.hi + 1
+    JSR product
+    SEC
+    LDA m_p+1 : SBC e_g : STA m_r
+    LDA m_p+2 : SBC e_g+1 : STA m_r+1
+    BRA offset
+.dn3 LSR m_p+2 : ROR A
+.dn2 LSR m_p+2 : ROR A
+.dn1 LSR m_p+2 : ROR A
+    BRA by8
 .offset
     \ X0 plus or minus it
     LDA e_neg : BMI minus
     CLC
     LDA e_x : ADC m_r : STA e_x
-    LDA e_x+1 : ADC m_r+1 : STA e_x+1
+    LDA e_x+1 : ADC m_r+1
     BRA placed
 .minus
     SEC
     LDA e_x : SBC m_r : STA e_x
-    LDA e_x+1 : SBC m_r+1 : STA e_x+1
+    LDA e_x+1 : SBC m_r+1
 .placed
     LDX e_c
+    STA ch_p,X : ZA_INDEXEDBY 0..1
     LDA e_x : STA ch_xl,X : ZA_INDEXEDBY 0..1
-    LDA e_x+1 : STA ch_p,X : ZA_INDEXEDBY 0..1
-    LDA e_k1 : STA ch_end,X : ZA_INDEXEDBY 0..1
     \ An edge of one line needn't step.
+    LDA ch_end,X : ZA_INDEXEDBY 0..1
     SEC : SBC r_y : CMP #2 : BCS steps
-    LDA #STEP_NONE : JSR patch_steps
-    SEC
-    RTS
+    LDA #STEP_NONE
+    JMP patch_steps
 .steps
     \ The gradient, with dx's sign
     LDA e_neg : BMI down
     LDA e_g : STA ch_gl,X : ZA_INDEXEDBY 0..1
     LDA e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
-    BRA stepped
+    LDA #STEP_G
+    JMP patch_steps
 .down
     SEC
     LDA #0 : SBC e_g : STA ch_gl,X : ZA_INDEXEDBY 0..1
     LDA #0 : SBC e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
-.stepped
-    LDA #STEP_G : JSR patch_steps
+    LDA #STEP_G
+    JMP patch_steps
+SHIFT_MIN = 5                           ; e_sh on a tall edge: 5..11
+.shift_by
+    EQUW up3, up2, up1, by8, dn1, dn2, dn3
+}
+
+\ product: m_p = e_dx (256 + e_f), 24 bits, e_dx < 4096: each byte u of
+\ e_dx times f as q(u + f) - q(|u - f|), q from rq (page-aligned, so f
+\ patched into the operands' low bytes adds it to the index: lo and hi by
+\ the caller, lo2 and hi2 here), and e_dx 256 added.
+ASSERT LO(rq_lo) = 0 AND LO(rq_hi) = 0
+.product
+{
+    LDX e_dx
+    TXA : SEC : SBC e_f : BCS l_pos
+    EOR #&FF : ADC #1                   ; |u - f| (C = 0)
+.l_pos
+    TAY
     SEC
+.lo
+    LDA rq_lo,X : SBC rq_lo,Y : STA m_p
+.hi
+    LDA rq_hi,X : SBC rq_hi,Y
+    CLC : ADC e_dx : STA m_p+1
+    LDA e_dx+1 : ADC #0 : STA m_p+2
+    LDA e_dx+1 : BEQ done
+    \ (the high byte's product, at 256)
+    TAX
+    LDA e_f : STA lo2 + 1 : STA hi2 + 1
+    TXA : SEC : SBC e_f : BCS h_pos
+    EOR #&FF : ADC #1
+.h_pos
+    TAY
+    SEC
+.lo2
+    LDA rq_lo,X : SBC rq_lo,Y : STA m_v2
+.hi2
+    LDA rq_hi,X : SBC rq_hi,Y
+    TAX
+    CLC
+    LDA m_p+1 : ADC m_v2 : STA m_p+1
+    TXA : ADC m_p+2 : STA m_p+2
+.done
     RTS
 }
 
 \ mul4: m_p = m_v A, 24 bits, A 0..15; m_v is changed.
-ZA_AUTO2 m_v, m_r
-ZA_AUTO 3, m_p
-ZA_AUTO1 m_v2
 .mul4
 {
     STZ m_p+2 : STZ m_v2
@@ -960,59 +982,6 @@ ZA_AUTO1 m_v2
         BEQ done
     NEXT
 .done
-    RTS
-}
-
-\ mulf_set: A = f, mulf's multiplier.
-\ mulf: m_p = m_v (256 + f), 24 bits: m_v f by quarter squares, each
-\ byte u of m_v times f as q(u + f) - q(|u - f|), q from rq (the tables
-\ are page-aligned, so f patched into an operand's low byte adds it to
-\ the index), and m_v 256 added.
-ASSERT LO(rq_lo) = 0 AND LO(rq_hi) = 0
-.mulf_set
-    STA mulf.a1+1 : STA mulf.a2+1 : STA mulf.a3+1 : STA mulf.a4+1
-    STA mulf.d1+1 : STA mulf.d2+1
-    RTS
-.mulf
-{
-    \ (the low byte's product)
-    LDA m_v
-    SEC
-.d1 SBC #0 : BCS d1_pos                 ; |u - f|
-    EOR #&FF : ADC #1                   ; (C = 0)
-.d1_pos
-    TAY
-    LDX m_v
-    SEC
-.a1 LDA rq_lo,X
-    SBC rq_lo,Y
-    STA m_p
-.a2 LDA rq_hi,X
-    SBC rq_hi,Y
-    STA m_p+1
-    \ (the high byte's)
-    LDA m_v+1
-    SEC
-.d2 SBC #0 : BCS d2_pos
-    EOR #&FF : ADC #1
-.d2_pos
-    TAY
-    LDX m_v+1
-    SEC
-.a3 LDA rq_lo,X
-    SBC rq_lo,Y
-    STA m_v2
-.a4 LDA rq_hi,X
-    SBC rq_hi,Y
-    STA m_p+2
-    LDY m_v2
-    \ + the high byte's product 256, + m_v 256
-    CLC
-    TYA : ADC m_p+1 : STA m_p+1
-    LDA m_p+2 : ADC #0 : STA m_p+2
-    CLC
-    LDA m_p+1 : ADC m_v : STA m_p+1
-    LDA m_p+2 : ADC m_v+1 : STA m_p+2
     RTS
 }
 
