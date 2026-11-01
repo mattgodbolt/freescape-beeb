@@ -661,3 +661,24 @@ its pass), it let keys go between passes that named the same keys in
 another order, and a long run's idle loops overflowed its maximum. The live
 check now takes every scenario of `tests/logic/` but `keys.txt`, whose E
 (a ZX key with no action) the disc doesn't read.
+
+## 2026-11-01: steering (track AA)
+
+Matt found the disc unsteerable: one tap turned Driller's starting 15°,
+animated as three 5° frames, and passes came about once a second
+(measured on the disc: each tap of Z moved the yaw by three units).
+Decision 48 starts at 5° and 25 units and makes held keys repeat like a
+keyboard. Measured on the disc that day: taps of 0.1s and 0.28s each turn
+5°; held Z turns 49.5° a second; a held walk covers 242 units a second
+facing along an axis (frame-bound at about 170 from the start view). The
+live check now holds each tap 13 fields and fails on a second pass or an
+early repeat; `tests/logic/pace.txt` holds turns and walks.
+
+The same day a fault track found the jet's stray view byte was the 6502
+rasteriser's: on a face under a pixel wide the two edges' rounding can
+swap them partway down, and the 6502 had fixed which was left at the
+first line. It now swaps crossed chains on any line, with three
+regression scenes. The ticks mismatch was the live check's own: at minute
+9 the original takes a pass without waiting for a key, which the check's
+trace now models. The live check runs 16 scenarios and 8 fuzz seeds,
+13,014 frames, each the model's byte for byte.

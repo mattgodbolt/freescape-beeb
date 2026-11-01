@@ -610,3 +610,23 @@ from the original's start; `make logic6502` and `make live` start from the
 port's, each scenario first putting the original's sizes back, and
 `tests/logic/pace.txt` holds turns and walks at the port's sizes. The four
 constants are together in `tools/logic/state.py`, for Matt to change.
+
+## 48. Steering: small sizes to start, and keys that repeat (2026-11-01; amends 4 and 36)
+
+Matt, trying the disc: "it seems impossible to steer. tapping left seems to
+always turn 3 steps". Driller's own pace (a pass about once a second) and
+starting sizes (a 15° turn, a 250-unit step) made each tap a large move
+shown over many frames. So:
+
+- **The game starts with the smallest turn, 5°, and a step of 25 world
+  units**, in place of Driller's 15° and 250; f0-f3 still change them
+  (decision 10).
+- **A key going down gives a pass at once; keys held alone repeat 15
+  fields later, then a pass every 5 fields**, as a keyboard's auto-repeat
+  does (15 fields is the Master's own repeat delay). A tap is one pass; a
+  held turn or walk goes on smoothly.
+
+The logic stays Driller's pass for pass; only when passes come and the
+sizes at the start change. The four constants are in
+`tools/logic/state.py`, Matt's to change. `make logic` keeps the
+original's start; the port's checks start from the port's.

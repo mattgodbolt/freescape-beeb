@@ -28,9 +28,9 @@ R and F rise and fall, U turns round, f0 and f1 set the turn's size and f2
 and f3 the step's, B shows the crosshair. You collide, climb, fall and go through
 doorways into other areas as in the original, because it is the
 original's logic, transcribed into 6502 and checked pass by pass against
-the original running headless. The renderer animates each step and turn
-in between the logic's moves, which come about once a second as the
-original's did.
+the original running headless. A tap turns 5° or steps 25 units, one
+of Driller's own moves; holding a key repeats it smoothly, like a
+keyboard's auto-repeat, and f0-f3 change the sizes.
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the
