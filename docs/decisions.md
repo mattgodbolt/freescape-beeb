@@ -359,3 +359,40 @@ the byte matrix's; a turning frame's transform and projection would come
 to about 5K cycles. It needs a second pipeline beside the matrix one (for
 pitch and roll) and a sideways bank of tables. Open until the rest of the
 frame is fast enough for it to matter.
+
+## 30. The live disc (2026-10-31, autonomous)
+
+**`build/live.ssd` draws every frame on the BBC from the camera alone**:
+`objects_frame`, then `raster_frame`, with no faces worked out off the
+BBC (`docs/research/live.md`). Its camera is free, not yet Driller's
+logic: Driller's keys and the cursors turn, walk (through anything,
+`LIVE_STEP` world units a frame along the view), look and roll; SPACE goes
+to the next entrance; with no key for `DEMO_FIELDS` fields a demo turns on
+the spot and goes on to the next entrance after a whole turn. It redraws
+every frame even when nothing has moved, so the figures it shows (frames a
+second, fields a frame, and each half's cycles, timed on the BBC by User
+VIA T2) are always the whole pipeline's.
+
+Why: the slideshow's figures were the fill's alone (decision 22); this is
+the engine as it stands, measured on itself. Proposed: it takes the
+slideshow's place as the public disc.
+
+## 31. The live disc's memory (2026-10-31, autonomous)
+
+- The sideways banks: the area records where `tools/mkareas.py` packs
+  them (from bank 4), the rasteriser in 6, the object pipeline's code
+  with the maths' in 7; the text's font and the disc's own tables after
+  the records in the last records bank.
+- HAZEL: the maths' tables and the pipeline's work, with ACCCON's Y set
+  for good once the OS is gone.
+- **The transform's cache in main RAM's `&3000-&3FFF`**, which section 8
+  of `docs/engine.md` keeps for per-buffer data: only `objects_frame`
+  touches it, and the frame clears ACCCON's X before calling it. The
+  projection's larger tables (decision 27) left HAZEL no room for both the
+  cache and the work, and main RAM below `&3000` has none.
+- The rasteriser's input in the OS's pages below `&0D00`, with the object
+  pipeline's output laid over it array for array, so nothing is copied
+  between them. `LogicWork` will want those pages (`docs/research/live.md`
+  says where the input can go then).
+- `area_enter`'s code in main RAM (section `AreaCode`), since it pages the
+  records' banks in.
