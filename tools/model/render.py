@@ -64,34 +64,69 @@ CONE = True
 BEHIND_EDGES = True
 
 
-def edge_lines(s, m, loop, cs):
+def edge_lines(s, m, loop, cs, image=None):
     """The screen lines of a face's edges' planes through the eye (clip.py,
     "The cone"): a box's edges along M's columns, any other's from its
     ends; and each line's edge, its two vertices' indices. An edge with
     both ends at or behind the eye (z <= 0) has none: the face's image is
-    inside its plane already (BEHIND_EDGES)."""
+    inside its plane already (BEHIND_EDGES). They're made in FRONT_FIRST's
+    order, and none after one with every corner of the view outside it,
+    which leaves nothing of the face (clip.cone_clip). With IMAGE_LINES, an
+    edge with an end the projection takes (image(i) not None) has its line
+    through that end's image (clip.image_line): through both ends' images
+    when it takes both, or a box's edge toward its vanishing point."""
     box = s.corner is not None or (s.obj["type"] == objects.RECTANGLE and not s.line)
+    n = len(loop)
+    edges = [(loop[j], loop[(j + 1) % n]) for j in range(n)]
+    if BEHIND_EDGES:
+        edges = [(i, k) for i, k in edges if cs[i][2] > 0 or cs[k][2] > 0]
+    if FRONT_FIRST:
+        edges.sort(key=lambda e: not (cs[e[0]][2] > 0 and cs[e[1]][2] > 0))
     lines = []
     ends = []
-    n = len(loop)
-    for j in range(n):
-        i, k = loop[j], loop[(j + 1) % n]
-        if BEHIND_EDGES and cs[i][2] <= 0 and cs[k][2] <= 0:
-            continue
-        if box:
-            d = [s.vertices[k][a] - s.vertices[i][a] for a in range(3)]
-            axis = next(a for a in range(3) if d[a])
-            col = (m[0][axis], m[1][axis], m[2][axis])
-            normal = clip.edge_normal_axis(cs[i], col, 1 if d[axis] > 0 else -1)
-        else:
-            normal = clip.edge_normal(cs[i], cs[k])
-        lines.append(clip.screen_line(normal))
+    for i, k in edges:
+        line = _image_line(s, m, cs, i, k, box, image) if IMAGE_LINES and image else None
+        if line is None:
+            if box:
+                d = [s.vertices[k][a] - s.vertices[i][a] for a in range(3)]
+                axis = next(a for a in range(3) if d[a])
+                col = (m[0][axis], m[1][axis], m[2][axis])
+                normal = clip.edge_normal_axis(cs[i], col, 1 if d[axis] > 0 else -1)
+            else:
+                normal = clip.edge_normal(cs[i], cs[k])
+            line = clip.screen_line(normal)
+        lines.append(line)
         ends.append((i, k))
-    if FRONT_FIRST:
-        order = sorted(range(len(lines)), key=lambda j: not (cs[ends[j][0]][2] > 0 and cs[ends[j][1]][2] > 0))
-        lines = [lines[j] for j in order]
-        ends = [ends[j] for j in order]
+        if clip.corners_out(line) == 4:
+            break
     return lines, ends
+
+
+def _image_line(s, m, cs, i, k, box, image):
+    """Edge i -> k's line from its ends' images (edge_lines, IMAGE_LINES), or
+    None for the plane's own line: when the projection takes neither end; a
+    generic edge with one end taken; or an edge whose images give no
+    direction (both at one point, or the edge pointing at the eye)."""
+    ti, tk = clip.projectable(cs[i]), clip.projectable(cs[k])
+    if ti and tk:
+        p, q = image(i), image(k)
+        a, b = p[1] - q[1], q[0] - p[0]
+    elif (ti or tk) and box:
+        d = [s.vertices[k][a] - s.vertices[i][a] for a in range(3)]
+        axis = next(a for a in range(3) if d[a])
+        sign = 1 if d[axis] > 0 else -1
+        p = image(i if ti else k)
+        a, b = clip.image_gradient(p, tuple(sign * m[r][axis] for r in range(3)))
+    else:
+        return None
+    if not (a or b):
+        return None
+    return clip.image_line(a, b, p)
+
+
+# The cone's lines from the images of their edges' ends where the projection
+# takes them (clip.image_line); off, every line from its edge's plane.
+IMAGE_LINES = True
 
 
 # The lines of edges with both ends in front come first, then the rest, each
@@ -118,11 +153,9 @@ def _cone_face(s, m, f, poly, cs, project, image, tally):
             if every_code:
                 out = []
             else:
-                lines, ends = edge_lines(s, m, f.loop, cs)
-                # the lines made, up to one with every corner outside, which
-                # ends the face (not one of counts.KEYS: tools/objectcases.py's)
-                made = next((k + 1 for k, line in enumerate(lines) if clip.corners_out(line) == 4), len(lines))
-                tally["cone_lines"] = tally.get("cone_lines", 0) + made
+                lines, ends = edge_lines(s, m, f.loop, cs, image)
+                # the lines made (not one of counts.KEYS: tools/objectcases.py's)
+                tally["cone_lines"] = tally.get("cone_lines", 0) + len(lines)
                 out = clip.cone_clip(lines, ends, image)
             return (out, True, True) if clip.drawable(out) else None
     near = not all(clip.projectable(v) for v in poly)
@@ -416,22 +449,38 @@ def walk_views(db, steps=4, step=25):
             yield area, "%s-w%d" % (name(area, e), k), cam.Camera(x, c.y, z, c.yaw, c.pitch, c.roll)
 
 
+class _Flag:
+    """MODULE.FLAG, set in every copy of its module that renders: this
+    module's own flags in this copy too, which run as a script is __main__,
+    not the tools.model.render that zxcompare renders through."""
+
+    def __init__(self, flag):
+        import importlib
+        mod_name, attr = flag.rsplit(".", 1)
+        mods = [importlib.import_module("tools.model." + mod_name)]
+        if mod_name == "render" and sys.modules[__name__] is not mods[0]:
+            mods.append(sys.modules[__name__])
+        self.mods, self.attr = mods, attr
+        self.was = getattr(mods[0], attr)
+
+    def set(self, value):
+        for mod in self.mods:
+            setattr(mod, self.attr, value)
+
+
 def flag_diff(db, flag):
     """The views of walk_views rendered with MODULE.FLAG (a tools/model
     module's boolean) on and then off: (views, pixels, the pixels that
     differ, the views with any, the most in one and which, the views whose
     draw order differs)."""
-    import importlib
-    mod_name, attr = flag.rsplit(".", 1)
-    mod = importlib.import_module("tools.model." + mod_name)
-    was = getattr(mod, attr)
+    f = _Flag(flag)
     views = pixels = differ = touched = worst = orders = 0
     worst_name = None
     try:
         for area, label, camera in walk_views(db):
-            setattr(mod, attr, True)
+            f.set(True)
             on = render(db, area, camera)
-            setattr(mod, attr, False)
+            f.set(False)
             off = render(db, area, camera)
             a, b = parts.decode(on.bytes), parts.decode(off.bytes)
             n = sum(1 for la, lb in zip(a, b) for pa, pb in zip(la, lb) if pa != pb)
@@ -443,7 +492,7 @@ def flag_diff(db, flag):
             if n > worst:
                 worst, worst_name = n, label
     finally:
-        setattr(mod, attr, was)
+        f.set(f.was)
     return views, pixels, differ, touched, worst, worst_name, orders
 
 
@@ -451,11 +500,8 @@ def flag_zx(db, flag, zxdir):
     """The ZX oracle's agreement (tools/model/zxcompare.py: the pixels away
     from edges compared and agreeing, over its views) with MODULE.FLAG on
     and off: ((compared, agreeing) on, (compared, agreeing) off)."""
-    import importlib
     from tools.model import zxcompare
-    mod_name, attr = flag.rsplit(".", 1)
-    mod = importlib.import_module("tools.model." + mod_name)
-    was = getattr(mod, attr)
+    flag = _Flag(flag)
     zxdir = pathlib.Path(zxdir)
     with open(zxdir / "views.json") as f:
         records = json.load(f)["views"]
@@ -463,7 +509,7 @@ def flag_zx(db, flag, zxdir):
     out = []
     try:
         for on in (True, False):
-            setattr(mod, attr, on)
+            flag.set(on)
             compared = agree = 0
             for r in records:
                 buf = (zxdir / (r["name"] + ".bin")).read_bytes()
@@ -472,7 +518,7 @@ def flag_zx(db, flag, zxdir):
                 agree += a
             out.append((compared, agree))
     finally:
-        setattr(mod, attr, was)
+        flag.set(flag.was)
     return out
 
 

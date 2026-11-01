@@ -483,12 +483,15 @@ def emit(db, loops, globals_rec, areas, gbytes, out6502, outjson):
     w("CONE        = %s" % ("TRUE" if render.CONE else "FALSE"))
     w("LINE_BITS   = %d" % clip.LINE_BITS)
     w("\\ The cone's pieces (render.BEHIND_EDGES, render.FRONT_FIRST, clip.SIDE_CROSSINGS,")
-    w("\\ clip.JOINS), the 2D clip's crossings by a reciprocal (clip.RECIP_2D) and the")
-    w("\\ cone's side crossings so (clip.SIDE_RECIP).")
+    w("\\ clip.JOINS), the 2D clip's crossings by a reciprocal (clip.RECIP_2D), the")
+    w("\\ cone's side crossings so (clip.SIDE_RECIP) but a unit line's (clip.UNIT_SIDES), and")
+    w("\\ its lines from images (render.IMAGE_LINES), their precision (clip.IMAGE_BITS).")
     for name, on in (("BEHIND_EDGES", render.BEHIND_EDGES), ("FRONT_FIRST", render.FRONT_FIRST),
                      ("SIDE_CROSSINGS", clip.SIDE_CROSSINGS), ("JOINS", clip.JOINS),
-                     ("RECIP_2D", clip.RECIP_2D), ("SIDE_RECIP", clip.SIDE_RECIP)):
+                     ("RECIP_2D", clip.RECIP_2D), ("SIDE_RECIP", clip.SIDE_RECIP),
+                     ("UNIT_SIDES", clip.UNIT_SIDES), ("IMAGE_LINES", render.IMAGE_LINES)):
         w("%-11s = %s" % (name, "TRUE" if on else "FALSE"))
+    w("IMAGE_BITS  = %d" % clip.IMAGE_BITS)
     w("")
     w("VIEW_FX    = %d             ; the focal lengths, sixteenths" % view.FX)
     w("VIEW_FY     = %d" % view.FY)

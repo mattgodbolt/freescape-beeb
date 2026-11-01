@@ -411,6 +411,46 @@ def line_f(line, p):
     return a * p[0] + b * p[1] + c
 
 
+# A line from an image (render.IMAGE_LINES): the screen line of an edge's
+# plane through the eye runs through the image of any of the edge's points
+# in front of the eye, so an edge whose end the projection takes has its
+# line through that end's projected image, square to (a, b): through the
+# other end's image too when the projection takes both, as a face projected
+# whole has that edge, or else toward the edge's vanishing point. With A
+# the end's camera-space vertex and d the edge's direction (B - A), N = A x
+# d, and with A at (u, v) = (x - XC, y - YC) on the screen, f's gradient
+# (-2 Nx, Ny) is Az / FX times (FY dy + v dz, FX dx - u dz): no product of
+# 24-bit numbers, and the line passes through the image exactly.
+IMAGE_BITS = 14
+assert 2 * (1 << IMAGE_BITS) * (1 << 15) < 1 << 31     # (f at a corner fits 32 bits signed)
+
+
+def image_line(a, b, p):
+    """The line through view point p square to (a, b), not both 0: (A, B,
+    C) with f(x, y) = A x + B y + C = A (x - px) + B (y - py), A and B a
+    and b shifted right together (rounding down) until both fit IMAGE_BITS
+    bits, signed; or a unit (A or B +-1) when the other is 0, so that a
+    line square to a side crosses it at p exactly."""
+    assert a or b
+    if not b:
+        a, b = (1 if a > 0 else -1), 0
+    elif not a:
+        a, b = 0, (1 if b > 0 else -1)
+    else:
+        s = max(0, max(abs(a), abs(b)).bit_length() - IMAGE_BITS)
+        a, b = a >> s, b >> s
+    x, y = p
+    return (a, b, -(a * x + b * y))
+
+
+def image_gradient(p, d):
+    """(a, b) for the line through the image p of an edge's end toward the
+    edge's vanishing point, d its direction (B - A) in camera space: (FY dy +
+    v dz, FX dx - u dz), (u, v) = p less the view's centre."""
+    u, v = p[0] - XC, p[1] - YC
+    return (FY * d[1] + v * d[2], FX * d[0] - u * d[2])
+
+
 RECT = [(0, 0), (WIDTH, 0), (WIDTH, HEIGHT), (0, HEIGHT)]
 # The rectangle's sides, each from corner k to corner k + 1: the top, the
 # right, the bottom and the left. Each vertex of the polygon the cone clips
@@ -433,6 +473,11 @@ JOINS = True
 # crossings are (crossing_r), with no division; off, f(K) / a by division,
 # rounded half up.
 SIDE_RECIP = True
+# A side's crossing with a line whose coefficient along it is 1 is f(K)
+# itself (side_d), exactly: a line from images square to the side
+# (image_line's unit) crosses it at its image. Off, the reciprocal's, which
+# can be a few sixteenths short.
+UNIT_SIDES = True
 
 
 def side_d(fk, a):
@@ -441,9 +486,13 @@ def side_d(fk, a):
     a's nine bits from its top one an = a >> s, s = bitlen(a) - 9, and fk
     shifted right s + 4 so that its product with R has 16 bits by 9, rounded
     and at most WIDTH (within about 2^-8 of the division's, which is under
-    WIDTH); or with SIDE_RECIP off, by division, rounded half up."""
+    WIDTH); f(K) itself for a of 1 (UNIT_SIDES: a line from images square to
+    the side, image_line's unit); or with SIDE_RECIP off, by division,
+    rounded half up."""
     if not SIDE_RECIP:
         return (2 * fk + a) // (2 * a)
+    if a == 1 and UNIT_SIDES:
+        return fk
     s = a.bit_length() - maths.CLIP_RBITS
     an = a >> s if s >= 0 else a << -s
     r = 256 + maths.CLIP_M[an - 256]

@@ -599,3 +599,19 @@ now 16,147 cycles of a step's median, a third of the cone. This round's
 agent was paused once, because its shell writes inside its worktree (under
 `.claude/`) stopped for Matt's permission; it finished with files changed
 only through the editing tools, and nothing more stopped.
+
+## 2026-11-01: the front end's seventh round (track W)
+
+The cone's lines from images and exact unit side crossings (decision 46),
+quads gathered with the loop written out, the coarse cull's compares
+patched in per frame, dedupe straight into the output, and a level
+camera's cuboid vertices by copies. Measured with `objectcheck
+--entrance` (median / p90 / max): a step from 121,789 / 160,683 / 191,793
+cycles to 112,858 / 150,137 / 173,474; a turn from 162,298 / 209,373 /
+287,771 to 152,631 / 201,728 / 270,986. On the live disc, stages 1-7
+walking from a median 0.93 fields to 0.90. Skipping objects with every
+vertex in one outcode half-space was measured and dropped (it cost more in
+the face loop than it saved). The front end's bank has little room left
+again; about a quarter of the candidates are transformed and projected
+for nothing, and a per-object test from the transform's cache is the next
+lever.
