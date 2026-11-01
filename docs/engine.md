@@ -286,23 +286,32 @@ come with it, to see where the cycles go.
   locations.
 - `&0800-&0CFF`: the player logic's variables, `LogicWork`
   (`docs/research/logic6502.md`).
-- `&0E00-&2FFF`: the engine's main code.
-- `&3000` up to `SCREEN`: per-buffer data only (section 4, stage 10); the
-  live disc keeps the transform's cache in main RAM's, reached with X
-  clear (decision 31).
+- `&0E00-&2FFF`: the engine's main code, and whatever is read whatever
+  ACCCON's X and whatever bank is paged: the interrupt, the code that
+  pages, the rasteriser's state, the maths' code (which patches itself).
+- `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
+  RAM's. Data kept per buffer (section 4, stage 10) needs the same
+  addresses free in both. The live disc keeps the front end's data in main
+  RAM's (the transform's cache, the sort's memory, the pipeline's tables
+  and the area's working copy), reached with X clear, as the front end
+  runs (decision 31), and the logic's lists by face in shadow RAM's,
+  reached with X set, as its passes run. No code goes there.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
-- HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
-  table) and the row-run code.
+- HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
+  f64 table) and the front end's work.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
   with room to share. The renderer reads the database too, as it enters
   an area (`src/area.6502`).
+- Not used yet: ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the
+  paged bank's first 4K), and parts of the OS's pages, free once the
+  engine owns the machine (`docs/research/live.md`, "Room").
 
-The tracks size these as they go, and `make memory` reports what each
-region holds. The live disc's map, the whole engine in one build, is
-`src/live.6502`'s (`docs/research/live.md`, decision 31).
+The tracks size these as they go. The live disc's map, the whole engine
+in one build, is `src/live.6502`'s, every boundary ASSERTed
+(`docs/research/live.md`, "Memory", decisions 31 and 40).
 
 ## 9. The interfaces between the stages
 

@@ -293,28 +293,66 @@ logic's code and variables unused.
 |---|---|
 | bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, loaded after `LOGIC`): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
 | bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' names, patterns and index by id, the lines' code), the text's widened font (`TextRAM`), and the working copy's conversion (`AreaConv`, `ACONV`) |
-| bank `BANK_RASTER` | the rasteriser: row runs, code, work, state (decision 20) |
-| bank `BANK_OBJ` | the object pipeline's code (`ObjCode`) with the maths' (`src/maths.6502`, `src/project.6502`, which patch themselves) |
-| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), loaded from `HAZEL_LOAD` on by `!BOOT` and copied up once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies read the maths' quarter squares here (`LOGIC_SQUARES`: the same table, ASSERTed) |
-| `&0E00` on | `LIVE` (the loop, the screen, the interrupt, the keys, the text, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `ObjConst` (`OCONST`), `ObjArea` (the working copy), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` to `&3000` |
+| bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20) |
+| bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below) |
+| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), loaded from `HAZEL_LOAD` (the screen) on by `!BOOT` and copied up once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies read the maths' quarter squares here (`LOGIC_SQUARES`: the same table, ASSERTed) |
+| `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, the text, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
-| main RAM's `&3000` on | the transform's cache (`ObjCache`) and the sort's memory (`ObjMemo`), which only `objects_frame` and `cache_reset` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31) |
-| shadow RAM's `&3000` on | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
+| main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31) |
+| shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
+| `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
 
-### Room for the front end
+The screen at 192 lines leaves main and shadow RAM's `&3000` up to `SCREEN`
+to the engine, against `&3000-&3FFF` before. Main RAM's is reached with X
+clear, so it holds what only the front end reads (it runs with X clear);
+code stays out of it, as the rest of the map keeps code and what the frame
+reads whatever X below `&3000`, in HAZEL or in a bank. So the working copy
+and the pipeline's tables went up there, and the maths' code (which patches
+itself, so needs RAM) came out of the front end's bank into the main RAM
+they left.
 
-The object pipeline's bank is all but full. Its room is **`ObjMore`**:
-main RAM from the end of `LogicWork` to `&3000`, a real section (file
-`OMORE`, which `!BOOT` loads), guarded at `&3000`. It's read whatever bank
-is paged and whatever ACCCON's X, so code there can be called from
-`ObjCode` and tables there read from it; the maths' code (which patches
-itself) could move there whole and leave its room in the bank. Elsewhere,
-for things `objects_frame` doesn't touch: shadow RAM's `&3000` on past
-`LogicFaces` (with X set, so not during `objects_frame`), the gap left in
-`BANK_DB` before the database, and ANDY (`&8000`-`&8FFF` with ROMSEL's bit
-7, the OS gone), which nothing uses yet. Main RAM's `&3000` on past
-`ObjMemo` is `objects_frame`'s too, with X clear.
+### Room
+
+Each owner's room is the rest of its section's span, up to the guard its
+`ASSERT`s hold; `build/live.json` has the addresses, and the measurements
+below the bytes (2026-11-01).
+
+- **The front end**: its bank from `obj_code_end` to `&C000`; `ObjMore`
+  from `obj_more_end` to `&3000` (code or tables, read whatever bank and
+  X); main RAM from `obj_area_end` to `SCREEN` (tables or work it reads
+  with X clear only); HAZEL from `obj_work_end` to `&E000`. The bytes
+  before `OBJ_CODE_ORG` in its bank are the price of where its hot loops
+  fall (below); aligning those loops would take them back.
+  `mk/objects.mk`'s check build keeps room for the bank full
+  (`CHECK_CODE_GUARD`, ASSERTed against `OBJ_CODE_ORG`), and for
+  `ObjMore`'s room without the maths.
+- **The fill**: its bank from `raster_work_end` to `&C000`. Its own
+  quarter squares (`rq_lo`, `rq_hi`, built by `raster_init`) are the
+  maths' `sq_lo` and `sq_hi` in HAZEL for every index it uses, as the
+  logic's are (`LOGIC_SQUARES`): reading those would free their pages in
+  the bank, a change to `src/raster.6502` (a `RASTER_SQUARES` as
+  `LOGIC_SQUARES`; the slideshow, which has no maths, keeps its own).
+- **Both, at the same address**: main RAM's room past `obj_area_end` and
+  shadow RAM's at the same addresses, if the front end leaves it, is
+  per-buffer room (ACCCON's X picks the buffer drawn), for the fill's
+  later skipping of runs the buffer already holds (`docs/engine.md`,
+  stage 10).
+- **The logic's**: shadow RAM from `logic_faces_end` to `SCREEN` (with X
+  set, as its passes run); `BANK_DB` from `live_glue_end` to `LOGIC_DB`;
+  `BANK_DATA` from `area_conv_end` to `&C000`.
+- **Not used yet**, measured on jsbeeb with the OS gone (below):
+  - ANDY, `&8000-&8FFF` with ROMSEL's bit 7: the Master's private RAM, the
+    MOS's own (it pages it only in set-up, through the font's OSWORD 10),
+    so free once the engine owns the machine. It stands in for the first
+    4K of whichever bank is paged, so it adds room only where that bank's
+    first 4K isn't needed while it's paged in.
+  - the OS's pages: from `work_end` to `RASTER_IN_ORG`; page `&0D` below
+    `&0D9F` (the NMI's, free with no disc access; a soft BREAK reads the
+    Master's extended vectors from `&0D9F` on, and pages 2 and 3, so those
+    stay the MOS's); page 1 below the stack's deepest; zero page above
+    baron's pool's highest allocation up to `&FB` (`&FC` is the MOS's IRQ
+    entry's, `&F4` `ROMSEL_COPY`).
 
 ## The check
 
@@ -413,13 +451,18 @@ disc's demo.
   `RasterIn` laid out alike (or agree one set of arrays for both); and fit
   their banks (`BANK_OBJ`, `BANK_RASTER`) and `ObjMore`, which the ASSERTs
   watch. `AreaCode` must stay out of sideways RAM, and whatever touches
-  `ObjCache` or `ObjMemo` needs ACCCON's X clear.
+  `ObjCache`, `ObjMemo`, `ObjConst` or `ObjArea` needs ACCCON's X clear.
+  The front end's hot loops fall where `OBJ_CODE_ORG` puts them; aligning
+  them (an `ASSERT` that their branches stay on a page) would free the
+  bytes before it. The fill could read the maths' quarter squares rather
+  than keep its own ("Room").
 - **The player logic (J)**: the hooks this disc fills in, and the names it
   sets (`LOGIC_*`), are the logic's interface now; `tools/logiccheck.6502`
   keeps the defaults.
 - **The maths (F)**: the projection's shared-coordinate entries are reached
   by a stub (`live_shared`) until a stage calls them; the logic reads the
-  maths' quarter squares.
+  maths' quarter squares. The maths' code is in `ObjMore`, from a page, as
+  in `tools/mathscheck.6502`.
 
 ## What's left
 
@@ -441,18 +484,27 @@ disc's demo.
 
 ## Decisions to record
 
-- **The idle loop** (proposed 2026-10-31, amends decision 30): a frame is
-  drawn only when its view's inputs (the camera, the area entered, the
-  objects' visibility, the crosshair) differ from the frame last handed
-  over's; otherwise the loop goes on with the keys and passes and draws
-  nothing. With it: each pass on a reading of the keys made after the
-  last pass ended, as the keys are read once a field; a turn's angles
-  rounded up, so its first 5-degree step shows from the pass's first field
-  (amends decision 36's rule); and the figures measured over the frames
-  drawn. Measured below.
-- **A tap acts once** (a fix to decision 37's rule as built, not a new
-  call): each half-row's keys gone down and held are taken together, with
-  the interrupt held off.
+(The idle loop and the tap that acts once, proposed here before, are
+decision 42.)
+
+- **The screen is Driller's 192 lines** (proposed 2026-11-01, amends
+  decisions 2 and 9): the CRTC shows 24 character rows, not MODE 2's 32,
+  from `SCREEN` to the top of RAM in each buffer, centred where MOS 3.20
+  puts MODE 2 at `*TV 0,1`; the view stays a row down, and the text takes
+  the ten rows below it, the live disc's figures two to a line. Why: the
+  ZX's own screen is 192 lines, the view and the panel; the rows below the
+  view are the panel's room; and 4K of main RAM and 4K of shadow RAM come
+  free. No view's pixels change, and the flip's lines are the view's as
+  before. Measured below.
+- **The live disc's memory, with the 192-line screen** (proposed
+  2026-11-01, amends decisions 31, 34 and 40): main RAM's `&3000` up to
+  `SCREEN` holds the front end's data (the transform's cache, the sort's
+  memory, the pipeline's tables and the area's working copy), reached with
+  ACCCON's X clear as decision 31's cache is; the maths' code moves out of
+  the front end's bank into `ObjMore`, from a page; the rasteriser's state
+  out of its bank into main RAM at `&0E00`; and the front end's code starts
+  `OBJ_CODE_ORG` into its bank, the page offset measured fastest. Shadow
+  RAM's `&3000` up to `SCREEN` stays the logic's. Measured below.
 
 ## Measurements
 
@@ -505,3 +557,65 @@ turning 5.38 / 8.53 / 9.35, from 5.14 / 8.52 / 8.92 and 5.41 / 8.52 / 9.34.
 A key pressed with nothing left to draw had its pass after 0.68 / 0.95 /
 1.23 fields, and its first changed view shown after 8.41 / 15.22 / 28.18
 walking (30 keys) and 7.61 / 11.12 / 13.24 turning (10).
+
+### The 192-line screen and the room it frees (2026-11-01, track T)
+
+**The screen.** `make frames`: the CRTC's R0-R13 127 64 90 40 38 0 24 31 0
+7 32 19 10 0 against MOS 3.20's MODE 2 at `*TV 0,1`, 127 80 98 40 38 0 32
+35 0 7 103 8 6 0; on jsbeeb's picture the screen is (264,128)-(776,512),
+MODE 2's (200,64)-(840,576), the same centre; the view's border
+(312,144)-(728,352). The vertical sync's flag now comes on line 250 of 312
+(282 before), and `T1_SYNC` follows: the interrupt's flips came on line 114
+(the view's lines 8-111), `frame_end`'s own on lines 239-243 for the test
+scene and 1-309 with its cost varied; the VSync build's on line 251. The
+text's window starts a page of T1 later (`TEXT_T1_MIN` 5, from 4), for the
+row straight below the view; with no lead it was still whole in practice,
+and a window ending within a page of `FLIP_LINE` fails `make slides`.
+
+**The free bytes**, on the logic's disc (the tighter of the two), before
+(the idle loop's disc) and after:
+
+| | before | after |
+|---|---|---|
+| the front end's bank, `obj_code_end` to `&C000` | 134 | 2,558 (and 128 before `OBJ_CODE_ORG`) |
+| `ObjMore`, to `&3000` | 45 | 198 |
+| main RAM's `&3000` room, to `SCREEN` | 256 | 1,336 |
+| HAZEL, `obj_work_end` to `&E000` | 179 | 179 |
+| the fill's bank, `raster_work_end` (before, `raster_state_end`) to `&C000` | 225 | 760 |
+| `BANK_DATA`, `area_conv_end` to `&C000` | 800 | 848 |
+| `BANK_DB`, `live_glue_end` to `LOGIC_DB` | 734 | 734 |
+| shadow RAM's `&3000` room, `logic_faces_end` to `SCREEN` | 2,272 | 6,368 |
+| the OS's pages, `work_end` to `RASTER_IN_ORG` | 37 | 133 |
+
+The maths' code is 2,552 bytes with `live_shared`. The text's ten lines,
+against thirteen, give `LiveData` and `Work` the rest.
+
+**Where the front end's code starts.** With the maths gone from the start
+of its bank, the rest of the front end's code moved down the bank, and its
+cycles moved with it. The free disc's check, frames matched by area and
+camera against the disc before, the median change in stages 1-7's cycles
+a frame by `OBJ_CODE_ORG`'s page offset (the maths' code on a page in
+`ObjMore`):
+
+| offset | &00 | &20 | &40 | &60 | &80 | &A0 | &C0 | &E0 | &F0 | &F8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| median change | +169 | +87 | +230 | +17 | −280 | −113 | −182 | +6 | +34 | −16 |
+
+(&F8 puts the code where it was. The maths' code not on a page added
+about 170 more at &00; the screen's change alone, −35.) With `&8080`, the
+disc's own check: stages 1-7 −0.11% over the free disc's frames (median
+−254 cycles a frame) and −0.25% over the logic disc's; stages 8-10 within
+±0.02%. Every frame is the model's, byte for byte, on both discs.
+
+**The room not yet used**, on jsbeeb, the logic's disc from `live_loop` on
+through walks, turns, looks, rolls, rises, turning round, the crosshair
+and shooting mode (64 seconds emulated), every write watched: nothing
+written in main RAM past `obj_area_end`, shadow RAM past
+`logic_faces_end`, HAZEL past `obj_work_end`, either bank past its code or
+work, or pages 2 and 3; the deepest stack `S = &E4`, so 229 bytes of page
+1 never reached; zero page written up to `&71`, baron's highest allocation
+(so `&72-&F3` and `&F5-&FB`, 137 bytes, are free); page `&0D` never
+written. ANDY: paged only by the MOS, in set-up (once a character of
+`text_init`'s OSWORD 10s), never written by the disc, and left holding
+3,633 non-zero bytes of the MOS's own: 4K for the engine once the OS is
+gone.

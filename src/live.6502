@@ -79,28 +79,33 @@ ENDIF
 \                tools/mklive.py, LDATA; and the figures' code), the text's
 \                font (TextRAM), and the working copy's conversion
 \                (AreaConv, ACONV: src/area.6502)
-\   BANK_OBJ     the object pipeline's code (ObjCode, with the maths' code,
-\                which patches itself)
-\   BANK_RASTER  the rasteriser's code, row runs and work (decision 20)
+\   BANK_OBJ     the object pipeline's code (ObjCode)
+\   BANK_RASTER  the rasteriser's row runs, code and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
 \   the maths' tables (the logic's multiplies share their quarter squares)
 \   and the transform's f64 table (ObjTables), copied in at start from where
 \   !BOOT loaded them (HAZEL_LOAD on); then the pipeline's work (ObjWork,
 \   the camera with it)
-\ Main RAM, below &3000 (which ACCCON's X switches):
-\   &0E00 on: this code (LIVE), area_init's and area_enter's (AreaCode: they
-\   page the banks in, so can't be in one), the pipeline's tables
-\   (ObjConst), the area's working copy (ObjArea), the logic's variables
-\   (LogicWork), and the front end's room (ObjMore), to &3000
+\ Main RAM below &3000 (which ACCCON's X switches), read whatever X and
+\ whatever bank is paged:
+\   &0E00 on: the rasteriser's state (RasterState, on a page), this code
+\   (LIVE), area_init's and area_enter's (AreaCode: they page the banks in,
+\   so can't be in one), the logic's variables (LogicWork), and the front
+\   end's code (ObjMore: the maths', which patches itself, and the 2D
+\   clip's), to &3000
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
 \   array for array, so no copy goes between them
-\ Main RAM's &3000 on, below the screen: the transform's cache (ObjCache)
-\   and the sort's memory (ObjMemo), which only objects_frame reads and
-\   writes, so live_loop clears ACCCON's X before it (frame_begin sets X for
-\   the buffer drawn, after)
-\ Shadow RAM's &3000 on: the logic's lists by face (LogicFaces), which only
-\   its passes read and write, so lv_pass sets ACCCON's X round each
+\ Main RAM's &3000 up to SCREEN: the front end's data, which only
+\   objects_frame and area_enter read and write: the transform's cache
+\   (ObjCache), the sort's memory (ObjMemo), the pipeline's tables
+\   (ObjConst) and the area's working copy (ObjArea); so live_loop clears
+\   ACCCON's X before objects_frame (frame_begin sets X for the buffer
+\   drawn, after), and lv_enter_area before area_enter. The rest, to
+\   SCREEN, is the front end's room for more of the same.
+\ Shadow RAM's &3000 up to SCREEN: the logic's lists by face (LogicFaces),
+\   which only its passes read and write, so lv_pass sets ACCCON's X round
+\   each
 \
 \ A routine in a bank is called with its bank paged (PAGE_IN); area_enter puts
 \ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too. The logic's entries
@@ -141,13 +146,21 @@ ENDSECTION
 \ the sort's memory after it, likewise only objects_frame's (src/order.6502)
 SECTION ObjMemo, org = obj_cache_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
+\ then the pipeline's tables (!BOOT loads them there, in main RAM) and the
+\ area's working copy, which objects_frame reads and area_enter writes,
+\ both with X clear; the rest up to SCREEN is the front end's room for
+\ such data
+SECTION ObjConst, org = obj_memo_end, load = &FFFF0000 OR obj_memo_end, filename = "OCONST", guard = SCREEN
+ENDSECTION
+SECTION ObjArea, org = obj_const_end, guard = SCREEN, virtual = TRUE
+ENDSECTION
 ASSERT HAZEL_LOAD + (obj_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
-\ The logic, in this build's map: its variables after the area's working
-\ copy, its keys' bitmap this file's, its quarter squares the maths' in
-\ HAZEL, its lists by face in shadow RAM's &3000 on, three of its hooks
-\ this file's.
-LOGIC_WORK_ORG    = obj_area_end
+\ The logic, in this build's map: its variables after area_enter's code,
+\ its keys' bitmap this file's, its quarter squares the maths' in HAZEL,
+\ its lists by face in shadow RAM's &3000 on, three of its hooks this
+\ file's.
+LOGIC_WORK_ORG    = area_code_end
 LOGIC_WORK_GUARD  = &3000
 LOGIC_SQUARES     = sq_lo
 IF LIVE_LOGIC
@@ -166,8 +179,46 @@ INCLUDE "logic/bank.6502"
 ASSERT LOGIC_BANK = BANK_DB AND LOGIC_CODE_BANK = BANK_DATA
 ASSERT IX_HIDDEN = &60          ; (src/area.6502's: bit 6 invisible, bit 5 destroyed)
 
-\ The banks.
-SECTION ObjCode, org = &8000, guard = &C000, filename = "OCODE", cmos = TRUE
+\ The banks. The front end's code from OBJ_CODE_ORG (src/defs.6502): its
+\ hot loops' branches cross pages, or don't, by where it starts, and that
+\ page offset was the fastest of a sweep (docs/research/live.md,
+\ "Measurements", 2026-11-01); aligning those loops would take the bytes
+\ before it back.
+SECTION ObjCode, org = OBJ_CODE_ORG, guard = &C000, filename = "OCODE", cmos = TRUE
+ENDSECTION
+SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
+ENDSECTION
+SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
+ENDSECTION
+SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
+ENDSECTION
+SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
+ENDSECTION
+SECTION TextRAM, org = live_data_end, guard = &C000, virtual = TRUE
+ENDSECTION
+SECTION AreaConv, org = text_ram_end, guard = &C000, filename = "ACONV", cmos = TRUE
+ENDSECTION
+SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE", cmos = TRUE
+ENDSECTION
+INCLUDE "../build/live/data.6502"
+
+\ Main RAM below &3000. First the rasteriser's state, which it reads and
+\ writes whatever ACCCON's X (the buffer it draws), on a page as its ALIGN
+\ asks, so none is lost to it; LIVE straight after.
+RASTER_STATE_ORG = &0E00
+SECTION RasterState, org = RASTER_STATE_ORG, guard = &3000, virtual = TRUE
+ENDSECTION
+SECTION AreaCode, org = live_end, load = &FFFF0000 OR live_end, filename = "LAREA", guard = &3000, cmos = TRUE
+ENDSECTION
+\ (LogicWork after it: src/logic/vars.6502, LOGIC_WORK_ORG above)
+\ ObjMore: the front end's code outside its bank, and its room, the rest of
+\ main RAM below &3000 (docs/research/live.md, "Memory"), read whatever
+\ bank is paged and whatever ACCCON's X: first the maths' code, which
+\ patches itself so lives in RAM, then the 2D clip's (src/clip.6502). The
+\ maths' code starts on a page, as in its own check (tools/mathscheck.6502),
+\ so its branches take the cycles that check counts.
+SECTION ObjMore, org = logic_work_end, load = &FFFF0000 OR logic_work_end, filename = "OMORE", guard = &3000, cmos = TRUE
+ALIGN 256
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
 \ live_shared: never called. It reaches the projection's shared-coordinate
@@ -185,37 +236,6 @@ INCLUDE "project.6502"
         STZ proj_v + i
     NEXT
     RTS
-ENDSECTION
-SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
-ENDSECTION
-SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
-ENDSECTION
-SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
-ENDSECTION
-SECTION RasterState, org = raster_work_end, guard = &C000, virtual = TRUE
-ENDSECTION
-SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
-ENDSECTION
-SECTION TextRAM, org = live_data_end, guard = &C000, virtual = TRUE
-ENDSECTION
-SECTION AreaConv, org = text_ram_end, guard = &C000, filename = "ACONV", cmos = TRUE
-ENDSECTION
-SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE", cmos = TRUE
-ENDSECTION
-INCLUDE "../build/live/data.6502"
-
-\ Main RAM.
-SECTION AreaCode, org = live_end, load = &FFFF0000 OR live_end, filename = "LAREA", guard = &3000, cmos = TRUE
-ENDSECTION
-SECTION ObjConst, org = area_code_end, load = &FFFF0000 OR area_code_end, filename = "OCONST", guard = &3000
-ENDSECTION
-SECTION ObjArea, org = obj_const_end, guard = &3000, virtual = TRUE
-ENDSECTION
-\ (LogicWork after it: src/logic/vars.6502, LOGIC_WORK_ORG above)
-\ ObjMore: the front end's room, the rest of main RAM below &3000, for its
-\ code or tables (docs/research/live.md, "Memory"). It's read whatever bank
-\ is paged and whatever ACCCON's X.
-SECTION ObjMore, org = logic_work_end, load = &FFFF0000 OR logic_work_end, filename = "OMORE", guard = &3000, cmos = TRUE
 ENDSECTION
 \ RasterIn ends at RASTER_IN_END, its vertices (from rs_vxl) page-aligned
 \ straight after its faces' arrays, as ObjOut's are.
@@ -260,7 +280,7 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*SRLOAD LOGICC 8000 ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD LDATA ", ~logic_code_end, " ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD ACONV ", ~text_ram_end, " ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD OCODE 8000 ", AS_STRING(BANK_OBJ), " Q", 13
+    EQUS "*SRLOAD OCODE ", ~OBJ_CODE_ORG, " ", AS_STRING(BANK_OBJ), " Q", 13
     EQUS "*SRLOAD RRUNS 8000 ", AS_STRING(BANK_RASTER), " Q", 13
     EQUS "*SRLOAD RCODE ", ~raster_runs_end, " ", AS_STRING(BANK_RASTER), " Q", 13
     EQUS "*LOAD HAZEL", 13
@@ -273,8 +293,8 @@ SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
 ENDSECTION
 
 \ ---------------------------------------------------------------------------
-\ LIVE: all below &3000.
-SECTION Live, org = &0E00, load = &FFFF0E00, exec = &FFFF0000 OR start, filename = "LIVE", guard = &3000, cmos = TRUE
+\ LIVE: all below &3000, after the rasteriser's state.
+SECTION Live, org = raster_state_end, load = &FFFF0000 OR raster_state_end, exec = &FFFF0000 OR start, filename = "LIVE", guard = &3000, cmos = TRUE
 
 \ User VIA T2, which nothing else uses: free-running down at 1MHz (clock).
 usrvia_t2cl = &FE68
@@ -522,8 +542,9 @@ ASSERT LO(hazel_tables_end) = 0
 .regions
     EQUW obj_tables_end, obj_work_end
     EQUW OBJ_CACHE_ORG, obj_cache_end           ; (with ACCCON's X clear)
-    EQUW obj_area_start, obj_area_end
+    EQUW obj_area_start, obj_area_end           ; (likewise)
     EQUW RASTER_IN_ORG, raster_in_end
+    EQUW RASTER_STATE_ORG, raster_state_end     ; (*SRLOAD's Q passed its files through it)
 REGIONS = P% - regions
 }
 
@@ -548,7 +569,7 @@ REGIONS = P% - regions
     LDA (p),Y : STA rs_pat,Y
     DEY : BPL pattern
     PAGE_IN BANK_OBJ
-    LDA #ACCCON_X : TRB acccon                  ; (its cache_reset clears the sort's memory, main RAM's &3000 on)
+    LDA #ACCCON_X : TRB acccon                  ; (the working copy, and the sort's memory its cache_reset clears, are main RAM's &3000 on)
     LDA lv_area : JSR area_enter
     PAGE_IN BANK_RASTER
     JSR raster_forget
@@ -1814,6 +1835,9 @@ ENDSECTION
 ENDSECTION
 
 \ Where each section ends, for the next's org and the clearing.
+SECTION ObjCode
+.obj_code_end
+ENDSECTION
 SECTION AreaCode
 .area_code_end
 ENDSECTION
@@ -1885,18 +1909,23 @@ ASSERT obj_work_end <= &E000
 \ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
 \ The banks: each section after the last in its bank, below &C000.
-ASSERT raster_state_end <= &C000
+ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= &C000
 ASSERT live_data_end <= text_ram_end AND text_ram_end <= area_conv_end AND area_conv_end <= &C000
 ASSERT logic_code_end <= live_data_end
 ASSERT logic_db_code_end <= live_glue_end AND live_glue_end <= LOGIC_DB
-\ Main RAM: LIVE, AreaCode, ObjConst, ObjArea, LogicWork, ObjMore, to &3000:
-\ never in &3000-&7FFF, which ACCCON's X switches, as the frame reads them.
-ASSERT obj_area_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
+ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
+\ Main RAM: RasterState (from a page, so its ALIGN costs nothing), LIVE,
+\ AreaCode, LogicWork, ObjMore, to &3000: never in &3000-&7FFF, which
+\ ACCCON's X switches, as the frame reads them whatever X.
+ASSERT LO(RASTER_STATE_ORG) = 0 AND RASTER_STATE_ORG >= &0E00
+ASSERT live_end <= area_code_end AND area_code_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
 ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
 \ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's page.
 ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
-\ Main RAM's &3000 on (with X clear): the cache and the sort's memory.
-ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= SCREEN
+\ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
+\ memory, the pipeline's tables and the area's working copy.
+ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
+ASSERT obj_const_end <= obj_area_end AND obj_area_end <= SCREEN
 \ Shadow RAM's &3000 on (with X set): the logic's lists by face.
 ASSERT logic_faces_end <= SCREEN AND LOGIC_FACES_ORG >= &3000
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER

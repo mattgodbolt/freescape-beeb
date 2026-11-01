@@ -62,6 +62,11 @@ VIEW_COL0   = (SCREEN_COLS - VIEW_BYTES) DIV 2
 VIEW_ADDR   = SCREEN + VIEW_ROW0 * SCREEN_ROW + VIEW_COL0 * 8
 ASSERT VIEW_ROW0 + VIEW_H DIV 8 <= SCREEN_ROWS
 
+\ Where the object pipeline's code starts in its sideways bank on the live
+\ disc (src/live.6502, which says why it isn't &8000); mk/objects.mk's
+\ check build keeps room for that bank full.
+OBJ_CODE_ORG = &8080
+
 \ Sixteenths of a pixel: the view coordinates (docs/engine.md, section 9).
 SUB         = 16
 
