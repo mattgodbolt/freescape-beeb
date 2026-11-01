@@ -340,3 +340,30 @@ faces wholly on screen, 16 bits downstream of the cached transform.
 - Merging the projection broke the object check's build (its tables
   outgrew the check's HAZEL layout, and its new entries were unreachable
   there); the full check caught both before anything was pushed.
+
+## 2026-10-31: the whole pipeline live on the BBC
+
+`build/live.ssd` (decision 30, `docs/research/live.md`) runs stages 1-10
+on the BBC every frame from a free camera, with nothing worked out off
+it. Measured that day by `make live` (`tools/livecheck.mjs`, jsbeeb's full
+video): 614 frames shown, over every entrance, walks and turns at five of
+them, and the demo, each the model's view of its camera byte for byte.
+Fields a frame, median / p90 / most:
+
+| frames | flip to flip | 1-7 objects | 8-10 fill | the rest |
+|---|---|---|---|---|
+| all (614) | 13.0 / 18.5 / 22.6 | 7.25 / 9.55 / 11.64 | 5.29 / 9.33 / 11.18 | 0.07 / 0.73 / 2.78 |
+| an entrance's first (70) | 10.2 / 16.0 / 21.0 | 6.12 / 8.34 / 9.38 | 3.23 / 5.67 / 9.15 | 0.82 / 2.28 / 2.78 |
+| still (359) | 11.5 / 17.4 / 20.5 | 6.37 / 8.56 / 9.17 | 4.54 / 9.16 / 11.18 | 0.06 / 0.52 / 1.88 |
+| a walk (65) | 14.0 / 18.5 / 19.8 | 7.76 / 8.64 / 9.11 | 6.05 / 9.68 / 10.08 | 0.10 / 0.56 / 0.95 |
+| a turn (110) | 16.8 / 21.6 / 22.6 | 9.52 / 11.25 / 11.64 | 6.49 / 9.94 / 10.84 | 0.07 / 0.56 / 1.01 |
+
+So about 3.9 frames a second at the median, against decision 2's two
+fields. The front end is the larger half everywhere, and a turn (the
+transform's cache refilled) costs it about three fields more than a still
+frame. The rest (the keys, the text, the figures, entering an area) is
+small but for an area's first frame, which waits for its name below the
+view. The BBC's own timing of each half, which it shows, agreed with the
+emulator's count within 8 cycles on all 1,228. Merging main's larger
+projection tables pushed the transform's cache out of HAZEL into main
+RAM's `&3000` (decision 31).

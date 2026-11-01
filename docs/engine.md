@@ -262,7 +262,9 @@ come with it, to see where the cycles go.
 - `&0800-&0CFF`: the player logic's variables, `LogicWork`
   (`docs/research/logic6502.md`).
 - `&0E00-&2FFF`: the engine's main code.
-- `&3000-&3FFF`: per-buffer data only (section 4, stage 10).
+- `&3000-&3FFF`: per-buffer data only (section 4, stage 10); the live
+  disc keeps the transform's cache in main RAM's, reached with X clear
+  (decision 31).
 - `&4000-&7FFF`: the screen, 16K in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
   table) and the row-run code.
@@ -272,7 +274,8 @@ come with it, to see where the cycles go.
   with room to share.
 
 The tracks size these as they go, and `make memory` reports what each
-region holds.
+region holds. The live disc's map, the whole engine in one build, is
+`src/live.6502`'s (`docs/research/live.md`, decision 31).
 
 ## 9. The interfaces between the stages
 
