@@ -19,6 +19,7 @@ make objects          # the records, the check build, and the check: every stage
 make objects-nocache  # the same with the transform's cache off (the measurement below)
 node tools/objectcheck.mjs build/objects --entrance --profile   # the entrance views and their
                                                                 # walks, cycles by routine
+node tools/objectcheck.mjs build/objects --entrance --profile-walks   # the walks' steps alone
 ```
 
 `make objects` needs `make colours` and the maths' tables (`make maths`'s
@@ -153,7 +154,11 @@ faces use).
 
 `V = M (v − c)`, exact, 24-bit, as `M v − M c`:
 
-- **M c** once a frame, by the maths' `dot3` a row at a time.
+- **M c** once a frame: by the maths' `dot3` a row at a time; or, while the
+  matrix holds (`matrix_build` clears `mc_valid`) and the camera has moved
+  under 64 units on each axis (a step), the last M c plus M times the move,
+  a byte product (`mmul`) a non-zero term. Nothing is rounded, so the two
+  are the same.
 - **An object's cache**, filled when it's first transformed under an
   orientation: for a box, `M` times its low corner and times each of its
   edges (four vectors, three for a rectangle); for a generic object or a
@@ -205,20 +210,28 @@ M, below). A polygon object's vertices go first, then its faces:
   tested once against the band the projection takes (`band_test`, the
   model's `clip.projectable`): in front of `ZNEAR`, x within 2^(n + 3) and y
   within 2^(n + 2), n the bit length of z, as two's complement, so a byte or
-  two of each coordinate against tables indexed by n (`band_*`). The band
-  is inside the guard band (the model asserts), so everything decision 17
-  bought still holds. Then each vertex of a face with no vertex off the band
-  is projected once (`vertex_shared`), in an order for the object's kind
+  two of each coordinate against tables indexed by n (`band_*`), and z's
+  top two bytes for the near plane (`ZNEAR` is 256, ASSERTed), inline in the
+  pass (`BAND_TEST`). The band is inside the guard band (the model asserts),
+  so everything decision 17 bought still holds. Then each vertex of a face
+  with no vertex off the band (every vertex used, when none is off) is
+  projected once (`vertex_shared`), in an order for the object's kind
   (`vp_order`: a cuboid's vertices i and i + 2 share x and z under a level
   camera, so do a rectangle's along y) that lets `project_y` and
   `project_z` take a vertex sharing the last one's x and z, or z, with its
-  outcode against the view.
-- **A face projected whole** (`poly_face`): its outcodes' AND drops it;
-  their OR zero takes it as it is, repeats dropped; else the 2D clip.
+  outcode against the view (a `project_y` vertex's x part the last one's).
+- **A face projected whole** (`poly_face`): its vertices go straight into
+  the output (`out_v*` from `out_vn`) as they're gathered, with their
+  outcodes' AND, which drops it, and OR. Wholly inside, and with no vertex
+  the one before it again (the first against the last), the drawn test
+  takes them there and `commit` records the face; else they go to `pa` for
+  the 2D clip, or for `dedupe`, and are staged back (`stage_pa`). A cone's
+  polygon and a line's take the same `stage_pa`, `drawable` and `commit`.
 - **Any other polygon: the cone** (`cone_face`, the model's
   `clip.cone_clip`). Every vertex in one of the half-spaces x < −z, x > z,
   2y > z, 2y < −z, z ≤ 0 (`vertex_code3`, each a 32-bit sum's sign; each
-  misses the view's pyramid wherever the point is) drops it. Else each edge's
+  misses the view's pyramid wherever the point is) drops it; the AND stops
+  once it's 0. Else each edge's
   plane through the eye (`edge_normal`) becomes a line on the screen
   (`edge_line`), kept if it cuts the view's rectangle, and the rectangle is
   clipped by each kept line in turn (`cone_pass`, Sutherland-Hodgman, its
@@ -228,17 +241,25 @@ M, below). A polygon object's vertices go first, then its faces:
   rectangle clipped by all its edges' planes is exactly its image: no near
   plane and no guard band, a pyramid from the eye as the original's.
   - A box's edge runs along a world axis k, so B − A is a multiple of M's
-    column k and the plane is ± A × M[:, k]: six terms, each a byte product
-    of a 24-bit coordinate's size by a column entry, table-driven
-    (`en_*`), passing over a zero entry (a level camera's matrix has four).
-    Any other edge's is cut16(A) × cut16(B − A), 16-bit products.
-  - The normal is shifted right until it fits `LINE_BITS`, N', and the line
-    is f(x, y) = A x + B y + C, A = −2 N'x, B = N'y, C = 2 XC N'x − YC N'y
-    − 2 FX N'z, by quarter-square products by 13 and 61 in the
-    instructions (2 XC = 128 × 13, YC = 64 × 13, 2 FX = 8 × 317, ASSERTed);
-    with A W and B H it's f at the rectangle's corners by additions, and
-    at a vertex on its sides by one product (`cone_eval`, |A| and |B|
-    patched into quarter-square readers once a pass).
+    column k and the plane is ± A × M[:, k]: each non-zero entry c of the
+    column gives two terms, A's coordinates by c, so c is patched into the
+    quarter-square reader once for both (`en_mul`: a signed 24-bit
+    coordinate by a byte, its raw top byte's excess taken off), and an entry
+    of ±64 is a shift (`en_shl6`; a level camera's column for y is (0, 64,
+    0)). Any other edge's is cut16(A) × cut16(B − A), 16-bit products.
+  - The normal is shifted right until it fits `LINE_BITS`, N' (one bit
+    length for the three components, then their 16-bit windows shifted
+    together), and the line is f(x, y) = A x + B y + C, A = −2 N'x, B =
+    N'y, C = P − Q − R, P = 2 XC N'x, Q = YC N'y, R = 2 FX N'z, by
+    quarter-square products by 13 and 61 in the instructions on the raw
+    bytes (2 XC = 128 × 13, YC = 64 × 13, 2 FX = 8 × 317, ASSERTed). The
+    line keeps f at the rectangle's corners, ±P ± Q − R (`lfc`), which
+    decides whether it cuts and stands for a corner's f in the passes.
+  - Each of the clipped polygon's vertices is tagged with the rectangle's
+    sides it's on (`pa_tg`, `OC_*`; a crossing gets its ends' sides in
+    common), so a pass's f at a vertex (`cone_eval`) is a corner's own, a
+    side's corner f plus one product (A x along the top and bottom, B y down
+    the sides), or two products inside; every way gives the same f.
 - **A line's face, or a point's** (`draw_segment`): with an end off the
   band, a point isn't drawn and a line is clipped in 3D to `ZNEAR` and the
   planes x = ±z, 2y = ±z, by crossings from the inside end (`seg_clip`, the
@@ -247,15 +268,20 @@ M, below). A polygon object's vertices go first, then its faces:
   `point_square`) and clipped in 2D.
 - **Crossings** (decision 24: `frac16`, `lerp`): one fraction t from the
   edge's inside end, f_P / (f_P − f_Q), both shifted right until the
-  difference fits 16 bits, then sixteen unrolled steps; `frac16` patches
-  t's bytes into `lerp`'s quarter-square readers, and `lerp` takes the
-  size of P to Q (up to 24 bits) by them, rounded half up.
+  difference fits 16 bits (by the difference's bit length: whole bytes,
+  then the rest right, or the other way left and a byte down), then sixteen
+  unrolled steps; `frac16` patches t's bytes into `lerp`'s quarter-square
+  readers, and `lerp` takes the size of P to Q (up to 24 bits) by them,
+  rounded half up.
 - **The 2D clip** is 16-bit (inside the band everything projects within
   the guard band's range), and runs only the passes for edges a vertex is
-  beyond.
-- **The drawn test** (`clip.drawable`): three vertices or more, one off the
-  line through the first two, decided by the products' signs and zeros
-  where it can be, else by two 16 × 16 products.
+  beyond; the four passes are one routine (`clip_pass`) taking the side's
+  axis as offsets into the coordinates' arrays.
+- **The drawn test** (`clip.drawable`, on the polygon staged in the
+  output): three vertices or more, one off the line through the first two,
+  decided by the products' signs and zeros where it can be, then by the
+  sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger, and the
+  other way about), else by two 16 × 16 products.
 
 ## Stage 7: the sort (`src/order.6502`)
 
@@ -263,16 +289,21 @@ The original's bubble sort, the model's `compare_axis` case for case, on
 cells: each draw-list entry's box and its side of the camera (across, below,
 above) on each axis, so a compare is byte compares on two index registers.
 
-A compare depends on nothing but the two boxes and the camera's ceiling
-cells, so its verdict (keep or swap) is remembered by the pair of slots
+A compare depends on nothing but the two boxes and each box's side of the
+camera on each axis (L ≥ e above, H < e below, else across, e the ceiling
+cell), so its verdict (keep or swap) is remembered by the pair of slots
 (`so_memo`, a byte a pair: the generation shifted left one, OR keep), under
-a generation (`so_gen`) that moves on when the cells do; when the
-generations run out the memory is cleared. A frame reads a pair's verdict
-from it when it has it, and works out the entries' keys only when it
-doesn't. A turn keeps the cells, so a turning frame's compares are
-remembered; so is every repeat of a pair within a frame. `cache_reset`
-(a new area, or an object moved) clears the memory (`sort_forget`);
-`cache_empty` (a new orientation) leaves it.
+a generation (`so_gen`) that moves on when a ceiling cell moves past some
+slot's L or H on its axis (any slot's, since the memory keeps every pair's);
+a cell that moves past none leaves every side, and so the memory, as it
+was. When the generations run out the memory is cleared. A frame reads a
+pair's verdict from it when it has it, through each draw-list entry's row
+of the memory (`dl_rl`, `dl_rh`, found once a frame), with a pass's place
+in a register, and works out the entries' keys only when it doesn't. A turn
+keeps the cells, so a turning frame's compares are remembered; so is every
+repeat of a pair within a frame. `cache_reset` (a new area, or an object
+moved) clears the memory (`sort_forget`); `cache_empty` (a new orientation)
+leaves it.
 
 ## The output: what the rasteriser reads
 
@@ -404,6 +435,78 @@ What it found:
   in the entrance views [measured]. The 24-bit adds and tests it would
   shorten aren't where the cycles went, so it waits for a vertex path that
   uses it.
+
+## The fourth round: optimisation (track O)
+
+Track O took stages 1-7 through optimisation rounds (the figures, before and
+after, by stage, step and turn, are in the journal, 2026-10-31, "the front
+end's optimisation rounds (track O)"). Each round profiled first
+(`objectcheck.mjs --profile`, and `--profile-walks` for the walks' steps
+alone, the frames that only move), took the hottest routines against the
+checklist (`../chuckie-egg-2-beeb/docs/optimising.md`), and kept a change
+only if it measured faster and stayed exact: the model is unchanged, so no
+pixel moved, and every stage of all 2,485 check views and every frame of the
+live disc agree with it as before.
+
+Kept:
+
+- **The cone's planes** (`edge_normal`): a column entry's two terms share
+  one patched multiplier, a ±64 entry is a shift, and a coordinate's sign
+  comes from its raw top byte's excess rather than from its size first.
+- **The cone's lines** (`edge_line`): one bit length for all of N, the
+  three components' windows shifted together, the constant products on raw
+  bytes with the sign's excess taken off (no negations), and the corners' f
+  kept for the passes.
+- **The cone's passes**: vertices tagged with the rectangle's sides they're
+  on, so a corner's f is the line's own and a side's one product; the
+  rectangle's first pass needs none. `vertex_code3`'s AND stops at 0.
+- **Crossings**: `frac16` normalises by the difference's bit length instead
+  of a bit at a time.
+- **The transform**: no near flag (the band test reads z); M c moved on by
+  the step while the matrix holds.
+- **The vertex pass**: the band test inline; every vertex used is projected
+  when none is off the band, without the faces' loop; a `project_y`
+  vertex's x outcode is the last one's.
+- **Faces projected whole** gathered straight into the output; the drawn
+  test on the staged polygon, with the sizes' order before the products.
+- **The sort**: each entry's memory row once a frame and a pass's place in
+  a register; the memory kept across a cell that passes no box's L or H.
+- **For room** in the live disc's bank: the matrix's products and roundings
+  as subroutines (a build is a turn's alone), and the 2D clip's four passes
+  as one routine. Both cost some cycles for their bytes.
+
+Measured and not kept:
+
+- **Skipping `vertex_shared`'s compares** for the pairs the vertex orders
+  know share x and z under a level camera: the test cost about what it
+  saved.
+- **Ending the sort at a cycle of two** (an order the same as two passes
+  before, after which the rest alternate, which would be exact): in the
+  model, too few of the entrance views and walks reach one early to pay.
+- **A shared edge's plane**: two faces of a box sharing an edge have planes
+  exactly opposite (A_k × col = A_i × col, the edge being along col), so one
+  normal would serve both; but two cone faces of one object rarely share an
+  edge in the check's views.
+
+What's left:
+
+- **The cone's crossings**: `frac16`'s sixteen-step division is the frame's
+  largest routine. A crossing by a reciprocal table and products (rtw-sources
+  §1.5) is several times cheaper; for the cone, whose polygon's edges lie in
+  the view, a reciprocal of nine or ten bits puts a crossing within a
+  fraction of a pixel. It's a change to the model's crossings (a decision,
+  with pixel figures against the model and the ZX oracle) and needs a
+  table's room outside the bank.
+- **The lines** (`edge_line`) are next; then the vertex pass's copies into
+  the projection's arguments, which a projection reading the vertex arrays
+  would save.
+- **Still frames**: on the live disc stages 1-7 run in full when nothing
+  moved. `objects_frame` could return at once with the camera and every
+  object's state as last frame's, if the logic said when an object's state
+  changed (the live loop's, track P's).
+- **The target** (about 60K at a median step) is still far off: the cone is
+  about a third of a step, and the projected faces' path (vertex pass,
+  projection, faces, 2D clip, drawn test) as much again.
 
 ## The floor (decision 8a)
 
