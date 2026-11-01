@@ -37,7 +37,7 @@ RS_FACES    = 128                   ; faces in one frame, at most
 RS_VERTICES = 256                   ; vertices of all of them
 RS_PATTERNS = 64                    ; patterns (four bytes each)
 RS_HMAX     = 30000                 ; |rs_hx|, |rs_hy| at most
-POOL_NODES  = 127                   ; gaps a pool holds (1..POOL_NODES; decision 32)
+POOL_NODES  = 127                   ; gaps a pool holds (1..POOL_NODES; raster.md, "The span buffer")
 \ The painter build (docs/research/raster.md): the backmost face and the
 \ background through the span buffer, then the other faces back to front.
 RASTER_PAINTER_WAY = FALSE              ; the engine's way: the span buffer's
@@ -60,6 +60,7 @@ ENDIF
 ASSERT POOL_HELD < POOL_FIELD AND 2 * VIEW_H DIV 4 <= POOL_HELD
 ASSERT VIEW_W < 128                 ; pixel positions are positive bytes
 ASSERT SUB * VIEW_W < 4096 AND SUB * VIEW_H < 4096  ; a vertex's high byte ASLed 4 times leaves C clear
+ASSERT SUB * VIEW_W * (SUB - 1) < 32768 ; product's multiplicand: a short edge's |dx| t0
 ASSERT RS_VERTICES = 256            ; a face's vertices wrap round mod 256
 
 \ ---------------------------------------------------------------------------
@@ -1032,7 +1033,8 @@ SHIFT_MIN = 5                           ; e_sh on a tall edge: 5..11
     EQUW up3, up2, up1, by8, dn1, dn2, dn3
 }
 
-\ product: m_p = e_dx (256 + e_f), 24 bits, e_dx < 4096: each byte u of
+\ product: m_p = e_dx (256 + e_f), 24 bits, e_dx < 32768 (the largest is a
+\ short edge's |dx| t0, which an ASSERT at the top bounds): each byte u of
 \ e_dx times f as q(u + f) - q(|u - f|), q from rq (page-aligned, so f
 \ patched into the operands' low bytes adds it to the index: lo and hi by
 \ the caller, lo2 and hi2 here), and e_dx 256 added.

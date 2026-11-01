@@ -113,7 +113,7 @@ build/raster/scenes.json: tools/rasterscenes.py $(RASTER_MODEL) src/defs.6502 bu
 # reads them from src/raster.6502), rewritten only when they change, so an
 # edit to the code doesn't remake every scene.
 build/raster/limits: src/raster.6502 | build/raster
-	grep -E '^\s*(POOL_NODES|POOL_HELD|RS_PATTERNS|RS_HMAX)\s*=' $< > $@.new
+	sed -n -E 's/^\s*(POOL_NODES|POOL_HELD|RS_PATTERNS|RS_HMAX)\s*=\s*([0-9]+).*/\1 = \2/p' $< > $@.new
 	cmp -s $@.new $@ || mv $@.new $@
 	rm -f $@.new
 

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "model"))
 
 from raster import (VIEW_W, VIEW_H, SUB, HALF, Background, Horizon,  # noqa: E402
                     edge_crossings, edge_crossings_exact,
-                    spans, painter, reference)
+                    spans, painter, reference, horizon_split, first_line)
 import writer  # noqa: E402
 
 XMAX, YMAX = SUB * VIEW_W, SUB * VIEW_H
@@ -369,6 +369,15 @@ def edge_scenes():
         x = 16 * (4 * i + i % 2) + 8
         faces.append((pattern(rng), jumble(rng, [(x, 100 + 13 * i), (x + 40 + i, 100), (x + 40, 1500), (x, 1500 - 20 * i)])))
     out.append(scene("narrow-gaps", faces, Horizon(-400, 900, 127, 3), rng))
+    # 256 vertices in all, so the last face's run of them ends at the last
+    # index and its chains' walks wrap round mod 256.
+    faces = []
+    for i in range(63):
+        x, y = 80 + 200 * (i % 8), 60 + 200 * (i // 8)
+        faces.append((pattern(rng), jumble(rng, [(x, y), (x + 120, y + 10), (x + 110, y + 130), (x - 5, y + 120)])))
+    faces.append((pattern(rng), jumble(rng, [(0, 300), (XMAX, 0), (XMAX - 200, YMAX), (100, YMAX - 50)])))
+    assert sum(len(v) for _, v in faces) == 256
+    out.append(scene("vertex-wrap", faces, level, rng))
     return out
 
 
@@ -446,6 +455,55 @@ def driller_views(db_path, out):
     print(f"{len(scenes)} of Driller's entrance views, checked against the model's brute force")
 
 
+def held_writes(frames):
+    """The view's bytes each frame of a sequence writes, as the 6502's
+    records of the background have it (raster_background): the frames go
+    alternately into each screen; a line no face touched is background
+    alone, and isn't written when the screen being drawn held the same
+    background there last time, in the same two patterns; other patterns
+    forget the screen's lines, and the first frame forgets both screens.
+    In the painter's build the backmost face alone touches lines, and after
+    the background the lines its painted faces' line ranges span (their
+    hull) are no longer background alone. Sets each built frame's
+    "written", and its painter's."""
+    recs = {"span": [[0] * VIEW_H, [0] * VIEW_H], "painter": [[0] * VIEW_H, [0] * VIEW_H]}
+    sigs = {"span": [None, None], "painter": [None, None]}
+    for t, f in enumerate(frames):
+        screen = t % 2
+        bg = Background(tuple(f["sky"]), tuple(f["ground"]),
+                        None if f["horizon"] is None else Horizon(*f["horizon"]))
+        faces = [(tuple(g["pattern"]), [tuple(v) for v in g["vertices"]]) for g in f["faces"]]
+        splits = [horizon_split(bg, y) for y in range(VIEW_H)]
+        sig = (splits[0][0], splits[0][1])
+        for build_, front, bytes_ in (("span", faces, f["counts"]["bytes"]),
+                                      ("painter", faces[-1:], f["painter"]["counts"]["bytes"])):
+            rec = recs[build_]
+            if t == 0:
+                rec[0][:] = rec[1][:] = [0] * VIEW_H
+            if sigs[build_][screen] != sig:
+                sigs[build_][screen] = sig
+                rec[screen][:] = [0] * VIEW_H
+            touched = []
+            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched)
+            skipped = 0
+            for y in range(VIEW_H):
+                if touched[y]:
+                    rec[screen][y] = 0
+                elif rec[screen][y] == splits[y][2] + 1:
+                    skipped += 1
+                else:
+                    rec[screen][y] = splits[y][2] + 1
+            if build_ == "painter":
+                lines = [first_line(y) for _, vs in faces[:-1] if len(vs) >= 3 for y in (min(p[1] for p in vs), max(p[1] for p in vs))]
+                for y in range(min(lines[0::2], default=VIEW_H), max(lines[1::2], default=0)):
+                    rec[screen][y] = 0
+            written = bytes_ - writer.VIEW_BYTES * skipped
+            if build_ == "span":
+                f["written"] = written
+            else:
+                f["painter"]["written"] = written
+
+
 def main():
     if len(sys.argv) == 4 and sys.argv[1] == "--driller":
         return driller_views(sys.argv[2], sys.argv[3])
@@ -459,6 +517,8 @@ def main():
 
     scenes = [built(s) for s in edge_scenes() + driller_scenes() + random_scenes()]
     seqs = [{"name": q["name"], "frames": [built(s) for s in q["frames"]]} for q in sequences()]
+    for q in seqs:
+        held_writes(q["frames"])
     Path(sys.argv[1]).write_text(json.dumps({"scenes": scenes, "sequences": seqs}) + "\n")
     print(f"{len(scenes)} scenes and {len(seqs)} sequences of frames, checked against the model's brute force")
 

@@ -9,16 +9,20 @@
 // (mk/raster.mk); --scenes names another scene file. For each scene it
 // writes the faces, patterns and horizon into rs_*, forgets what the screens
 // held, fills the screen with bytes the frame must change (the view's with
-// each expected byte's complement), calls check_frame, and checks:
+// each expected byte's complement), poisons the frame's own work (the
+// lines' heads, the vertices' lines, the pools), calls check_frame, and
+// checks:
 //   - the view's bytes are the model's, in the screen ACCCON's X chose, and
-//     as many were written as the model's counts say;
+//     as many bytes, shared bytes and runs were written as the model's
+//     counts say;
 //   - nothing else of either screen changed;
 //   - nothing was written outside the rasteriser's own memory (its zero
 //     page, the stack, its sections) and the view;
 //   - rs_overflow is set exactly when the model's pools overflowed.
 // Then each sequence of frames goes into alternate screens without
 // forgetting, each frame checked the same way: what the 6502 leaves alone
-// must be what's wanted. It reports each scene's cycles, split by what ran
+// must be what's wanted, and it must write as many bytes as the
+// background's records leave (tools/rasterscenes.py's held_writes). It reports each scene's cycles, split by what ran
 // (an instruction-level profile over the routines' labels), and the cost
 // model fitted to them; --json writes them with the model's counts
 // (docs/research/raster.md), and --hot each instruction's cycles and
@@ -141,6 +145,9 @@ await m.call(S("check_init"));
 const stub = await m.empty();
 // --hot: each instruction's cycles and executions over the scenes, by address.
 const hot = hotOut ? new Map() : null;
+// The work each frame makes afresh, poisoned before each.
+const work = [[S("head"), VIEW_H], [S("vk"), S("RS_VERTICES")], [S("pools"), 16 * S("POOL_FIELD")]];
+let poison = 0;
 
 function writeScene(s) {
     const patterns = [];
@@ -208,6 +215,10 @@ async function frame(s, shadow, fresh) {
             for (let c = 0; c < VIEW_BYTES; c++) m.poke(addr(y, c), want[y][c] ^ 0xff, space);
     }
     const before = { [space]: m.read(SCREEN, 0x8000 - SCREEN, space), [other]: m.read(SCREEN, 0x8000 - SCREEN, other) };
+    // The frame's own work (the lines' heads, the vertices' lines, the
+    // pools) must be made by the frame: whatever it held is poisoned.
+    poison++;
+    for (const [at, n] of work) m.write(at, Array.from({ length: n }, (_, i) => (i * 97 + poison * 31 + 0x5b) & 255), BANK);
 
     // Profile: each instruction's cycles to its routine's bucket.
     const prof = {};
@@ -272,6 +283,10 @@ async function frame(s, shadow, fresh) {
     if (fresh && counts.bytes !== want_counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${want_counts.bytes}`);
     if (fresh && counts.joins !== want_counts.joins) problems.push(`${counts.joins} shared bytes written, the model's ${want_counts.joins}`);
     if (fresh && counts.runs !== want_counts.runs) problems.push(`${counts.runs} runs entered, the model's ${want_counts.runs}`);
+    // A held frame writes what the background's records leave
+    // (tools/rasterscenes.py's held_writes).
+    const held = PAINTER ? s.painter.written : s.written;
+    if (!fresh && held !== undefined && counts.bytes !== held) problems.push(`${counts.bytes} view bytes written, the records' ${held}`);
     return { cycles, prof, counts, problems };
 }
 
