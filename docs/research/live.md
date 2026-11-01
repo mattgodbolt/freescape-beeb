@@ -259,6 +259,15 @@ and fields a frame from the flips and fields counted (`frames`, `fields`),
 and the mean cycles a frame of each half, in thousands; each over the
 frames since the figures were last drawn, every `FIGURE_FIELDS` fields.
 
+The screen is Driller's 192 lines (`docs/engine.md`, section 1), so the
+text has the ten character rows below the view, one line each, from the
+row straight below it (`TEXT_LAYOUT`): the area's name; the entrance (the
+free disc) or the game's end; `dd.dfps  dd.d f/f`, frames a second then
+fields a frame; `cycles dddk dddk`, stages 1-7's then 8-10's; the keys on
+two lines; and the credit on four. The row straight below the view begins
+a line before `FLIP_LINE`, so a character there is begun early enough to
+be done before the beam reaches it (`TEXT_LEAD_US` in `src/text.6502`).
+
 The window is measured early when the loop goes idle with its frames all
 shown (the idle loop, above). The halves are timed on the BBC by User VIA
 T2, which runs free down at

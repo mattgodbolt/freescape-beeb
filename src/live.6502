@@ -125,7 +125,7 @@ MACRO PAGE_IN bank
 ENDMACRO
 
 \ HAZEL: the maths' tables and the f64 table, then the work.
-HAZEL_LOAD  = &4000             ; where !BOOT loads the tables (the screen, cleared after)
+HAZEL_LOAD  = SCREEN             ; where !BOOT loads the tables (the screen, cleared after)
 SECTION Hazel, org = &C000, load = &FFFF0000 OR HAZEL_LOAD, filename = "HAZEL"
 INCLUDE "../build/maths/tables.6502"
 .hazel_tables_end
@@ -280,30 +280,31 @@ SECTION Live, org = &0E00, load = &FFFF0E00, exec = &FFFF0000 OR start, filename
 usrvia_t2cl = &FE68
 usrvia_t2ch = &FE69
 
-\ The text's lines: {character row, logical colour}, below the view.
+\ The text's lines: {character row, logical colour}, the rows below the view
+\ one after another to the screen's last (the panel's, later).
 TL_NAME     = 0
 TL_ENTRANCE = 1                 ; (the entrance, or with the logic the game's end)
-TL_FPS      = 2
-TL_FPF      = 3
-TL_FRONT    = 5
-TL_FILL     = 6
-TEXT_LAYOUT = {{15, 3}, {16, 7}, {18, 2}, {19, 2}, {21, 6}, {22, 6}, {23, 6}, {25, 5}, {26, 5}, {28, 7}, {29, 7}, {30, 7}, {31, 7}}
-NUMBER_COL  = 12                ; each figure's four characters
+TL_RATE     = 2                 ; frames a second, then fields a frame
+TL_CYCLES   = 3                 ; cycles a frame: stages 1-7's, then 8-10's
+TEXT_LAYOUT = {{14, 3}, {15, 7}, {16, 2}, {17, 6}, {18, 5}, {19, 5}, {20, 7}, {21, 7}, {22, 7}, {23, 7}}
+ASSERT TEXT_LAYOUT[0, 0] = VIEW_ROW0 + VIEW_H DIV 8 AND TEXT_LAYOUT[LEN(TEXT_LAYOUT) - 1, 0] = SCREEN_ROWS - 1
+\ Each figure's four characters, in its line's fixed text: "dd.dfps  dd.d
+\ f/f" and "cycles dddk dddk", a space before each figure but the first.
+FPS_CELL    = TL_RATE * TEXT_COLS
+FPF_CELL    = TL_RATE * TEXT_COLS + 8
+FRONT_CELL  = TL_CYCLES * TEXT_COLS + 7
+FILL_CELL   = TL_CYCLES * TEXT_COLS + 12
 DEMO_COL    = 12                ; "demo" on the entrance's line
 FUNCTION centred(s) = CHR(REPEATED((TEXT_COLS - LEN(s)) DIV 2, ' ')) + s + CHR(REPEATED(TEXT_COLS - LEN(s) - (TEXT_COLS - LEN(s)) DIV 2, ' '))
-FUNCTION label(s) = s + CHR(REPEATED(TEXT_COLS - LEN(s), ' '))
-FIXED_FROM  = TL_FPS            ; the fixed lines, from here to the end
+FIXED_FROM  = TL_RATE           ; the fixed lines, from here to the end
 IF LIVE_LOGIC
     KEYS_TEXT = {centred("Z X : / P L N M"), centred("R F U B f0-f3")}
 ELSE
     KEYS_TEXT = {centred("cursors P L N M"), centred("SPACE: next")}
 ENDIF
 FIXED_TEXT = {
-    label("frames/sec"),
-    label("fields/frm"),
-    label("cycles a frame:"),
-    label("1-7 objects"),
-    label("8-10 fill"),
+    "    fps      f/f",
+    "cycles          ",
     KEYS_TEXT[0],
     KEYS_TEXT[1],
     centred("Driller (c)"),
@@ -312,9 +313,15 @@ FIXED_TEXT = {
     centred("a tech demo")
 }
 ASSERT LEN(FIXED_TEXT) = LEN(TEXT_LAYOUT) - FIXED_FROM
-ASSERT TL_FRONT - FIXED_FROM = 3 AND TL_FILL - FIXED_FROM = 4
+ASSERT TL_CYCLES = TL_RATE + 1
 FOR i = 0..<LEN(FIXED_TEXT)
     ASSERT LEN(FIXED_TEXT[i]) = TEXT_COLS
+NEXT
+\ (each figure's cells blank in the fixed text, and inside its line)
+FIGURE_CELLS = {FPS_CELL, FPF_CELL, FRONT_CELL, FILL_CELL}
+FOR i = 0..<LEN(FIGURE_CELLS)
+    c = FIGURE_CELLS[i] - FIXED_FROM * TEXT_COLS
+    ASSERT SUM(FIXED_TEXT)[c..c + 3] = "    " AND (c + 3) DIV TEXT_COLS = c DIV TEXT_COLS
 NEXT
 ASSERT LIVE_TEXT_COLS = TEXT_COLS
 ENTRANCE_TEXT = "entrance "
@@ -940,8 +947,7 @@ ASSERT TL_ENTRANCE = TL_NAME + 1 AND LEN(OVER_TEXT) = TEXT_COLS
     INY : CPY #4 : BNE line
     RTS
 .blank_cells
-    EQUB TL_FPS * TEXT_COLS + NUMBER_COL, TL_FPF * TEXT_COLS + NUMBER_COL
-    EQUB TL_FRONT * TEXT_COLS + NUMBER_COL, TL_FILL * TEXT_COLS + NUMBER_COL
+    EQUB FPS_CELL, FPF_CELL, FRONT_CELL, FILL_CELL
 }
 
 ENDSECTION
@@ -1066,7 +1072,7 @@ ENDIF
     LDA #10 : STA mul_a : STZ mul_a+1
     LDA div_n : STA mul_b : LDA div_n+1 : STA mul_b+1
     JSR fig_ratio
-    LDX #TL_FPF * TEXT_COLS + NUMBER_COL
+    LDX #FPF_CELL
     JSR tenths
     \ frames a second, tenths: (rate dn + 10 df / 2) / (10 df)
     LDA count_frames : SEC : SBC win_s0 : STA mul_b
@@ -1075,11 +1081,11 @@ ENDIF
     LDA div_n : STA div_d : LDA div_n+1 : STA div_d+1 : STZ div_d+2 : STZ div_d+3
     LDA #10 : JSR div_times
     JSR fig_ratio
-    LDX #TL_FPS * TEXT_COLS + NUMBER_COL
+    LDX #FPS_CELL
     JSR tenths
     \ each span's mean cycles in thousands: 2 us / (1000 n) = us / (500 n)
-    LDY #T_FRONT : LDX #TL_FRONT * TEXT_COLS + NUMBER_COL : JSR kilo
-    LDY #T_FILL : LDX #TL_FILL * TEXT_COLS + NUMBER_COL : JSR kilo
+    LDY #T_FRONT : LDX #FRONT_CELL : JSR kilo
+    LDY #T_FILL : LDX #FILL_CELL : JSR kilo
 .restart
     JMP fig_restart
 \ kilo: span Y's window as thousands of cycles a frame, into cell X on.
