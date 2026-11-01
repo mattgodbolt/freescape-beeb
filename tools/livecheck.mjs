@@ -20,8 +20,10 @@
 // point in the field from a fixed pseudo-random sequence, and held until the
 // disc's pass takes them; then, in that instant, held on for the next pass
 // if it has the same keys (with any pokes between put in at once), or let
-// go; or, if the pass leaves the logic's input a minute to take (the
-// trace's "soon"), the next pass comes at once, so its keys go down then
+// go, as a tap, once nearly REPEAT_FIELDS have passed since they went down
+// (the pace, decision 48); or, if the pass leaves the logic's input a
+// minute to take (the trace's "soon"), the next pass comes at once, so its
+// keys go down then
 // (none, for the pass of none the trace puts in where the next step isn't
 // one of keys). A minute's end comes by its clock (the minute otherwise
 // kept away), with its pass's keys; a poke or an FCL script's result is
@@ -41,7 +43,10 @@
 //   logic has them; and its view the model's render of that camera, those
 //   objects and the crosshair, byte for byte;
 // - a key pressed with nothing left to draw is taken by a pass (lv_pass's
-//   key_take) within KEY_FIELDS fields;
+//   key_take) within KEY_FIELDS fields; a tap is one pass; and the keys
+//   held alone repeat no sooner than REPEAT_FIELDS after the last pass that
+//   took a key gone down (lv_made). It reports the held keys' passes, and
+//   in tests/logic/pace.txt's run their speed;
 // - at the end, with the camera still, every indexed object hidden in
 //   ix_flags, and then shown again, each brings a frame (its view the
 //   model's with those flags).
@@ -618,6 +623,7 @@ const LV_TAKING = FREE ? -1 : sym("lv_pass.timed"); // (where a pass takes the k
 let lastTaking = null;
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
 let summary = "";
+let pace = null; // (the logic's disc: the taps and the held keys' passes, reported below)
 if (!FREE) await logicScript();
 else await freeScript();
 const emulated = now() / 2e6 - bootSecs;
@@ -775,13 +781,21 @@ async function logicScript() {
     // and the steps whose passes it has taken. A pass's keys are held until
     // it's taken; in that instant (the hook) the next pass is asked for if
     // it's the next step with the same keys, which stay held (a held key's
-    // passes follow on), and otherwise the keys go up, before the disc reads
-    // them again: no pass comes within a field of the last (the idle loop).
+    // passes follow on), and otherwise the keys go up: for keys the script
+    // pressed, a tap, once nearly REPEAT_FIELDS have passed since they went
+    // down (tapUntil), so the disc's pace (lv_pass) must make it one pass.
     let want = null;
     const done = new Set(), early = new Set(); // (early: pokes the hook has put in)
     let passesOk = 0, passesSeen = 0, walksOk = 0;
     const passLog = []; // each pass that ran: what its frames are to show
     let overs = 0;
+    const REPEAT_FIELDS = sym("REPEAT_FIELDS");
+    let tapUntil = null, taps = 0;
+    // the pace: the fields counted (lv_now) at the last pass that took a key
+    // gone down, and the fields from each pass to a pass after it on the
+    // keys held alone: the first repeat, and those after
+    let lastMade = null;
+    const firstRepeats = [], repeats = [];
     onPassed = (a) => {
         if (a === 0 || (a === 2 && !want && exp[0x8bf2])) {
             // no key: the original waits in its input; or the game's over,
@@ -800,6 +814,17 @@ async function logicScript() {
         if (probe && probe.tPass === undefined) probe.tPass = lastTaking;
         const { rec, where } = want;
         done.add(rec);
+        // The pace (decision 48): the keys held alone repeat no sooner than
+        // REPEAT_FIELDS after the last pass that took a key gone down (but a
+        // minute's end brings its pass whatever is held).
+        const tPass = V16("lv_now"), made = V("lv_made") !== 0;
+        const prev = passLog.at(-1);
+        if (made) lastMade = tPass;
+        else if (!rec.tick) {
+            const gap = (tPass - (lastMade ?? tPass)) & 0xffff;
+            if (lastMade !== null && gap < REPEAT_FIELDS) fail(`${where}: the keys held repeated ${gap} fields after a key went down, not ${REPEAT_FIELDS}`);
+            if (prev && prev.run === script && rec.names.length) (prev.made ? firstRepeats : repeats).push((tPass - prev.t) & 0xffff);
+        }
         // (the next pass, if it has these keys: after pokes, which go in
         // now, before the disc can take another pass, as the original
         // takes it without a pass with no key between)
@@ -826,8 +851,13 @@ async function logicScript() {
                 };
             }
         } else {
+            // A tap: keys the script pressed are held on until nearly
+            // REPEAT_FIELDS after they went down, as a player's tap lasts a
+            // while, and no second pass may come of them (the script asks
+            // for none: above)
+            if (want.tDown !== undefined && rec.names.length) tapUntil = want.tDown + (REPEAT_FIELDS - 2) * FIELD;
+            else hold([]);
             want = null;
-            hold([]);
         }
         if (a !== rec.result) fail(`${where}: the pass answered ${a}, not ${rec.result}`);
         const P0 = expCamera(), area0 = ram[LV_AREA], flags0 = expFlags();
@@ -847,7 +877,8 @@ async function logicScript() {
         }
         if (ok) walksOk++;
         else fail(`${where}: the disc's hooks saw ${n} walks (${V("lv_loaded") ? "an area loaded" : "no load"}), the transcription ${JSON.stringify(walks)}${rec.loaded ? ", a load" : ""}`);
-        passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, margin: exp[0x88d0] });
+        passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, margin: exp[0x88d0],
+            run: script, t: tPass, made });
         for (const [ad, v] of rec.then) exp[ad] = v;
     };
     // Each frame: the animation's state as lv_camera left it, the logic's
@@ -912,11 +943,23 @@ async function logicScript() {
                     hold([]);
                     await settleAndPress(where);
                     if (!rec.tick) startProbe(rec.names.join("+"));
-                    want = { rec, where, steps: run.steps, i };
+                    want = { rec, where, steps: run.steps, i, tDown: now() };
                     minuteDue = rec.tick;
                     hold(rec.names);
                 }
                 await until(() => done.has(rec), `${where}: the pass`);
+                if (tapUntil !== null) {
+                    // (the tap held on: onPassed)
+                    await until(() => now() >= tapUntil, `${where}: the tap`);
+                    hold([]);
+                    tapUntil = null;
+                    taps++;
+                    // (a field, so the vertical sync reads them up before a
+                    // key goes down again: the disc may be settled already,
+                    // and a key let go and pressed again inside a field is a
+                    // key held)
+                    await session.runFor(FIELD);
+                }
             }
         }
         hold([]);
@@ -1018,6 +1061,21 @@ async function logicScript() {
         `${camsOk} frames with the camera as the logic and decision 4 have it, ${between_n} of them between passes ` +
         `(${perPass.size} passes shown so, ${counts.length ? counts[counts.length >> 1] : 0} frames each at the median), ` +
         `${flagsOk} with the logic's objects' flags; ${visibilityFrames} frames from the objects' flags alone`;
+    // The held keys' speed in tests/logic/pace.txt's run (at the port's
+    // start sizes): over each pass on the keys held alone with another after
+    // it, its turn or its walk (one, not both) over the fields to that one.
+    const speed = { turn: [0, 0], walk: [0, 0] };
+    for (let k = 0; k + 1 < passLog.length; k++) {
+        const [p, q] = [passLog[k], passLog[k + 1]];
+        if (p.run !== "pace" || q.run !== "pace" || p.made || q.made) continue;
+        const turn = Math.abs(turnOf(p.P1[3], p.P0[3]));
+        const walk = Math.hypot(...[0, 1, 2].map((a) => s16((p.P1[a] - p.P0[a]) & 0xffff)));
+        const kind = turn && !walk ? "turn" : walk && !turn ? "walk" : null;
+        if (!kind) continue;
+        speed[kind][0] += kind === "turn" ? 5 * turn : walk;
+        speed[kind][1] += (q.t - p.t) & 0xffff;
+    }
+    pace = { taps, firstRepeats, repeats, speed };
 }
 
 async function freeScript() {
@@ -1301,6 +1359,13 @@ console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
     `${compared - wrong} the model's view byte for byte (${requests.length} views); ` +
     `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ` +
     `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times`);
+if (pace) {
+    const rate = ([d, f], unit) => (f ? `${((2e6 / FIELD_CYCLES) * d / f).toFixed(1)} ${unit} a second over ${f} fields` : "-");
+    console.log(`${NAME}: the pace: ${pace.taps} taps held ${sym("REPEAT_FIELDS") - 2} fields, each one pass; ` +
+        `the keys held alone repeat ${stats(pace.firstRepeats)} fields after their pass (${pace.firstRepeats.length}), ` +
+        `then a pass every ${stats(pace.repeats)} fields (${pace.repeats.length}) (median / p90 / max); ` +
+        `held in pace's run, turning ${rate(pace.speed.turn, "degrees")}, walking ${rate(pace.speed.walk, "units")}`);
+}
 // --- The keys pressed while settled: each one's pass (within KEY_FIELDS,
 // with the idle loop) and the first view it changed, by what changed.
 const kinds = { walking: [], turning: [], other: [] };

@@ -9,11 +9,14 @@ Runs tools/logic/ (the transcription, itself checked against the original
 by make logic) with decision 18's fix on (move.FIX_CORNER), which the port
 makes, on every scenario (tests/logic/*.txt by default) and on N random
 walks from random entrances (tools/logic/check.py's), each from the
-in-play snapshot. Writes FILE, JSON:
+in-play snapshot as make logic runs it: the 6502's start is the port's
+(decision 48, tools/logic/state.py's port_start), so each run's first steps
+poke the original's sizes back (original_sizes). Writes FILE, JSON:
 
     layout   the variables compared (tools/logic/state.py's), their
              addresses in the original, and the database's
-    start    the compared bytes as each run starts: [address, hex]
+    start    the compared bytes as each run starts, the port's start:
+             [address, hex]
     runs     each run's steps: a pass's keys as the ZX's half-rows (the
              BBC's bitmap, src/input.6502), and whether a minute ends
              first; a poke; an FCL script; then the compared bytes that
@@ -38,7 +41,7 @@ from logic.check import entrances, walk  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.oracle import Original, SCRIPT  # noqa: E402
 from logic.passes import KEYS, run_pass  # noqa: E402
-from logic.state import VARS, State, database  # noqa: E402
+from logic.state import VARS, State, database, original_sizes, port_start  # noqa: E402
 from mklogicdata import ZXV_ORG, ZXV_END  # noqa: E402
 
 
@@ -73,9 +76,17 @@ def changes(before, after, where):
     return [[a, after[a]] for a in where if before[a] != after[a]]
 
 
-def run(steps, snap_mem, where):
-    """A run's steps, as the 6502 is to take them, with what each changes."""
-    s = State(snap_mem)
+def from_original(steps, snap_mem, name):
+    """A run's steps after the pokes that put the original's start sizes
+    back, from the port's start (original_sizes)."""
+    return [scenario.Step("poke", f"{name}: the original's sizes", addr=a, values=v)
+            for a, v in original_sizes(snap_mem)] + steps
+
+
+def run(steps, start_mem, where):
+    """A run's steps, as the 6502 is to take them, from start_mem, with what
+    each changes."""
+    s = State(start_mem)
     out = []
     over = False
     for st in steps:
@@ -161,20 +172,22 @@ def main():
     ap.add_argument("--no-scenarios", action="store_true")
     args = ap.parse_args()
     move.FIX_CORNER = True      # decision 18: the port's logic
-    mem = Original(args.snap).memory()
+    snap_mem = Original(args.snap).memory()
+    mem = port_start(snap_mem)          # decision 48: the 6502's start
     where = regions(mem)
     lo, hi = database(mem)
     paths = args.scenarios or ([] if args.no_scenarios else sorted(glob.glob("tests/logic/*.txt")))
     runs = []
     for p in paths:
-        runs.append({"name": p, "steps": run(scenario.load(p), mem, where)})
+        runs.append({"name": p, "steps": run(from_original(scenario.load(p), snap_mem, p), mem, where)})
     if args.fuzz:
         ents = entrances(args.snap)
         for i in range(args.fuzz):
             rng = random.Random(args.seed + i)
             text = "\n".join(walk(rng, ents, args.passes)) + "\n"
             name = f"fuzz-{args.seed + i}"
-            runs.append({"name": name, "steps": run(scenario.parse(text, name), mem, where)})
+            steps = from_original(scenario.parse(text, name), snap_mem, name)
+            runs.append({"name": name, "steps": run(steps, mem, where)})
     cross, mul = arith_cases(args.arith, args.seed)
     vars_ = [{"name": n, "addr": a, "size": size_of(sz), "kind": k} for n, a, sz, k, _ in VARS if k != "clock"]
     out = {
