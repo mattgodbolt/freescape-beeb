@@ -413,7 +413,7 @@ logic's code and variables unused.
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
-| page `&0D`, below `&0D9F` | `start`, which runs once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
+| page `&0D`, below `&0D9F` | `start`, with `lv_start` and `clock_init`, which run once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
 | main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`, which the loader puts there) in the cache's place |
 | shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
 | `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
@@ -674,10 +674,10 @@ decision 42.)
   No byte of a frame changes, nor a cycle (both tables are on pages). Its
   bank gains their pages.
 - **The start runs from page `&0D`** (proposed 2026-11-01, track Y):
-  `start` runs once, so it goes where the DFS's NMI code was, which the
-  loader writes once the disc is done with, behind an RTI at `&0D00`. Main
-  RAM below `&3000` gains it, which takes the maths' code down a page and
-  so gives `ObjMore` a page more.
+  `start` (with `lv_start` and `clock_init`) runs once, so it goes where
+  the DFS's NMI code was, which the loader writes once the disc is done
+  with, behind an RTI at `&0D00`. Main RAM below `&3000` gains it, which
+  takes the maths' code down a page and so gives `ObjMore` a page more.
 - **ANDY** (open, for Matt): the front end's second window (it gains up to
   4K for code it calls through a ROMSEL switch from above `&9000`, the
   front end's change), or the area conversion's place (`BANK_DATA` gains
@@ -802,12 +802,12 @@ gone.
 
 On jsbeeb's Master from power on (SHIFT-BREAK), `tools/loadcheck.mjs`
 (and, for the discs before, the same run to the loop and the first flip),
-the discs before against main at the fault track's merge:
+the discs before (main, with the steering track's merge) and after:
 
 | disc | files before | after | first frame before | after |
 |---|---|---|---|---|
-| `build/live.ssd` | 18, 77,754 bytes | 2: `!BOOT` 3,200, `DRILLER` 38,246 | 16.51s | 11.19s |
-| `build/live-free.ssd` | 18 | 2: 3,202 and 38,140 | - | 11.15s |
+| `build/live.ssd` | 18, 77,754 bytes | 2: `!BOOT` 3,251, `DRILLER` 38,233 | 16.51s | 11.19s |
+| `build/live-free.ssd` | 18 | 2: 3,218 and 38,119 | - | 11.15s |
 | `build/slides.ssd` | 6, 37,340 bytes | 2: 596 and 18,747 | 8.01s | 6.37s |
 
 The live disc's boot after: the loader starts at 2.62s (the MOS, the
@@ -823,10 +823,10 @@ dmsc's decoder as written. A test disc of 40K: read in 10K OSGBPB calls,
 38.8s from power on; a track at a time by OSWORD `&7F`, 6.9s.
 
 The streams (the live disc's, unpacked, then packed): `BANK_DB` 16,384 to
-10,061; `BANK_DATA` 15,387 to 9,136; `BANK_OBJ` 16,137 to 8,636;
+10,040; `BANK_DATA` 15,387 to 9,132; `BANK_OBJ` 16,137 to 8,636;
 `BANK_RASTER` 11,153 to 4,958; main RAM (`&0F1F` up to `&4328`, the gap
-zero) 13,321 to 5,454; HAZEL 5,632 to 2,517; page `&0D` 89 to 75. The
-loader's code is the rest of `!BOOT`'s 3,200 bytes. On the first build,
+zero) 13,321 to 5,466; HAZEL 5,632 to 2,517; page `&0D` 147 to 126. The
+loader's code is the rest of `!BOOT`'s 3,251 bytes. On the first build,
 the parts packed a file at a time came to 41,083 bytes, and as streams to
 40,878.
 
@@ -840,17 +840,19 @@ the parts packed a file at a time came to 41,083 bytes, and as streams to
 | HAZEL, `obj_work_end` to `&E000` | 150 | 150 |
 | the fill's bank, `raster_work_end` to `&C000` | 760 | 1,784 |
 | `BANK_DATA`, `area_conv_end` to `&C000` | 997 | 997 |
-| `BANK_DB`, `live_glue_end` to `LOGIC_DB` | 983 | 983 |
+| `BANK_DB`, `live_glue_end` to `LOGIC_DB` | 999 | 999 |
 | shadow RAM's `&3000` room, to `SCREEN` | 6,368 | 6,368 |
-| the OS's pages, `work_end` to `RASTER_IN_ORG` | 197 | 197 |
-| page `&0D`, to `&0D9F` | 159 | 70 (all 159 once `start` is done) |
+| the OS's pages, `work_end` to `RASTER_IN_ORG` | 194 | 194 |
+| page `&0D`, to `&0D9F` | 159 | 12 (all 159 once `start` is done) |
 | ANDY | 4,096 | 4,096 |
 
 The fill's bank gains its quarter squares' pages. `ObjMore` gains a page
-as `start` (89 bytes with its RTI) and the HAZEL copy (`hazel_fill`, 38)
-leave `LIVE`, taking `logic_work_end` below a page and the maths' code
-with it. The free disc's `ObjMore` is 1,108 before and after (its `LIVE`
-is smaller, so no page is crossed).
+as `start`, `lv_start` and `clock_init` (147 bytes with the RTI) and the
+HAZEL copy (`hazel_fill`, 38) leave `LIVE`, taking `logic_work_end` below a
+page (`&1AEA`, 22 bytes short of it) and the maths' code with it: what
+`LIVE`, `AreaCode` and `LogicWork` grow by past that costs `ObjMore` the
+page again. The free disc's `ObjMore` is 1,108 before and after (its
+`LIVE` is smaller, so no page is crossed).
 
 **Packed until needed**, weighed and not done: what runs only on entering
 an area or at the start would need a buffer to unpack into that's free and
