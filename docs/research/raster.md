@@ -373,10 +373,10 @@ where they had crossed, where the model's `[min, max)` draws a pixel. Had
 they first parted the wrong way round, the face would have lost every
 line but those. The model is right (its `face_spans`, and the fill rule
 above); the 6502 now swaps the chains wherever a line finds them crossed:
-a line not full tests (`LDY r_b : CPY r_a`) before its gaps, a fresh
-line's empty test does it at no cost, and the painter's `PAINT` likewise
-(`swap_chains`). Full lines no longer pay the 3 cycles of the patched
-`BRA` either. `make raster`'s scenes `crossing-chains` (after parting),
+a line with gaps and a face already tests (`LDY r_b : CPY r_a`) before
+walking its gaps, a fresh line's empty test does it at no cost, and the
+painter's `PAINT` likewise (`swap_chains`). The patched `BRA` that every
+line paid goes. `make raster`'s scenes `crossing-chains` (after parting),
 `crossing-chains-first` (first parting the way most of their lines don't)
 and `crossing-chains-shared` (over the edge behind, as the frame) fail
 the old code on both builds. Over the 65 views (the table above): all of

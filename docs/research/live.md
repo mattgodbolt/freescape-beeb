@@ -357,25 +357,34 @@ below the bytes (2026-11-01).
 
 On the logic's disc it runs the trace `tools/mklive.py --trace` makes
 (`build/live/trace.json`): the scenarios of `tests/logic/` that
-`LIVE_SCENARIOS` names (walls, climbs, falls, doorways into other areas,
-the area's edges, rising and falling), a run of the keys they don't press
-(the crosshair hidden, shown and moved, the turn's and step's sizes,
-turning round), and a tour of every entrance by the FCL's GOTO, each as
+`LIVE_SCENARIOS` names (all but `keys.txt`, whose E the disc doesn't read:
+walls, climbs, falls, doorways into other areas, the area's edges, rising
+and falling, the FCL's limits, the jet, the clock's minutes, the steps' and
+turns' sizes, the corner, the crosshair, the fuzz's finds), a run of the
+keys they don't press (the crosshair hidden, shown and moved, the turn's
+and step's sizes, turning round), and a tour of every entrance by the
+FCL's GOTO, each as
 `tools/logic/` takes it with decision 18's fix on, and each from the game's
 start (`LogicWork` and the database written back as the disc booted with
 them). A pass's keys go down on the BBC's keyboard once the disc has
 settled (nothing left to draw: a loop has drawn nothing since the last
-frame was handed over, the request is taken, and no pass's frames or waits
-are left), at a point in the field from a fixed pseudo-random sequence, as
-a player's keys go down at any point; they're held until the disc's pass
-takes them, and in that instant held on if the next step is a pass with the
-same keys (any pokes between put in at once, before the disc can take
-another pass, so the logic sees the keys held throughout as the
-transcription does), or let go. A poke or an FCL script's result is
-written into the logic's state at `live_loop`'s top and the disc asked to
-take it (`lv_request`); a minute's end comes by setting `lv_minute`, which
-is kept away otherwise, with its pass's keys put in as gone down at the
-same loop. It fails unless:
+frame was handed over and the last pass's frames ended, the request is
+taken, and no wait is left), at a point in the field from a fixed
+pseudo-random sequence, as a player's keys go down at any point; they're
+held until the disc's pass takes them, and in that instant held on if the
+next step is a pass with the same keys, in any order (any pokes between put
+in at once, before the disc can take another pass, so the logic sees the
+keys held throughout as the transcription does), or let go. A pass that
+leaves the logic's input a minute to take (the global conditions put
+`MinuteCount` back under it at minute 9) has the next pass come at once,
+whatever is held, as the original's input waits for a key only with no
+minute to take: in that instant the next pass's keys go down instead, and
+where the next step isn't a pass of keys the trace puts in a pass of none
+before it (`soon`; `tests/logic/minutes.txt`). A poke or an FCL script's
+result is written into the logic's state at `live_loop`'s top and the disc
+asked to take it (`lv_request`); a minute's end comes by setting
+`lv_minute`, which is kept away otherwise, with its pass's keys put in as
+gone down at the same loop. It fails unless:
 
 - the disc's state at boot is the game's start; after every pass every
   variable of the original's (`tools/logic/state.py`) and the whole

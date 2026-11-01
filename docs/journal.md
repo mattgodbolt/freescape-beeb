@@ -631,3 +631,33 @@ overwrote the score). Extra live scenarios showed two faults not the
 panel's: with the jet, one view byte differs from the model; with the
 clock's ticks, the logic differs from the transcription. Both are being
 looked into.
+
+## 2026-11-01: the jet's byte and the clock's pass (track Z)
+
+The jet's byte was the rasteriser's. A sliver under a pixel wide, over the
+right edge of the face behind it, had its chains' DDAs part one way and
+cross lower down, each rounding toward its own top vertex. The model takes
+each line's `[min, max)` of the boundaries; the 6502 had kept the order the
+chains first parted in for the whole face, so it drew nothing where they
+had crossed, and a face whose chains first parted the wrong way would have
+lost nearly every line. The 6502 now swaps the chains wherever a line finds
+them crossed, and `make raster` has three scenes of crossing chains that
+the old code fails on both builds. Driller's 65 views come to 7,761,617
+cycles from 7,770,109 (`docs/research/raster.md`, "The chains crossing").
+
+The clock's fault wasn't the logic's: pass by pass it is the
+transcription's, and the original's. At minute 9 the global conditions put
+the minute counter back under the input, and the original's input takes a
+minute without waiting for a key, so the disc ran a pass of no keys as soon
+as the last was done, which the check's trace didn't have. Now the trace
+marks such a pass (`soon`) and puts in the pass of none where the next step
+isn't one of keys, and the check puts the next pass's keys down as the pass
+before is taken; `tests/logic/minutes.txt` has both. Making it, the oracle
+showed that a tick can't follow such a pass: the input takes the minute
+left before the clock ends another. Three faults of the check's own came
+out with the new scenarios: it could find the disc settled while the loop
+that ended a pass's frames was drawing (a key then waited 2.58 fields for
+its pass), it let keys go between passes that named the same keys in
+another order, and a long run's idle loops overflowed its maximum. The live
+check now takes every scenario of `tests/logic/` but `keys.txt`, whose E
+(a ZX key with no action) the disc doesn't read.
