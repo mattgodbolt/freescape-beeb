@@ -2515,32 +2515,18 @@ ENDMACRO
 ENDSECTION
 SECTION ObjMore
 
-\ SC_STEP: a step of side_cut's division: the next dividend bit from sc_l's
-\ top into the remainder (sc_r and A), the last quotient bit (C) into sc_l's
-\ bottom, and the divisor taken off if it goes (C set).
-MACRO SC_STEP
-    ROL sc_l : ROL sc_l+1
-    ROL sc_r : ROL A
-    CMP sc_a+1 : BCC zero : BNE one
-    LDY sc_r : CPY sc_a : BCC zero
-.one
-    TAY
-    LDA sc_r : SBC sc_a : STA sc_r      ; (C set)
-    TYA : SBC sc_a+1
-    SEC
-.zero
-ENDMACRO
-
 \ side_cut: the cone's vertex cp_m = where line cp_line crosses side
 \ Y of the rectangle (0 top, 1 right, 2 bottom, 3 left), which it cuts (the
 \ model's side_crossing): from the side's corner K inside the line (f >= 0),
-\ d = (f(K) + (a >> 1)) DIV a along it, a = |A| along the top and bottom
-\ and |B| down the sides, which is f(K) / a rounded half up; tagged with
-\ the side. f(K) < a W (the side's other corner is outside), so d has
-\ eleven bits and D >> 11 is under a: eleven steps of a long division. A
-\ line square to the side (B zero for the top and bottom, A for the sides)
-\ crosses the opposite side at the same point, which is kept by line
-\ (ln_scl, ln_sch; edge_line marks none kept).
+\ d = f(K) / a along it (the model's side_d), a = |A| along the top and
+\ bottom and |B| down the sides, by the 2D clip's reciprocals: a's nine
+\ bits from its top one, an = a >> s (s = bitlen(a) - 9, a shift left when
+\ it's negative), R = 256 + clip_m[an - 256], and d = ((f(K) >> (s + 4)) R
+\ + 2^12) >> 13, at most W; tagged with the side. f(K) < a W (the side's
+\ other corner is outside), so f(K) >> (s + 4) has 16 bits. A line square
+\ to the side (B zero for the top and bottom, A for the sides) crosses the
+\ opposite side at the same point, which is kept by line (ln_scl, ln_sch;
+\ edge_line marks none kept).
 .side_cut
 {
     ZA_AUTO1 side, flip, keep
@@ -2597,29 +2583,74 @@ ENDMACRO
     STA sc_a+1
     LDA lnb0,X : STA sc_a
 .got_a
-    \ D = f(K) + (a >> 1), then D << 5 as D << 8 >> 3: the remainder starts
-    \ at D >> 11 (sc_r and A), and D's low eleven bits at sc_l's top
-    LDA sc_a+1 : LSR A : TAY
-    LDA sc_a : ROR A
-    CLC : ADC dv : STA dv
-    TYA : ADC dv+1 : STA dv+1
-    BCC added
-    INC dv+2
-    BNE added
-    INC dv+3
-.added
-    STZ sc_l
+    \ k = bitlen(a) - 8 (s + 1), and an's low byte, as clip_cut's: from a's
+    \ high byte shifted down s, or its low byte shifted up 1 - k
+    LDA sc_a+1 : BEQ small
+    TAY : LDA proj_bl2,Y : LSR A : STA sc_k     ; 1 to 7
+    TAY : DEY
+    LDA sc_a+1 : STA sc_r
+    LDA sc_a
+    CPY #0 : BEQ indexed
+.right
+    LSR sc_r : ROR A
+    DEY : BNE right
+    BRA indexed
+.small
+    LDY sc_a : LDA proj_bl2,Y : LSR A
+    SEC : SBC #8 : STA sc_k             ; -7 to 0
+    EOR #&FF : TAY : INY : INY          ; 1 - k
+    LDA sc_a
+.left
+    ASL A
+    DEY : BNE left
+.indexed
+    TAY : LDA clip_m,Y
+    QS_SET                              ; (cone_qs: by M)
+    \ f(K) >> (s + 4) = f(K) >> (k + 3): a byte down when that's 8 or more
+    LDA sc_k : CLC : ADC #3 : BMI up
+    CMP #8 : BCC bits
+    SBC #8                              ; (C set)
+    LDY dv+1 : STY dv
+    LDY dv+2 : STY dv+1
+    LDY dv+3 : STY dv+2
+.bits
+    TAY : BEQ shifted
+.down
+    LSR dv+2 : ROR dv+1 : ROR dv
+    DEY : BNE down
+    BRA shifted
+.up
+    EOR #&FF : TAY : INY                ; -(k + 3), 1 to 4
+.lift
+    ASL dv : ROL dv+1
+    DEY : BNE lift
+.shifted
+    \ its product with R = 256 + M (f M, and f a byte up), plus 2^12, then
+    \ >> 13 as << 3 and two bytes down
+    LDX dv : JSR cone_qs : STA sc_l
+    LDX dv+1 : JSR cone_qs : STA sc_r
+    LDA cq_lo : CLC : ADC sc_l : STA sc_l
+    LDA sc_r : ADC #0 : STA sc_r        ; f M >> 8 (bytes 1, 2)
+    LDA sc_l : CLC : ADC dv : TAY
+    LDA sc_r : ADC dv+1 : STA sc_r
+    LDA #0 : ROL A : STA sc_l+1         ; (f R >> 8: Y, sc_r, sc_l+1)
+    TYA : CLC : ADC #&10                ; + 2^12
+    BCC rounded
+    INC sc_r
+    BNE rounded
+    INC sc_l+1
+.rounded
     FOR k = 1..3
-        LSR dv+3 : ROR dv+2 : ROR dv+1 : ROR dv : ROR sc_l
+        ASL A : ROL sc_r : ROL sc_l+1
     NEXT
-    LDA dv : STA sc_l+1
-    LDA dv+1 : STA sc_r
-    LDA dv+2
-    CLC
-    FOR k = 1..11
-        SC_STEP
-    NEXT
-    ROL sc_l : ROL sc_l+1               ; (d: eleven bits)
+    LDA sc_r : STA sc_l
+    \ at most W
+    LDA #LO(CLIP_W) : CMP sc_l
+    LDA #HI(CLIP_W) : SBC sc_l+1
+    BCS fits
+    LDA #LO(CLIP_W) : STA sc_l
+    LDA #HI(CLIP_W) : STA sc_l+1
+.fits
     \ the point: d, or W less it, along the side
     LDA flip : BEQ placed
     LDA #LO(CLIP_W) : SEC : SBC sc_l : STA sc_l
@@ -2655,7 +2686,7 @@ ENDMACRO
     EQUB HI(0), HI(CLIP_W), HI(CLIP_H), HI(0)
 }
 ZA_AUTO2 sc_l, sc_a
-ZA_AUTO1 sc_r
+ZA_AUTO1 sc_r, sc_k
 ASSERT CLIP_W = CLIP_H AND CLIP_W < 2048    ; (d has eleven bits whichever side)
 ASSERT NLINES <= 32                         ; (lfc's index: 32 corner + slot)
 ENDSECTION
@@ -3053,6 +3084,7 @@ ASSERT VMAX = 8
     EQUB 1 << (0..7)
 ASSERT CONE                             ; (the model's render.CONE: the 6502 has only it)
 ASSERT BEHIND_EDGES AND FRONT_FIRST AND SIDE_CROSSINGS AND JOINS AND RECIP_2D   ; (and these)
+ASSERT SIDE_RECIP
 \ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
 \ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
 \ bytes and the mask of the bits from k + 1 up.

@@ -429,19 +429,45 @@ SIDE_CROSSINGS = True
 JOINS = True
 
 
+# The cone's side crossings by a reciprocal (side_d), as the 2D clip's
+# crossings are (crossing_r), with no division; off, f(K) / a by division,
+# rounded half up.
+SIDE_RECIP = True
+
+
+def side_d(fk, a):
+    """f(K) / a, the distance along a side to a line's crossing (0 <= fk <
+    a WIDTH): by the 2D clip's reciprocals (maths.CLIP_M), R about 2^17 /
+    a's nine bits from its top one an = a >> s, s = bitlen(a) - 9, and fk
+    shifted right s + 4 so that its product with R has 16 bits by 9, rounded
+    and at most WIDTH (within about 2^-8 of the division's, which is under
+    WIDTH); or with SIDE_RECIP off, by division, rounded half up."""
+    if not SIDE_RECIP:
+        return (2 * fk + a) // (2 * a)
+    s = a.bit_length() - maths.CLIP_RBITS
+    an = a >> s if s >= 0 else a << -s
+    r = 256 + maths.CLIP_M[an - 256]
+    t = s + 4
+    f = fk >> t if t >= 0 else fk << -t
+    assert f < 1 << 16
+    return min((f * r + (1 << 12)) >> 13, WIDTH)
+
+
+assert WIDTH == HEIGHT              # (side_d's bound, whichever side)
+
+
 def side_crossing(line, k):
     """Where a line crosses side k of the rectangle, which it cuts (its
     corners on either side of it): from the corner K inside the line (f >=
-    0), along the side by f(K) / |a|, rounded half up, a the line's
-    coefficient along the side (A along the top and bottom, B down the
-    sides)."""
+    0), along the side by f(K) / |a| (side_d), a the line's coefficient
+    along the side (A along the top and bottom, B down the sides)."""
     c0, c1 = RECT[k], RECT[(k + 1) % 4]
     f0, f1 = line_f(line, c0), line_f(line, c1)
     assert (f0 >= 0) != (f1 >= 0)
     (ka, fk), other = ((c0, f0), c1) if f0 >= 0 else ((c1, f1), c0)
     axis = 0 if k in (0, 2) else 1
     a = abs(line[axis])
-    d = (2 * fk + a) // (2 * a)
+    d = side_d(fk, a)
     p = list(ka)
     p[axis] += d if other[axis] > ka[axis] else -d
     return tuple(p)

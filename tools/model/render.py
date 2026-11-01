@@ -5,6 +5,14 @@ the rasteriser, the writer, and the view's bytes; with a picture at MODE 2's
 
     render.py DB.json OUTDIR      every entrance view: OUTDIR/aAAA-eEEE.png
                                   and OUTDIR/counts.json, and the summary
+    render.py --diff MODULE.FLAG DB.json [ZXVIEWS]
+                                  a model flag's picture: every entrance view
+                                  and a four-step walk from each (as
+                                  tools/objectcases.py walks) rendered with
+                                  the flag on and off, the pixels and draw
+                                  orders that differ; and with the ZX
+                                  oracle's views (make model-zx's
+                                  build/zx/views/), each way's agreement
 """
 import json
 import pathlib
@@ -394,7 +402,92 @@ def name(area, entrance):
     return "a%03d-e%03d" % (area["id"], entrance["id"])
 
 
+def walk_views(db, steps=4, step=25):
+    """Every entrance view, then a walk of steps frames along its yaw, step
+    world units a frame (tools/objectcases.py's WALK_STEPS, WALK_STEP):
+    (area, name, camera)."""
+    sin, cos = db["tables"]["sin"], db["tables"]["cos"]
+    for area, e, c in cam.entrance_views(db):
+        yield area, name(area, e), c
+        x, z = c.x, c.z
+        for k in range(1, steps + 1):
+            x += (step * sin[c.yaw]) // 64
+            z += (step * cos[c.yaw]) // 64
+            yield area, "%s-w%d" % (name(area, e), k), cam.Camera(x, c.y, z, c.yaw, c.pitch, c.roll)
+
+
+def flag_diff(db, flag):
+    """The views of walk_views rendered with MODULE.FLAG (a tools/model
+    module's boolean) on and then off: (views, pixels, the pixels that
+    differ, the views with any, the most in one and which, the views whose
+    draw order differs)."""
+    import importlib
+    mod_name, attr = flag.rsplit(".", 1)
+    mod = importlib.import_module("tools.model." + mod_name)
+    was = getattr(mod, attr)
+    views = pixels = differ = touched = worst = orders = 0
+    worst_name = None
+    try:
+        for area, label, camera in walk_views(db):
+            setattr(mod, attr, True)
+            on = render(db, area, camera)
+            setattr(mod, attr, False)
+            off = render(db, area, camera)
+            a, b = parts.decode(on.bytes), parts.decode(off.bytes)
+            n = sum(1 for la, lb in zip(a, b) for pa, pb in zip(la, lb) if pa != pb)
+            views += 1
+            pixels += VIEW_W * VIEW_H
+            differ += n
+            touched += n > 0
+            orders += on.order != off.order
+            if n > worst:
+                worst, worst_name = n, label
+    finally:
+        setattr(mod, attr, was)
+    return views, pixels, differ, touched, worst, worst_name, orders
+
+
+def flag_zx(db, flag, zxdir):
+    """The ZX oracle's agreement (tools/model/zxcompare.py: the pixels away
+    from edges compared and agreeing, over its views) with MODULE.FLAG on
+    and off: ((compared, agreeing) on, (compared, agreeing) off)."""
+    import importlib
+    from tools.model import zxcompare
+    mod_name, attr = flag.rsplit(".", 1)
+    mod = importlib.import_module("tools.model." + mod_name)
+    was = getattr(mod, attr)
+    zxdir = pathlib.Path(zxdir)
+    with open(zxdir / "views.json") as f:
+        records = json.load(f)["views"]
+    areas = {a["id"]: a for a in db["areas"]}
+    out = []
+    try:
+        for on in (True, False):
+            setattr(mod, attr, on)
+            compared = agree = 0
+            for r in records:
+                buf = (zxdir / (r["name"] + ".bin")).read_bytes()
+                _, _, c, a, _ = zxcompare.compare_view(db, areas[r["area"]], r, buf)
+                compared += c
+                agree += a
+            out.append((compared, agree))
+    finally:
+        setattr(mod, attr, was)
+    return out
+
+
 def main(argv):
+    if len(argv) in (4, 5) and argv[1] == "--diff":
+        with open(argv[3]) as f:
+            db = json.load(f)
+        views, pixels, differ, touched, worst, who, orders = flag_diff(db, argv[2])
+        print("%s: %d views, %d of %d pixels differ, in %d views (most %d, %s); "
+              "the draw order differs in %d" % (argv[2], views, differ, pixels, touched, worst, who, orders))
+        if len(argv) == 5:
+            (c1, a1), (c0, a0) = flag_zx(db, argv[2], argv[4])
+            print("%s: against the ZX oracle, pixels away from edges agreeing %d of %d on, %d of %d off"
+                  % (argv[2], a1, c1, a0, c0))
+        return 0
     if len(argv) != 3:
         print(__doc__, file=sys.stderr)
         return 2
