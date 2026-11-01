@@ -15,11 +15,15 @@
 // of the trace's runs (tools/mklive.py --trace: the scenarios of tests/logic/
 // and a tour of every entrance, as tools/logic/ takes them, decision 18's
 // fix on) from the game's start (LogicWork and the database as the disc
-// booted with them, written back): a pass's keys held on the BBC's keyboard
-// until the disc's next pass takes them, a minute's end by its clock (the
-// minute otherwise kept away), a poke or an FCL script's result written
-// into the logic's state and the disc asked to take it (lv_request). It
-// fails (exit status 1) unless:
+// booted with them, written back): a pass's keys pressed on the BBC's
+// keyboard once the disc has settled (nothing left to draw: below), at a
+// point in the field from a fixed pseudo-random sequence, and held until the
+// disc's pass takes them; then, in that instant, held on for the next pass
+// if it has the same keys (with any pokes between put in at once), or let
+// go. A minute's end comes by its clock (the minute otherwise kept away),
+// with its pass's keys; a poke or an FCL script's result is written into
+// the logic's state and the disc asked to take it (lv_request). It fails
+// (exit status 1) unless:
 //
 // - the disc's state at boot is the game's start, and after every pass
 //   every variable of the original's (tools/logic/state.py) and the whole
@@ -32,12 +36,17 @@
 //   step), or straight, as decision 4's rule says, in the old area while an
 //   area's change waits; its objects' flags (ix_flags) the records' as the
 //   logic has them; and its view the model's render of that camera, those
-//   objects and the crosshair, byte for byte.
+//   objects and the crosshair, byte for byte;
+// - a key pressed with nothing left to draw is taken by a pass (lv_pass's
+//   key_take) within KEY_FIELDS fields;
+// - at the end, with the camera still, every indexed object hidden in
+//   ix_flags, and then shown again, each brings a frame (its view the
+//   model's with those flags).
 //
 // With --free, as before the logic came:
 //
 // - the tour: SPACE, entrance after entrance, round all of them to the first
-//   again, each held for TOUR_FRAMES frames;
+//   again, each until the disc settles;
 // - at each of --walks' entrances (gone to by poking lv_want), the keys held
 //   a few frames each: the cursors and Q W O K, P L N M, and turning and
 //   walking together; each frame's camera must be the last frame's moved as
@@ -63,10 +72,23 @@
 //   comes with the beam above the written character row;
 // - the BBC's own timing of each half (clock_to's span_us, from User VIA T2),
 //   which its figures show, is within CLOCK_SLACK cycles of the harness's
-//   count of the same call.
+//   count of the same call;
+// - the idle loop (docs/research/live.md): every loop that draws nothing
+//   (live_idle) finds the inputs of the frame last handed over, all its view
+//   is made from (the area and its entries, the camera, the objects' hidden
+//   flags, the crosshair), so the view shown is the one they make; and no
+//   frame is drawn with the inputs of the frame before it.
+//
+// "Settled" is: a loop has drawn nothing since the last frame was handed
+// over, and with the logic, the request is taken and no pass's frames or
+// waits are left. It reports when each key pressed so had its pass and
+// when the first view it changed was shown (by the frame's flip, the
+// view's bytes compared with the last shown), by what changed: the
+// latency a player sees.
 //
 // It reports fields a frame (median, p90, max) for the whole frame (flip to
-// flip, as the BBC shows them; and the loop, from frame_end to frame_end)
+// flip, as the BBC shows them; and the loop, from frame_end to frame_end,
+// or after loops that drew nothing from the frame's own loop's start)
 // and for each half: stages 1-7 (objects_frame, from its call to
 // live_front_done) and stages 8-10 (raster_frame, to live_fill_done), over
 // every frame and by what the frame did: an area's first frame (the
@@ -96,7 +118,6 @@ const tracePath = opt("trace", "build/live/trace.json");
 const walkAt = opt("walks", "0,18,26,40,57").split(",").filter(Boolean).map(Number);
 const jsonOut = opt("json");
 const verbose = args.includes("--verbose");
-const TOUR_FRAMES = 2;
 const CLOCK_SLACK = 8; // cycles: T2 counts microseconds, from its own phase
 const NAME = FREE ? "live-free" : "live";
 
@@ -110,6 +131,8 @@ const ENTRANCES = live.entrances.length;
 if (FREE && sym("LIVE_ENTRANCES") !== ENTRANCES) throw new Error(`${liveFile} has ${ENTRANCES} entrances, the disc ${sym("LIVE_ENTRANCES")}`);
 
 let failures = 0;
+let redrawn = 0; // frames drawn with the last frame's inputs
+let visibilityFrames = 0; // frames the visibility probe brought
 const fail = (what) => {
     if (++failures <= 30) console.log(`${NAME}: FAIL ${what}`);
 };
@@ -170,6 +193,13 @@ const CLOCK_TO = sym("clock_to"), CLOCK_READ = sym("clock.again");
 let lastClock = null;
 const TEXT_WAITING = sym("text_catch_up.waiting");
 let textWaits = 0; // frames that waited for the beam to catch the text up
+// The idle loop (docs/research/live.md): live_idle is where live_loop finds the
+// frame's inputs as the last frame handed over had them and draws nothing.
+// (A disc without it draws every frame: then "settled" means a standing
+// frame drawn.)
+const IDLE = syms.live_idle;
+let idles = 0, idlesOk = 0, idlesAtEnd = 0; // (idlesAtEnd: idles when the last frame was handed over)
+let idleSeen = false; // an idle loop since the last frame was handed over
 const JSR = 0x20;
 const s16 = (v) => (v & 0x8000 ? v - 0x10000 : v);
 const camera = () => {
@@ -179,6 +209,39 @@ const camera = () => {
 // what the frame's objects_frame was given besides the camera (the logic's
 // disc): set below
 let frameExtra = () => ({});
+// A frame's inputs, all that its view is made from, as live_loop compares
+// them (docs/research/live.md, "The idle loop"): the area and how many times one has been entered,
+// the camera, and with the logic what's hidden of each object it indexes
+// (ix_flags AND IX_HIDDEN, all IX_MAX) and the crosshair.
+const LV_ENTERED = syms.lv_entered;
+const genNow = () => (LV_ENTERED === undefined ? 0 : ram[LV_ENTERED]);
+const IX_FLAGS = FREE ? 0 : sym("ix_flags"), IX_MAX = FREE ? 0 : sym("IX_MAX");
+const CROSS_ON = FREE ? 0 : sym("CrossOn"), CROSS_X = FREE ? 0 : sym("CrossX"), CROSS_Y = FREE ? 0 : sym("CrossY");
+const hiddenOf = (flags) => flags.map((v) => v & 0x60).join(",");
+const inputsOf = (f) => `area ${f.area} (entered ${f.gen}), camera ${f.camera}` +
+    (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}`);
+function inputsNow() {
+    const f = { area: ram[LV_AREA], gen: genNow(), camera: camera() };
+    if (!FREE) {
+        f.hiddenAll = hiddenOf([...ram.subarray(IX_FLAGS, IX_FLAGS + IX_MAX)]);
+        f.cross = ram[CROSS_ON] ? [ram[CROSS_X], ram[CROSS_Y]] : null;
+    }
+    return inputsOf(f);
+}
+// Every idle loop must find the inputs of the frame last handed over: so
+// the view shown (or about to be) is the one they make.
+const idleLoops = []; // cycles from live_loop to live_idle, each loop that drew nothing
+function onIdle() {
+    idles++;
+    if (current) idleLoops.push(now() - current.tLoop);
+    idleSeen = true;
+    const last = frames.at(-1);
+    if (!last) return; // (before the hooks' first frame)
+    const inputs = inputsNow();
+    if (inputs !== last.inputs) fail(`an idle loop after frame ${last.n} (${script}) with ${inputs}, not the frame's ${last.inputs}`);
+    else idlesOk++;
+}
+let events = 0; // passes taken and requests made: what a standing frame comes after
 let onLoop = () => {};
 let onPassed = () => {};
 
@@ -197,13 +260,18 @@ cpu.debugInstruction.add((addr, opcode) => {
     const bank = cpu.romsel & 15;
     if (opcode === JSR && word(addr + 1) === FB_BEGIN) calling = true;
     if (addr === LIVE_LOOP) {
-        if (current && !current.ended) fail("live_loop again before frame_end");
+        // (a loop that drew nothing leaves its frame unbegun)
+        if (current && current.tFront !== undefined && !current.ended) fail("live_loop again before frame_end");
         current = { tLoop: now() };
         onLoop();
     } else if (!FREE && addr === LIVE_PASSED) {
         onPassed(cpu.a);
+    } else if (!FREE && addr === LV_TAKING) {
+        lastTaking = now();
     } else if (addr === TEXT_WAITING) {
         textWaits++;
+    } else if (addr === IDLE) {
+        onIdle();
     } else if (addr === CLOCK_READ) {
         lastClock = now(); // (the last of its tries is the one kept)
     } else if (addr === OBJECTS && bank === BANK_OBJ && current) {
@@ -212,7 +280,11 @@ cpu.debugInstruction.add((addr, opcode) => {
         current.camera = camera();
         current.area = ram[LV_AREA];
         current.script = script;
+        current.gen = genNow();
+        current.ev = events;
+        current.afterIdle = idles > idlesAtEnd;
         Object.assign(current, frameExtra());
+        if (!FREE) current.hiddenAll = hiddenOf(current.ixFlags);
     } else if (addr === FRONT_DONE && current?.tFront !== undefined) {
         current.front = now() - current.tFront;
         afterClock = "front";
@@ -249,7 +321,17 @@ cpu.debugInstruction.add((addr, opcode) => {
             const b = ram[sym("draw_buffer")];
             current.cross = ram[LV_XON + b] ? [ram[LV_XX + b], ram[LV_XY + b]] : null;
         }
-        if (lastEndT !== null) current.loop = now() - lastEndT;
+        current.inputs = inputsOf(current);
+        // nothing is drawn again that's drawn already (the idle loop)
+        if (IDLE && frames.length && frames.at(-1).inputs === current.inputs) {
+            redrawn++;
+            fail(`frame ${current.n} (${script}) drawn with the inputs of frame ${frames.at(-1).n}: ${current.inputs}`);
+        }
+        idleSeen = false;
+        idlesAtEnd = idles;
+        // (after loops that drew nothing, from its own loop's start)
+        if (current.afterIdle) current.loop = now() - current.tLoop;
+        else if (lastEndT !== null) current.loop = now() - lastEndT;
         lastEndT = now();
         // the BBC's own timing of each half, as its figures show it
         for (const [half, at] of [["front", T_FRONT], ["fill", T_FILL]]) {
@@ -330,7 +412,8 @@ function flipped(to) {
     if (!frame && !frames.length) return; // (handed over before the hooks went in)
     if (!frame) return fail(`flip ${flips} with no frame handed over`);
     if (frame.buffer !== to) return fail(`flip ${flips} to buffer ${to}, but frame ${frame.n} was drawn in ${frame.buffer}`);
-    if (lastFlipT !== null) frame.flip = t - lastFlipT;
+    if (frame.afterIdle) frame.flip = t - frame.tLoop;
+    else if (lastFlipT !== null) frame.flip = t - lastFlipT;
     lastFlipT = t;
     if (frame.unhooked) return;
     const rows = [];
@@ -338,6 +421,12 @@ function flipped(to) {
         const row = Buffer.alloc(VIEW_BYTES);
         for (let c = 0; c < VIEW_BYTES; c++) row[c] = bufferByte(to, viewAt(y, c));
         rows.push(row.toString("hex"));
+    }
+    // the first view a key pressed while settled changes
+    const was = shown.at(-1);
+    if (probe && !probe.closed && probe.tShown === undefined && frame.tLoop >= probe.tKey && was && rows.join() !== was.rows.join()) {
+        probe.tShown = t;
+        probe.frame = frame;
     }
     shown.push({ frame, rows });
 }
@@ -383,6 +472,42 @@ async function until(test, what, limit = LIMIT * 4) {
         await session.runFor(FIELD);
     }
 }
+// Settled: nothing left to draw until a key comes. With the idle loop: a
+// loop has found nothing new since the last frame was handed over (and,
+// with the logic, the request taken, no pass's frames showing and no wait
+// for the next pass). On a disc that draws every frame, the last two
+// frames since the last pass or request standing.
+let settledExtra = () => true;
+const standing = () => {
+    const [a, b] = [frames.at(-2), frames.at(-1)];
+    return a && b.ev === events && a.ev === events && !b.anOn && a.area === b.area && a.camera.join() === b.camera.join();
+};
+const settledNow = () => settledExtra() && (IDLE ? idleSeen : standing());
+const settle = (what) => until(settledNow, `${what}: settling`);
+// ... then on to a point in the field from a fixed pseudo-random sequence,
+// so keys go down at any point of a field, as a player's do, the same
+// points on any disc
+let phase = Number(opt("seed", "12345"));
+async function settleAndPress(what) {
+    await settle(what);
+    phase = (phase * 1103515245 + 12345) & 0x7fffffff;
+    await session.runFor(phase % FIELD);
+    if (!settledNow()) await settle(what);
+}
+// A key pressed while settled: when its pass comes, and when the first
+// view it changes is shown (flipped). Each probe lasts until the next.
+// A key pressed while idle is taken by a pass within KEY_FIELDS: it's
+// read at the next vertical sync (a field at most), and the next loop's
+// pass takes it, after the loop going round then, which may be drawing
+// the text below the view (text_sync, the beam's window at most) or
+// working out the figures (live_figures).
+const KEY_FIELDS = 2;
+const probes = [];
+let probe = null;
+function startProbe(what) {
+    probe = { what, tKey: now(), cam: camera() };
+    probes.push(probe);
+}
 const press = async (key) => {
     session.keyDownRaw(BBC[key]);
     await session.runFor(3 * FIELD);
@@ -391,6 +516,8 @@ const press = async (key) => {
 
 // --- The logic's disc.
 const LIVE_PASSED = FREE ? -1 : sym("lv_pass.live_passed");
+const LV_TAKING = FREE ? -1 : sym("lv_pass.timed"); // (where a pass takes the keys)
+let lastTaking = null;
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
 let summary = "";
 if (!FREE) await logicScript();
@@ -498,19 +625,41 @@ async function logicScript() {
     // What the live_loop hook does next: write the queued state and ask the
     // disc to take it; keep the clock's minute away, or bring it on.
     let writes = null, minuteDue = false, applied = 0;
-    const LV_MINUTE = S("lv_minute"), LV_REQUEST = S("lv_request");
+    // the visibility probe's flags: to be written at the next loop, and as
+    // they stand (the frames' expected flags, not the logic's records)
+    let flagWrites = null, visibility = null;
+    const LV_MINUTE = S("lv_minute"), LV_REQUEST = S("lv_request"), KEYS_MADE = S("keys_made");
     onLoop = () => {
+        if (flagWrites) {
+            ram.set(flagWrites, S("ix_flags"));
+            visibility = flagWrites;
+            flagWrites = null;
+            idleSeen = false;
+        }
         const f = word(S("fields"));
         const m = minuteDue ? f : f + 20000;
         ram[LV_MINUTE] = m & 0xff;
         ram[LV_MINUTE + 1] = (m >> 8) & 0xff;
+        if (minuteDue) {
+            // the minute and its pass's keys at once (as gone down since the
+            // last pass), as this loop's pass takes the minute: the keys
+            // alone may not have been read yet
+            minuteDue = false;
+            want.rec.keys.forEach((r, i) => (ram[KEYS_MADE + i] |= r));
+        }
         if (writes) {
             writes();
             writes = null;
             ram[LV_REQUEST] = 1;
             applied++;
+            events++;
+            idleSeen = false;
         }
     };
+    // (settled, with the logic: the request taken, no pass's frames, no
+    // wait for the next pass)
+    settledExtra = () => !writes && !V("lv_request") && !V("an_on") && !V("lv_switch") &&
+        s16((V16("lv_until") - V16("fields")) & 0xffff) <= 0;
     // A pass with no key held is the original waiting in its input
     // ($9990): what its first part has cleared, and no keys read.
     let waited = false;
@@ -522,9 +671,14 @@ async function logicScript() {
         const rows = zxOf("KeyRows");
         for (let i = 0; i < rows.size; i++) exp[rows.addr + i] = 0;
     }
-    // The pass the disc is to take next, and what it took.
-    let want = null; // {rec, where, early: asked for with the pokes before it}
-    let taken = null; // an early one's step, once the disc has taken it
+    // The pass the disc is to take next ({rec, where, steps, i: its step}),
+    // and the steps whose passes it has taken. A pass's keys are held until
+    // it's taken; in that instant (the hook) the next pass is asked for if
+    // it's the next step with the same keys, which stay held (a held key's
+    // passes follow on), and otherwise the keys go up, before the disc reads
+    // them again: no pass comes within a field of the last (the idle loop).
+    let want = null;
+    const done = new Set(), early = new Set(); // (early: pokes the hook has put in)
     let passesOk = 0, passesSeen = 0, walksOk = 0;
     const passLog = []; // each pass that ran: what its frames are to show
     let overs = 0;
@@ -538,10 +692,35 @@ async function logicScript() {
         }
         waited = false;
         passesSeen++;
-        if (!want) return fail(`a pass (answer ${a}) the script didn't ask for, at ${script}`);
+        events++;
+        idleSeen = false; // (what it changes may want a frame: not settled till a loop draws nothing)
+        if (!want) return fail(`a pass (answer ${a}) the script didn't ask for, at ${script}, on the keys ${[...ram.subarray(S("lv_lkeys"), S("lv_lkeys") + 8)]} (held ${[...held]})`);
+        // (a probe's view is its first pass's: a second pass closes it)
+        if (probe && probe.tPass !== undefined && probe.tShown === undefined) probe.closed = true;
+        if (probe && probe.tPass === undefined) probe.tPass = lastTaking;
         const { rec, where } = want;
-        if (want.early) taken = rec;
-        want = null;
+        done.add(rec);
+        // (the next pass, if it has these keys: after pokes, which go in
+        // now, before the disc can take another pass, as the original
+        // takes it without a pass with no key between)
+        const { steps, i } = want;
+        const same = (r) => r?.keys && !r.tick && r.names.join() === rec.names.join();
+        let j = i + 1;
+        const batch = [];
+        for (; steps[j] && (steps[j].poke || steps[j].fcl); j++) batch.push(...steps[j].changes, ...steps[j].then);
+        if (same(steps[j])) {
+            want = { rec: steps[j], where: `${script} ${steps[j].line}`, steps, i: j };
+            if (batch.length) {
+                early.add(steps[i + 1]);
+                writes = () => {
+                    for (const [a, v] of batch) exp[a] = v;
+                    for (const [a] of batch) put(a, exp[a]);
+                };
+            }
+        } else {
+            want = null;
+            hold([]);
+        }
         if (a !== rec.result) fail(`${where}: the pass answered ${a}, not ${rec.result}`);
         const P0 = expCamera(), area0 = ram[LV_AREA], flags0 = expFlags();
         if (verbose) console.log(`  pass ${where}: answered ${a}, from ${P0}`);
@@ -572,7 +751,7 @@ async function logicScript() {
     frameExtra = () => ({
         anOn: V("an_on"), e: (V16("lv_now") - V16("an_t0")) & 0xffff, pass: passLog.at(-1), over: V("lv_over") !== 0,
         ixFlags: [...ram.subarray(S("ix_flags"), S("ix_flags") + IX_MAX)], ixN: V("ix_n"),
-        logicCam: expCamera(), expFlags: expFlags(), switching: V("lv_switch") !== 0,
+        logicCam: expCamera(), expFlags: visibility ? visibility.slice(0, V("ix_n")) : expFlags(), switching: V("lv_switch") !== 0,
     });
 
     // The runs.
@@ -587,61 +766,79 @@ async function logicScript() {
             ram.set(work, LOGIC_WORK);
             ram.set(db, bankAt(BANK_DB, LOGIC_DB));
         };
-        await until(() => !writes, `${run.name}: the start`);
-        await framesMade(2, `${run.name}: the start`);
+        await settle(`${run.name}: the start`);
         for (let i = 0; i < run.steps.length; i++) {
             const rec = run.steps[i];
             const where = `${run.name} ${rec.line}`;
             steps++;
             if (rec.frames) {
-                await framesMade(rec.frames, where);
+                await settle(where);
             } else if (rec.poke || rec.fcl) {
                 // the results of this step and those straight after it (a
                 // poke's bytes, an FCL script's changes, and what the
                 // renderer does after) into the disc's state, which it takes
-                // as it is; a pass after them with the keys held as they
-                // are is asked for now, as it may come in the same frame
-                // (the expected state changes as the disc's does, at the
-                // live_loop that writes it)
+                // as it is (the expected state changes as the disc's does,
+                // at the live_loop that writes it)
                 const batch = [];
                 let j = i;
                 for (; j < run.steps.length && (run.steps[j].poke || run.steps[j].fcl); j++)
                     batch.push(...run.steps[j].changes, ...run.steps[j].then);
                 steps += j - i - 1;
                 i = j - 1;
-                const next = run.steps[j];
-                if (next?.keys && !next.tick && held.size && next.names.join() === [...held].join())
-                    want = { rec: next, where: `${run.name} ${next.line}`, early: true };
-                else hold([]);
+                if (early.has(rec)) {
+                    // (put in by the hook, with the keys held for the pass after)
+                    await until(() => !writes, where);
+                    continue;
+                }
+                hold([]);
                 writes = () => {
                     for (const [a, v] of batch) exp[a] = v;
                     for (const [a] of batch) put(a, exp[a]);
                 };
-                await until(() => !writes, where);
-                if (!want?.early) await framesMade(1, where);
-            } else {
-                minuteDue = rec.tick;
-                if (taken === rec) taken = null; // (asked for with the pokes before it, and taken)
-                else {
-                    if (want?.rec !== rec) want = { rec, where };
+                await settle(where);
+            } else if (!done.has(rec)) {
+                // keys going down (not held on from the last pass's, which
+                // the hook asks for): pressed once the disc has settled, and
+                // timed but with a minute, whose keys come with it (onLoop)
+                if (want?.rec !== rec) {
+                    hold([]);
+                    await settleAndPress(where);
+                    if (!rec.tick) startProbe(rec.names.join("+"));
+                    want = { rec, where, steps: run.steps, i };
+                    minuteDue = rec.tick;
                     hold(rec.names);
-                    await until(() => !want, `${where}: the pass`);
                 }
-                minuteDue = false;
-                // the next pass's keys held on now if they're the same
-                const next = run.steps.slice(i + 1).find((r) => !r.frames);
-                if (!next || (next.keys && (next.names.join() !== rec.names.join() || next.tick))) hold([]);
+                await until(() => done.has(rec), `${where}: the pass`);
             }
         }
         hold([]);
         // the last pass's frames shown, and the state as the transcription's,
         // as the original's is while it waits in its input for a key
-        await until(() => frames.length && !frames.at(-1).anOn && !frames.at(-1).switching, `${run.name}: the end`);
-        await framesMade(1, `${run.name}: the end`);
+        await settle(`${run.name}: the end`);
         if (waited) waiting();
         const d = compare();
         if (d.length) report(`${run.name}: the end`, d);
         if (failures === before) runsOk++;
+    }
+
+    // What's shown alone, with the camera still: every object the index has
+    // hidden (ix_flags, written between loops, as logic_go_shown writes it
+    // after a pass), then shown again as it was. Each must bring a frame
+    // (lv_inputs compares the flags), and each frame is held to the model's
+    // render with those flags. (The FCL's own VIS and INVIS reach the disc
+    // by a request, which enters the area again, and so draws a frame
+    // whatever the flags.)
+    script = "visibility";
+    await settle("visibility");
+    const IXF = S("ix_flags");
+    const shownFlags = [...ram.subarray(IXF, IXF + IX_MAX)];
+    for (const want of [shownFlags.map((v, i) => (i < V("ix_n") ? v | 0x40 : v)), shownFlags]) {
+        const n0 = frames.length;
+        flagWrites = want;
+        await until(() => !flagWrites, "visibility");
+        await settle("visibility");
+        if (frames.length === n0) fail("the objects' flags changed, with the camera still, and no frame came");
+        else visibilityFrames += frames.length - n0;
     }
     script = "end";
 
@@ -653,7 +850,7 @@ async function logicScript() {
         return d >= 37 ? d - 72 : d;
     };
     const scale = (d, f) => Math.sign(d) * ((Math.abs(d) * f) >> 8);
-    const turnBy = (t, f) => Math.sign(t) * ((Math.abs(t) * f + 128) >> 8);
+    const turnBy = (t, f) => Math.sign(t) * ((Math.abs(t) * f + 255) >> 8);
     function between(p, f) {
         // the way the pass's frames go: its walk, or straight
         const same = p.P0.join() === p.P1.join();
@@ -711,7 +908,7 @@ async function logicScript() {
         `${passesSeen} passes taken, ${passesOk} with the transcription's state, ${walksOk} with its walks and loads, ${overs} that found the game over; ` +
         `${camsOk} frames with the camera as the logic and decision 4 have it, ${between_n} of them between passes ` +
         `(${perPass.size} passes shown so, ${counts.length ? counts[counts.length >> 1] : 0} frames each at the median), ` +
-        `${flagsOk} with the logic's objects' flags`;
+        `${flagsOk} with the logic's objects' flags; ${visibilityFrames} frames from the objects' flags alone`;
 }
 
 async function freeScript() {
@@ -722,7 +919,7 @@ async function freeScript() {
     await untilFrame((f) => f.entrance === 0, "the first entrance");
     let spaceOk = 0;
     for (let i = 0; i < ENTRANCES; i++) {
-        await framesMade(TOUR_FRAMES, `the tour at ${live.entrances[i].name}`);
+        await settle(`the tour at ${live.entrances[i].name}`);
         const next = (i + 1) % ENTRANCES;
         script = "entrance";
         await press("SPACE");
@@ -786,15 +983,17 @@ async function freeScript() {
         script = "entrance";
         await untilFrame((f) => f.entrance === at, `going to ${live.entrances[at].name}`);
         script = "still";
-        await framesMade(1, "settling");
+        await settle(`at ${live.entrances[at].name}`);
         for (const hold of HOLDS) {
             script = "walk";
+            await settleAndPress(`before ${hold.keys}`);
             const first = frames.length;
+            startProbe(hold.keys.join("+"));
             for (const k of hold.keys) session.keyDownRaw(BBC[k]);
             await framesMade(hold.frames, `holding ${hold.keys}`);
             for (const k of hold.keys) session.keyUpRaw(BBC[k]);
             script = "still";
-            await framesMade(2, `after ${hold.keys}`);
+            await settle(`after ${hold.keys}`);
             // every frame from the hold's start: as the last, or moved as asked
             let movedN = 0, ok = true;
             for (let i = first; i < frames.length; i++) {
@@ -827,7 +1026,7 @@ async function freeScript() {
     // and a key stops it
     await press("LEFT");
     script = "still";
-    await framesMade(2, "after the demo");
+    await settle("after the demo");
     if (frames.at(-1).demo) fail("a key didn't stop the demo");
     await session.runFor(20 * FIELD);
     summary = `${ENTRANCES} entrances (${spaceOk} by SPACE), walks at ${walkAt.length} (${holdsOk} of ` +
@@ -914,6 +1113,32 @@ console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
     `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ${glyphsChecked} flips' text ` +
     `checked against the font; the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times; ` +
     `${textWaits} waits for the beam to catch the text up`);
+// --- The keys pressed while settled: each one's pass (within KEY_FIELDS,
+// with the idle loop) and the first view it changed, by what changed.
+const kinds = { walking: [], turning: [], other: [] };
+let unchanged = 0;
+const passWaits = [];
+for (const p of probes) {
+    if (p.tPass !== undefined) {
+        passWaits.push(fields(p.tPass - p.tKey));
+        if (IDLE && p.tPass - p.tKey > KEY_FIELDS * FIELD_CYCLES)
+            fail(`${p.what}, pressed while idle: its pass ${fields(p.tPass - p.tKey).toFixed(2)} fields after, not within ${KEY_FIELDS}`);
+    }
+    if (p.tShown === undefined) {
+        unchanged++;
+        continue;
+    }
+    const c = p.frame.camera;
+    const kind = c.slice(0, 3).join() !== p.cam.slice(0, 3).join() ? "walking" : c.slice(3).join() !== p.cam.slice(3).join() ? "turning" : "other";
+    kinds[kind].push(fields(p.tShown - p.tKey));
+}
+console.log(`${NAME}: ${probes.length} keys pressed with nothing left to draw: ` +
+    (FREE ? "" : `the pass after ${stats(passWaits)} fields (median / p90 / max); `) +
+    `the first view they changed shown after ` +
+    Object.entries(kinds).map(([k, v]) => `${k} ${stats(v)} (${v.length})`).join(", ") +
+    ` fields; ${unchanged} changed nothing shown`);
+if (IDLE) console.log(`${NAME}: ${idles} idle loops, ${idlesOk} with the last frame's inputs, each ` +
+    `${stats(idleLoops)} cycles from live_loop to live_idle; ${redrawn} frames drawn with the last frame's inputs`);
 console.log(`${NAME}: fields a frame, median / p90 / max:`);
 console.log(`  ${"frames".padEnd(10)} ${"n".padStart(4)}  ${"flip to flip".padEnd(20)} ${"loop".padEnd(20)} ` +
     `${"1-7 objects".padEnd(20)} ${"8-10 fill".padEnd(20)} ${"the rest".padEnd(20)}`);
@@ -930,6 +1155,13 @@ if (jsonOut)
             n: f.n, area: f.area, script: f.script, kind: f.kind, camera: f.camera,
             flip: f.flip ?? null, loop: f.loop ?? null, front: f.front, fill: f.fill,
         })),
+        // the keys pressed while settled: cycles to their pass and to the
+        // first view they changed shown (null: none)
+        keys: probes.map((p) => ({
+            keys: p.what, pass: p.tPass === undefined ? null : p.tPass - p.tKey,
+            shown: p.tShown === undefined ? null : p.tShown - p.tKey,
+        })),
+        idle_loops: idleLoops,
     }, null, 1) + "\n");
 console.log(failures ? `${NAME}: ${failures} failure(s)` : `${NAME}: ok`);
 process.exit(failures ? 1 : 0);

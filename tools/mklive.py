@@ -194,6 +194,8 @@ O
 B
 SPACE
 Q x3
+O x2
+K
 P x2
 SPACE
 A x2
@@ -294,8 +296,8 @@ def trace(snap, out_path, paths):
     for p in paths:
         runs.append({"name": Path(p).stem, "steps": run(lscen.load(p))})
     # The keys the scenarios above don't press, in the disc's own run: the
-    # crosshair hidden and shown (B), moved in shooting mode (SPACE), the
-    # turn's and the step's sizes, turning round.
+    # crosshair hidden and shown (B), moved across and up and down in
+    # shooting mode (SPACE), the turn's and the step's sizes, turning round.
     runs.append({"name": "keys", "steps": run(lscen.parse(KEYS_RUN, "keys"))})
     # The tour: every entrance, by the FCL's GOTO, in the database's order,
     # a couple of frames each.
