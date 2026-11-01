@@ -30,11 +30,10 @@
 \   transform_setup   M c for the frame (after matrix_update)
 \   transform_object  X = a slot, A = the mask of its vertices wanted:
 \                     those vertices in vx*, vy*, vz* (vertex j at index
-\                     j), with vflag's bit 7 set for one nearer than ZNEAR
-\                     and its other bits clear. Others of its vertices may
-\                     be computed too, as the ones wanted are built from
-\                     them. Fills the object's cache first if it isn't
-\                     good. Clobbers A, X, Y.
+\                     j). Others of its vertices may be computed too, as
+\                     the ones wanted are built from them. Fills the
+\                     object's cache first if it isn't good. Clobbers A,
+\                     X, Y.
 \
 \ The camera's coordinates must be below &8000 (M c's products take them as
 \ signed).
@@ -60,7 +59,6 @@ SECTION ObjWork
 .vz0        SKIP VALL
 .vz1        SKIP VALL
 .vz2        SKIP VALL
-.vflag      SKIP VALL               ; bit 7: nearer than ZNEAR; the clip's bits below
 ENDSECTION
 
 \ The cache: a slot is one vector, M v for a corner or M times an edge.
@@ -377,17 +375,6 @@ MACRO V_ADD d, s, e
     LDA vz2+s : ADC ca_z2+e,X : STA vz2+d
 ENDMACRO
 
-\ NEAR_FLAG j: vflag j = &80 if vertex j's z < ZNEAR (signed), else 0
-MACRO NEAR_FLAG j
-    LDA vz0+j : CMP #LO(ZNEAR)
-    LDA vz1+j : SBC #HI(ZNEAR)
-    LDA vz2+j : SBC #ZNEAR DIV 65536
-    BVC no_overflow
-    EOR #&80
-.no_overflow
-    AND #&80 : STA vflag+j
-ENDMACRO
-
 \ A cuboid's vertex j is built from PARENT[j] and edge EDGE[j] (cache slot
 \ X + EDGE[j]): its highest bit's axis added to the vertex without it.
 CUBE_PARENT = {0, 0, 0, 1, 0, 1, 2, 3}
@@ -428,13 +415,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     LDA ca_z0,X : SEC : SBC mc+6 : STA vz0,Y
     LDA ca_z1,X : SBC mc+7 : STA vz1,Y
     LDA ca_z2,X : SBC mc+8 : STA vz2,Y
-    LDA vz0,Y : CMP #LO(ZNEAR)
-    LDA vz1,Y : SBC #HI(ZNEAR)
-    LDA vz2,Y : SBC #ZNEAR DIV 65536
-    BVC gen_no_overflow
-    EOR #&80
-.gen_no_overflow
-    AND #&80 : STA vflag,Y
 .gen_next
     INY
     LDA want : BNE gen_vertex
@@ -442,7 +422,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
 .sensor
     LDX slot
     V_SUB 0
-    NEAR_FLAG 0
     RTS
 .rect
     LDX slot
@@ -450,9 +429,6 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     V_ADD 1, 0, 1
     V_ADD 2, 1, 2
     V_ADD 3, 0, 2
-    FOR j = 0..3
-        NEAR_FLAG j
-    NEXT
     RTS
 .cuboid
     \ The vertices wanted and those they're built from: 7 from 3, 3 and 5
@@ -470,11 +446,9 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
     LSR A : STA want
     LDX slot
     V_SUB 0
-    NEAR_FLAG 0
     FOR j = 1..7
         LSR want : BCC skip
         V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
-        NEAR_FLAG j
     .skip
     NEXT
     RTS

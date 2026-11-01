@@ -41,6 +41,8 @@ SECTION ObjWork
 .sk_sx      SKIP N_OBJ              ; its side of the camera on each axis (SK_*)
 .sk_sy      SKIP N_OBJ
 .sk_sz      SKIP N_OBJ
+.dl_rl      SKIP N_OBJ              ; each entry's row of the sort's memory
+.dl_rh      SKIP N_OBJ
 ENDSECTION
 
 \ The compares remembered (sort_objects): a compare of two objects' boxes
@@ -137,11 +139,13 @@ MACRO SK_COMPARE lo, hi, side
 ENDMACRO
 
 \ sort_objects: the original's sort of the draw list into dl_ord, each
-\ pair's verdict from the memory when it has it (so_memo).
+\ pair's verdict from the memory when it has it (so_memo). Each entry's row
+\ of the memory (by its slot) is found once a frame (dl_rl, dl_rh), and a
+\ pass keeps its place in X.
 .sort_objects
 {
     ZA_ENTRY
-    ZA_AUTO1 last, passes, changed, j, b, second, keyed
+    ZA_AUTO1 last, passes, changed, j, mslot, second, keyed
     ZA_AUTO2 row
     LDX dl_n : BNE some
     RTS
@@ -149,6 +153,9 @@ ENDMACRO
     DEX
 .order
     TXA : STA dl_ord,X
+    LDY dl_obj,X
+    LDA so_row_lo,Y : STA dl_rl,X
+    LDA so_row_hi,Y : STA dl_rh,X
     DEX : BPL order
     \ the camera's ceiling cells moved: a new generation
     LDA so_valid : BEQ moved
@@ -173,57 +180,55 @@ ENDMACRO
     STX passes                          ; at most this many passes
 .pass
     STZ changed
-    STZ j
+    LDX #0
 .pair
-    LDY j
-    LDX dl_ord,Y                        ; a
-    LDA dl_ord+1,Y : STA b              ; b
     \ remembered? (so_memo's row for a's slot, at b's)
-    LDY dl_obj,X
-    LDA so_row_lo,Y : STA row
-    LDA so_row_hi,Y : STA row+1
-    LDY b : LDA dl_obj,Y : TAY
+    LDY dl_ord,X                        ; a
+    LDA dl_rl,Y : STA row
+    LDA dl_rh,Y : STA row+1
+    LDY dl_ord+1,X                      ; b
+    LDA dl_obj,Y : TAY
     LDA (row),Y : EOR so_gen
     CMP #2 : BCS compare                ; (another generation's, or none)
-    LSR A : BCC hit_swap
-    JMP kept
-.hit_swap
-    JMP first
+.verdict
+    LSR A : BCC swap                    ; (C: keep)
+.next
+    INX : CPX last : BCC pair
+    LDA changed : BEQ sorted
+    DEC passes : BNE pass
+.sorted
+    RTS
+.swap
+    \ b, then a
+    LDA dl_ord,X : PHA
+    LDA dl_ord+1,X : STA dl_ord,X
+    PLA : STA dl_ord+1,X
+    INC changed                         ; (fewer than 256 swaps a pass)
+    BRA next
 .compare
+    STX j : STY mslot
     LDA keyed : BNE have_keys
     JSR sort_keys
     INC keyed
-    LDY j : LDX dl_ord,Y
 .have_keys
-    LDY b
+    LDY j : LDX dl_ord,Y
+    LDA dl_ord+1,Y : TAY
     STZ second
     SK_COMPARE sk_lx, sk_hx, sk_sx
     SK_COMPARE sk_ly, sk_hy, sk_sy
     SK_COMPARE sk_lz, sk_hz, sk_sz
     LDA second : BEQ first
-    \ kept: remembered
-    LDY b : LDA dl_obj,Y : TAY
-    LDA so_gen : ORA #1 : STA (row),Y
-    BRA kept
+    LDA #1                              ; kept
+    BRA remember
 .first
-    \ swapped: remembered (unless it came from there), b, then a
-    LDY b : LDA dl_obj,Y : TAY
-    LDA so_gen : STA (row),Y
-    LDY j
-    LDA dl_ord,Y : TAX
-    LDA b : STA dl_ord,Y
-    TXA : STA dl_ord+1,Y
-    LDA #1 : STA changed
-.kept
-    INC j : LDA j : CMP last : BCS pass_done
-    JMP pair
-.pass_done
-    LDA changed : BEQ sorted
-    DEC passes : BEQ sorted
-    JMP pass
-.sorted
-    RTS
+    LDA #0                              ; swapped
+.remember
+    LDY mslot
+    PHA : ORA so_gen : STA (row),Y : PLA
+    LDX j
+    JMP verdict
 }
+ASSERT N_OBJ < 256
 
 \ sort_keys: each draw-list entry's keys: its header box's cells and its
 \ side of the camera on each axis.

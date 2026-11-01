@@ -63,31 +63,44 @@ SECTION ObjCode
     RTS
 }
 
-\ mmul a, b: the product of two signed bytes in zero page (each within
-\ -64..64) into mp (16-bit signed).
-MACRO MMUL a, b
-    LDA a : CLC : ADC b
+\ mmul: mp (16-bit signed) = A times Y, signed bytes each within -64..64.
+\ Clobbers A, X, Y.
+.mmul
+{
+    STY mm_b : STA mm_a
+    CLC : ADC mm_b
     BPL sum_pos
     EOR #&FF : INC A                ; |a + b| (128 stays 128)
 .sum_pos
     TAX
-    LDA a : SEC : SBC b
+    LDA mm_a : SEC : SBC mm_b
     BPL diff_pos
     EOR #&FF : INC A
 .diff_pos
     TAY
     LDA msq_lo,X : SEC : SBC msq_lo,Y : STA mp
     LDA msq_hi,X : SBC msq_hi,Y : STA mp+1
+    RTS
+}
+ZA_AUTO1 mm_a, mm_b
+ZA_AUTO2 mp
+
+\ MMUL a, b: mp = a b (mmul), a and b in zero page
+MACRO MMUL a, b
+    LDY b : LDA a : JSR mmul
 ENDMACRO
 
-\ MROUND: mp's (v + 32) >> 6 in A, which must fit a signed byte.
-MACRO MROUND
+\ mround: mp's (v + 32) >> 6 in A, which must fit a signed byte.
+.mround
     LDA mp : CLC : ADC #32 : STA mp
     LDA mp+1 : ADC #0 : STA mp+1
     LDA mp
     ASL A : ROL mp+1
     ASL A : ROL mp+1
     LDA mp+1
+    RTS
+MACRO MROUND
+    JSR mround
 ENDMACRO
 
 \ MADD acc: mp added to acc (16-bit).
@@ -101,7 +114,7 @@ ENDMACRO
 {
     ZA_ENTRY
     ZA_AUTO1 sy, cy, sp, cp, sr, cr, py10, py12, nsy
-    ZA_AUTO2 mp, acc
+    ZA_AUTO2 acc
     LDX mat_angles : LDA sin_table,X : STA sy : LDA cos_table,X : STA cy
     LDX mat_angles+1 : LDA sin_table,X : STA sp : LDA cos_table,X : STA cp
     LDX mat_angles+2 : LDA sin_table,X : STA sr : LDA cos_table,X : STA cr
