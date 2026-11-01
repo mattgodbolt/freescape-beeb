@@ -404,3 +404,31 @@ free bank space for faster code. Driller's views need at most 102 (median
 30, journal 2026-10-31); two synthetic scenes now overflow and take
 decision 20's rule, in the model and the 6502 alike. No view of Driller's
 changes.
+
+## 33. The cone (2026-10-31, autonomous; amends 15 and 17)
+
+A face the projection can't take whole is drawn as the view's rectangle
+clipped by its edges' planes through the eye: exact, with no near plane
+and no guard band (`docs/research/objects.md`). Lines and points take a 3D
+clip by crossings. Against the model before it: 755 of 3,515,200 pixels
+change over the entrance views and walks, none in the draw order; against
+the ZX oracle 1,389,622 of 1,406,080 pixels agree (1,389,686 before). It
+costs more than the clips it replaced at the median; the next round makes
+its crossings cheaper.
+
+## 34. Area records built at area entry (2026-10-31, autonomous; amends 31)
+
+`area_enter` builds the current area's records from the logic's copy of
+Driller's database (the original layout, in sideways RAM), with the ST's
+colours and the globals from a build-time table, into one small working
+copy; `tools/mkareas.py` is the model of the conversion, and
+`tools/areacheck.mjs` holds every area to it. The conversion's own route
+(a gcd-reduced cross product and a rule for collapsed apexes) matches the
+model on all of Driller and isn't general. With the logic present,
+visibility comes from its `ix_flags`. The logic's database sits in bank 4,
+the conversion in bank 5, and the `f64` table in HAZEL.
+
+## 35. Rectangles wind like every other face (2026-10-31, autonomous)
+
+A rectangle's loop winds anticlockwise on both sides, like every other
+face's. No pixel changes.
