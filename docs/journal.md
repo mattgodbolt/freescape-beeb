@@ -567,3 +567,18 @@ and not yet used: ANDY's 4K, 229 bytes of page 1, 137 of zero page, and
 page &0D below &0D9F. The front end's code starts at `OBJ_CODE_ORG`, the
 fastest of ten offsets measured (they spread about ±0.2%). Every frame of
 both live discs is still the model's, byte for byte.
+
+## 2026-11-01: the column fill, priced and not built (track U)
+
+Matt had no preference among a column fill, half vertical resolution, a
+smaller view and more polishing; the column fill was chosen as the one
+that keeps the picture, but priced first, since the painter's estimate
+had been wrong. Modelled exactly and priced from measured kernels (a byte
+8 cycles dithered and 5 solid down a column; a run's entry 43 with the
+plant kept and 78 when it moves; a face byte-column's loop 96): median /
+p90 / max on the 65 views drawn fresh, the row fill measured 110,119 /
+183,995 / 319,926 against the column fill priced at 123,467 / 183,240 /
+269,828; on 738 live frames, 75,016 / 234,630 / 371,360 against 89,837 /
+258,327 / 371,188. Not built (decision 44). The study also found two
+free-camera frames in area 4 that fail the model's own exact-edges check;
+the disc drew the model's view for them.

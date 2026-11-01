@@ -519,3 +519,17 @@ the maths code and the rasteriser's state moved (`docs/research/live.md`
 has the map, every boundary ASSERTed). The view doesn't change; the live
 disc's text is condensed into the ten rows, the attribution kept
 (decision 6).
+
+## 44. The row fill stays, against a column fill (2026-11-01, autonomous)
+
+A column fill (faces as byte columns written straight down the screen's
+layout, as PORTAL and lander fill) was modelled exactly
+(`tools/model/colfill.py`, the row fill's bytes on every scene, view and
+live frame) and priced from 6502 kernels measured in jsbeeb
+(`docs/research/colfill.md`): a median of 123,467 cycles on Driller's 65
+views drawn fresh against the row fill's measured 110,119, faster only on
+the busiest. Most of Driller's bytes are dithered, and down a column the
+pattern byte changes every line, so every store needs a load. The row
+fill stays; `make colfill` keeps the study checked. A column fill for busy
+views alone would need dithers that don't change line to line, which
+changes the picture (decision 8).
