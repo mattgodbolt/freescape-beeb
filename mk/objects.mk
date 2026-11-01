@@ -1,45 +1,66 @@
 # Track H: the object pipeline in 6502 (docs/engine.md stages 1-7,
 # docs/research/objects.md).
 #
-#   make objects   the area records (tools/mkareas.py, into build/gen/),
-#                  the check build (build/objects/), and the check: every
-#                  entrance view and the extra cameras through the 6502,
-#                  headless, each stage's output against the model's
-#                  exactly, with each stage's cycles (tools/objectcheck.mjs,
-#                  on tools/objectcases.py's cases); one of make check's
+#   make objects   the working copy's model (tools/mkareas.py, into
+#                  build/gen/), the check build (build/objects/), and the
+#                  checks: every area's working copy and the globals', as
+#                  area_init and area_enter build them from Driller's
+#                  database in the logic's bank (build/logic6502's LOGIC),
+#                  against mkareas.py's, byte for byte, with their cycles
+#                  (tools/areacheck.mjs); then every entrance view and the
+#                  extra cameras through the 6502, headless, each stage's
+#                  output against the model's exactly, with each stage's
+#                  cycles (tools/objectcheck.mjs, on tools/objectcases.py's
+#                  cases); and both again on the build that takes what's
+#                  hidden from the logic's flags (OBJ_LOGIC,
+#                  build/objects-logic/), the views there the entrances and
+#                  their walks; one of make check's
 #
 # The check build puts the code, the tables and the working memory in main
-# RAM and the records in sideways RAM banks, as the engine's build will
-# place the same sections where its memory map says.
+# RAM and HAZEL, the logic's database bank and the conversion's in sideways
+# RAM, as the engine's build places the same sections where its memory map
+# says.
 
 AREAS_GEN   = build/gen/areas.6502
 AREAS_JSON  = build/gen/areas.json
 OBJ_DIR     = build/objects
+OBJ_LOGIC_DIR = build/objects-logic
+OBJ_DB      = $(L6_DIR)/LOGIC
 OBJ_SRC     = src/defs.6502 src/area.6502 src/matrix.6502 src/objects.6502 \
               src/order.6502 src/transform.6502 src/clip.6502
 OBJ_MODEL   = $(wildcard tools/model/*.py tools/model/standin/*.py)
 OBJ_CASES   = $(OBJ_DIR)/cases.json
 
-ALL    += $(OBJ_DIR)/OCODE $(OBJ_CASES)
+ALL    += $(OBJ_DIR)/OCODE $(OBJ_LOGIC_DIR)/OCODE $(OBJ_CASES)
 CHECKS += objects
 
 .PHONY: objects
-objects: $(OBJ_DIR)/OCODE $(OBJ_CASES)
-	node tools/objectcheck.mjs $(OBJ_DIR)
+objects: $(OBJ_DIR)/OCODE $(OBJ_LOGIC_DIR)/OCODE $(OBJ_CASES) $(OBJ_DB) $(AREAS_JSON)
+	node tools/areacheck.mjs $(OBJ_DIR) --areas $(AREAS_JSON) --db $(OBJ_DB)
+	node tools/areacheck.mjs $(OBJ_LOGIC_DIR) --areas $(AREAS_JSON) --db $(OBJ_DB)
+	node tools/objectcheck.mjs $(OBJ_DIR) --db $(OBJ_DB)
+	node tools/objectcheck.mjs $(OBJ_LOGIC_DIR) --db $(OBJ_DB) --cases $(OBJ_CASES) \
+	    --areas $(AREAS_JSON) --entrance
 
-# The faces' colours are the model's (render.recolour), from make colours.
-$(AREAS_GEN) $(AREAS_JSON) &: tools/mkareas.py $(DATA_JSON) $(OBJ_MODEL) $(COLOUR_MODEL) src/defs.6502
+# The faces' colours are the model's (render.recolour), from make colours;
+# the globals' records are the tape's.
+$(AREAS_GEN) $(AREAS_JSON) &: tools/mkareas.py tools/freescape.py $(DATA_JSON) $(DATA_TAPE) \
+                              $(OBJ_MODEL) $(COLOUR_MODEL) src/defs.6502
 	@mkdir -p $(@D)
-	$(PYTHON) -I tools/mkareas.py $(DATA_JSON) $(AREAS_GEN) $(AREAS_JSON)
+	$(PYTHON) -I tools/mkareas.py $(DATA_JSON) $(DATA_TAPE) $(AREAS_GEN) $(AREAS_JSON)
 
 define OBJECTS_CHECK_6502
-\ The object pipeline's check build (mk/objects.mk, tools/objectcheck.mjs).
-\ The code, the records' working copy and the work in main RAM; the maths'
-\ tables, the transform's cache and the output in HAZEL, which the check's
-\ entries page in.
+\ The object pipeline's check build (mk/objects.mk, tools/objectcheck.mjs,
+\ tools/areacheck.mjs). The code, the working copy and the work in main
+\ RAM; the maths' tables, the transform's cache and f64 table in HAZEL,
+\ which the check's entries page in; the logic's database bank (the
+\ harness loads build/logic6502's LOGIC) and the conversion's in sideways
+\ RAM.
 INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
+AREA_DB_BANK   = 4              ; src/logic/vars.6502's LOGIC_BANK (tools/areacheck.mjs checks)
+AREA_CONV_BANK = 5
 
 SECTION ObjCode, org = &0E00, guard = &5000, filename = "OCODE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
@@ -95,7 +116,7 @@ ENDMACRO
 .check_area
     EQUB 0
 ENDSECTION
-\ area_enter pages the records' banks, so its code is never in one.
+\ area_init and area_enter page the banks, so their code is never in one.
 SECTION AreaCode, org = &5000, guard = &5100, filename = "OAREA", cmos = TRUE
 ENDSECTION
 SECTION ObjConst, org = &5100, guard = &5C00, filename = "OCONST"
@@ -109,9 +130,13 @@ INCLUDE "../maths/tables.6502"
 ENDSECTION
 SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
+SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
+ENDSECTION
 SECTION ObjOut, org = &7000, guard = &7600, virtual = TRUE
 ENDSECTION
 SECTION ObjMemo, org = &7600, guard = &7C00, virtual = TRUE
+ENDSECTION
+SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 
 INCLUDE "../gen/areas.6502"
@@ -121,6 +146,14 @@ INCLUDE "../../src/transform.6502"
 INCLUDE "../../src/objects.6502"
 INCLUDE "../../src/clip.6502"
 INCLUDE "../../src/order.6502"
+IF DEFINED(OBJ_LOGIC)
+\ The logic's flags for the objects of its index, as logic_go_shown leaves
+\ them (src/logic/vars.6502's): tools/objectcheck.mjs writes them.
+SECTION ObjWork
+.ix_flags   SKIP IX_MOST
+ENDSECTION
+ENDIF
+ASSERT LO(fq0) = 0
 endef
 export OBJECTS_CHECK_6502
 
@@ -132,6 +165,14 @@ $(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.65
                                              src/maths.6502 src/project.6502 $(MATHS_GEN)
 	$(ASM) --warn 2 -p $(OBJ_DIR) --symbols $(OBJ_DIR)/symbols.json $<
 
+# The same, with what's hidden from the logic's flags (src/area.6502's
+# OBJ_LOGIC).
+$(OBJ_LOGIC_DIR)/OCODE &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) src/maths.6502 src/project.6502 $(MATHS_GEN)
+	@mkdir -p $(@D)
+	cp $(OBJ_DIR)/check.6502 $(OBJ_LOGIC_DIR)/check.6502
+	$(ASM) --warn 2 -D OBJ_LOGIC=TRUE -p $(OBJ_LOGIC_DIR) --symbols $(OBJ_LOGIC_DIR)/symbols.json \
+	    $(OBJ_LOGIC_DIR)/check.6502
+
 $(OBJ_CASES): tools/objectcases.py $(AREAS_JSON) $(DATA_JSON) $(OBJ_MODEL) $(COLOUR_MODEL)
 	$(PYTHON) -I tools/objectcases.py $(DATA_JSON) $(AREAS_JSON) $@
 
@@ -142,9 +183,8 @@ $(OBJ_CASES): tools/objectcases.py $(AREAS_JSON) $(DATA_JSON) $(OBJ_MODEL) $(COL
 OBJ_NC_DIR = build/objects-nocache
 
 .PHONY: objects-nocache
-objects-nocache: $(OBJ_NC_DIR)/OCODE $(OBJ_CASES)
-	cp $(OBJ_CASES) $(OBJ_NC_DIR)/cases.json
-	node tools/objectcheck.mjs $(OBJ_NC_DIR) --entrance
+objects-nocache: $(OBJ_NC_DIR)/OCODE $(OBJ_CASES) $(OBJ_DB)
+	node tools/objectcheck.mjs $(OBJ_NC_DIR) --db $(OBJ_DB) --cases $(OBJ_CASES) --entrance
 
 $(OBJ_NC_DIR)/OCODE &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) src/maths.6502 src/project.6502 $(MATHS_GEN)
 	@mkdir -p $(@D)

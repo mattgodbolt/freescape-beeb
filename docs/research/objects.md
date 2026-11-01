@@ -25,19 +25,24 @@ node tools/objectcheck.mjs build/objects --entrance --profile   # the entrance v
 `build/maths/`), which its rules build. It fails if any stage of any case
 differs from the model, or if the pipeline writes outside its own memory.
 
-## The records (`tools/mkareas.py`)
+## The records (`src/area.6502`, modelled by `tools/mkareas.py`)
 
-Driller's areas in the engine's layout, generated into `build/gen/` from
-`build/data/driller.json` (nothing of Driller's is committed):
-`areas.6502` for the assembler, `areas.json` for the check.
+The stages read an area's objects from one **working copy** (`ObjArea`),
+which `area_enter` builds as the area is entered, on the BBC, from the
+records of Driller's own database: the ZX's bytes in the original's
+layout, at the top of the player logic's bank (`LOGIC_BANK`, `LOGIC_DB`:
+`logic6502.md`), where the logic walks them too. Nothing per area is
+precomputed. `tools/mkareas.py` is the model of what it builds, from
+`build/data/driller.json`, into `build/gen/` (nothing of Driller's is
+committed): `areas.6502` for the assembler, `areas.json` with every area's
+working copy for the check.
 
-- **A slot an object**, structure of arrays, the globals in the first
-  `G_OBJ` slots and the area's after them. Only objects the model can draw
-  get a slot (`objects.shape()` isn't `None`); the object pass walks the
-  area's slots and then the globals', which is the model's order with the
-  undrawable ones left out. The faces' colours are the model's
-  (`render.recolour`, decision 8), and the generator checks the globals are
-  coloured alike in every area, since they're copied once.
+- **A slot an object**, structure of arrays, so every array has one
+  address and the stages index it with `abs,X`: the globals in the first
+  `G_OBJ` slots, built once by `area_init`, and the area's after them. Only
+  objects the model can draw get a slot (`objects.shape()` isn't `None`);
+  the object pass walks the area's slots and then the globals', which is
+  the model's order with the undrawable ones left out.
 - **Kinds** (`ob_flags`' low bits): a cuboid (its box: vertex i has bit k
   set for the high side on axis k), a rectangle (its box and its zero axis,
   `ob_aux`), a generic object (pyramids, polygons, lines; its vertices'
@@ -48,9 +53,8 @@ Driller's areas in the engine's layout, generated into `build/gen/` from
   over `CELL`); the boxes for the coarse cull (`ob_bl*`, `ob_bh*`, the
   bounds) and for the sort (`ob_l*`, `ob_h*`, the header box) are cells.
 - **Each face** (`fa_*`): its colour; its loop, an offset into one table
-  of loops shared by every area (`lp_table`, each distinct loop once); the
-  mask of its object's vertices it uses; and its test (`fa_test`,
-  `fa_tval`):
+  of loops shared by every area (`lp_table`, in `ObjConst`); the mask of
+  its object's vertices it uses; and its test (`fa_test`, `fa_tval`):
   - an **axis test** for a face in a plane x, y or z = P: seen from below
     when the camera's floor cell f < P (`T_AXLO + 2 axis`, tval P), from
     above when P < its ceiling cell e, stored as 255 − e < 255 − P
@@ -59,16 +63,54 @@ Driller's areas in the engine's layout, generated into `build/gen/` from
     reduced normal's two non-zero components (every slanted face in Driller
     has two) and a point of the plane on those axes;
   - `T_ALWAYS` for a line and a sensor's point.
-- **Packed** in the arrays' order, each as long as its count, into
-  sideways RAM from bank 4 (decision 5). `area_enter` copies an area's into
-  the working copy (`ObjArea`), so every array has one address and the
-  stages index it with `abs,X`.
+- **`ob_ix`**: each slot's place in the logic's index of the area's objects
+  (`ix_*`: the area's records, then the globals'), which says where its
+  flags are when the logic is there (below).
 
-Sizes [measured, `make objects`'s `mkareas.py` line]: 29 areas in **24,985
-bytes** (bank 4: 16,125, bank 5: 8,860); the globals' record 686 bytes,
-resident; 70 bytes of shared loops. The largest any area needs, globals
-included: 38 objects, 128 faces, 66 planes, 168 generic vertices, 5
-sensors, so the working copy is 2,504 bytes.
+**How it's built.** For each record in turn, area by area in the
+database's order (`DB_AREAS`, the database's table of areas): its fixed
+part is read into `rec` by `area_record`, in main RAM (`AreaCode`) so that
+it can page the database's bank in; the conversion itself (`AreaConv`) can
+sit in any bank. It does what `objects.shape()` does, in bytes, but in
+three places, each of which `mkareas.py` asserts on every object, so a
+database it couldn't convert fails the build with the reason:
+
+- a slanted face's plane is the cross product at its loop's first corner,
+  (v1 − v0) × (v2 − v1), whose edges are signed bytes, reduced by the
+  greatest common divisor of its two non-zero components (Stein's way, and
+  a division by shifts), not Newell's normal over the whole loop;
+- a pyramid's side loses its apex corner when the apex edge has shrunk to
+  a point, and its apex face goes when any apex edge has, rather than
+  removing repeated corners in general;
+- every loop is one the conversion finds by a constant: `lp_table` holds
+  them in a fixed order (the cuboid's face f at 4 f, a polygon's forward
+  and backward, a pyramid's sides whole and shrunk, its base and apex),
+  and `mkareas.py` refuses a loop that isn't one of them.
+
+**What isn't in the ZX's database** comes from tables `mkareas.py`
+generates from the originals into `AreaConv` (decision 6): each face's
+colour in the version the colours follow (`render.recolour`, decision 8),
+as a stream of colour bytes for each area and the globals, in the records'
+order and layout, which the conversion takes in place of the records' own;
+and the globals' records as the tape has them, for a build without the
+logic, which keeps its own (`AREA_GLOBALS`: the logic's `Globals`).
+
+**The logic's flags** (`OBJ_LOGIC`, a build option). Without it the object
+pass skips a slot whose `ob_state` has bit 7 set, as the data first has
+them. With it, the pass reads the logic's `ix_flags` at the slot's `ob_ix`
+(bit 6 invisible, bit 5 destroyed, as `logic_go_shown` copies them) and
+`area_enter` builds the globals' slots again too, since the logic moves the
+rig's parts as an area loads (`place_rigs`).
+
+**Checked** by `tools/areacheck.mjs` (in `make objects`): the globals'
+slots after `area_init`, then every area after `area_enter`, with the
+working copy past the globals' filled with junk first, against
+`mkareas.py`'s, byte for byte; the build's `AREA_DB` and `AREA_DB_BANK`
+against the logic build's `LOGIC_DB` and `LOGIC_BANK`; nothing written
+outside the working copy and `ObjWork`; and the same on the `OBJ_LOGIC`
+build. It reports the cycles of `area_init` and `area_enter`. The sizes and
+cycles are in the journal (2026-10-31, "area records from the logic's
+database").
 
 ## Cells (stages 2 and 7)
 
@@ -212,24 +254,28 @@ Faces nearest first, in the rasteriser's input's shape
 
 | Entry | Does | Inputs | Outputs | Clobbers |
 |---|---|---|---|---|
-| `area_init` | the globals copied in, once | | the working copy's first slots | A X Y, the cache |
-| `area_enter` | an area's record copied in | A: its index in `ar_*` | the working copy, `ob_n`, `ob_state` | A X Y, the cache; pages and restores the bank |
+| `area_init` | the globals' slots built, once | | the working copy's first slots, `ob_n`, `ob_state` | A X Y, the cache; pages and restores the bank |
+| `area_enter` | an area's slots built (and the globals' again, with `OBJ_LOGIC`) | A: its index in the database's table of areas | the working copy (`ob_ix` too), `ob_n`, `ar_counts`, `ob_state` | A X Y, the cache; pages and restores the bank |
 | `objects_frame` | stages 1-7 | `cam_x/y/z` (16-bit, below &8000), `cam_yaw/pitch/roll` (0-71) | `out_*`; also `mat`, `cd_*`, `dl_*`, `tf_*` | A X Y, its zero page |
 | `cache_reset` | every cache emptied | | | A X |
 
-- **Paging**: the records' bank only during `area_enter` (it restores
-  `romsel` and its copy at &F4); the maths' tables readable throughout
-  `objects_frame` (HAZEL in the engine: ACCCON's Y); the working copy and
-  the work areas never in `&3000-&7FFF` while the screen's X bit is set, nor
-  in sideways RAM.
-- **The logic** hides and shows by `ob_state`'s bit 7, finds slots by
-  `ob_id`, and must call `cache_reset` if it moves an object (the rig).
+- **Paging**: `area_init` and `area_enter` are called with the pipeline's
+  bank in, page in the conversion's (`AREA_CONV_BANK`) and, a record at a
+  time, the database's (`AREA_DB_BANK`), and restore `romsel` and its copy
+  at &F4; the maths' tables readable throughout `objects_frame` (HAZEL in
+  the engine: ACCCON's Y); the working copy and the work areas never in
+  `&3000-&7FFF` while the screen's X bit is set, nor in sideways RAM.
+- **The logic** hides and shows by `ob_state`'s bit 7, or, with
+  `OBJ_LOGIC`, by its own `ix_flags` at each slot's `ob_ix`; it finds slots
+  by `ob_id`, and must call `area_enter` again after loading an area (the
+  rig's parts move) and `cache_reset` if it moves an object otherwise.
 - **Sections** (each placed by the build's memory map; the check build's
-  in `mk/objects.mk`): `ObjCode` (12.2K of this track's code [measured]),
-  `ObjConst` (2,232 bytes: the f64 table, quarter squares, loops, the area
-  directory, the copy's descriptors, the sine table, the globals' record),
-  `ObjArea` (2,504), `ObjWork` (1,902), `ObjCache` (2,304), `ObjOut`
-  (1,410), and the records' `AreaBank4`, `AreaBank5`.
+  in `mk/objects.mk`): `ObjCode` (this track's code), `ObjConst` (the
+  loops, the sine table, the matrix's quarter squares, the clip's nibble
+  tables), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
+  `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjOut`;
+  `AreaCode` (`area_init`, `area_enter` and the database's reader, never in
+  sideways RAM) and `AreaConv` (the conversion and its tables, anywhere).
 
 ## The check (`tools/objectcheck.mjs`)
 
@@ -361,7 +407,11 @@ For the coordinator to number:
   memo of the sort's compares (about half of them repeat).
 - **Size**: this track's code is too big for main RAM beside the rest; the
   engine's build should put it in a sideways bank with the working copy.
-- **The logic's side**: moving an object (the rig) means updating its
-  record's cells and calling `cache_reset`.
+- **The logic's side**: a build with the logic (`OBJ_LOGIC`, `AREA_GLOBALS`)
+  calls `area_enter` after each of its area loads, which builds the
+  globals' slots from its records with the rig's parts where it put them.
+- **Area entry's cost** is mostly the slanted faces' planes (the cross
+  product's products, the greatest common divisor and the divisions) and
+  the reading of the records through main RAM.
 - **The glue** to the rasteriser: `out_*` to `rs_*`, colour indices to
   patterns.

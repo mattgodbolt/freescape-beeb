@@ -91,7 +91,8 @@ includes.)
 - Baron: fail on any warning (`tools/asm.sh`); `ASSERT` is built in;
   `FOR n = 0..15` is inclusive; put `ZA_UNREACHABLE` after an
   always-taken branch; a `;` comment mid-line on a colon-separated line
-  swallows the rest of it.
+  swallows the rest of it; a `ZA_AUTO` can't be named `a`, `x` or `y`
+  (names are case-insensitive).
 - Run to a label after boot, never a fixed wait.
 - `.DELETE_ON_ERROR` stays in the Makefile.
 - The view is written only between `frame_begin` and `frame_end`, to

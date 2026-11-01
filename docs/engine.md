@@ -125,10 +125,13 @@ which owns the machine and makes no OS call.
 
 - `tools/freescape.py` reads Driller's database from the fetched ZX tape
   into JSON (`make data`), checked against ScummVM's parse.
-- The build turns that into the engine's own records, one per area, in
-  sideways RAM: objects with their kind, box, colours and vertices, laid
-  out for the object pass (stage 2), and the area's colours and sky and
-  ground.
+- The BBC keeps the database itself, the ZX's bytes, in the player
+  logic's sideways RAM bank, and entering an area builds its objects from
+  it into the engine's working copy (`src/area.6502`, modelled by
+  `tools/mkareas.py`): their kind, box, colours and vertices, laid out for
+  the object pass (stage 2). What the ZX's database hasn't, the faces'
+  colours in the version decision 8 follows, comes from a table the build
+  makes from the originals.
 - **Units.** Object positions and sizes are bytes in the original's cells.
   The engine's world unit is the one Driller's camera moves in, so an
   object's corner in world units is its cell coordinate times a constant
@@ -268,10 +271,11 @@ come with it, to see where the cycles go.
 - `&4000-&7FFF`: the screen, 16K in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, logs, reciprocals, the sine
   table) and the row-run code.
-- Sideways RAM banks 4-7: the area records, more code. The player logic
+- Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
-  with room to share.
+  with room to share. The renderer reads the database too, as it enters
+  an area (`src/area.6502`).
 
 The tracks size these as they go, and `make memory` reports what each
 region holds. The live disc's map, the whole engine in one build, is

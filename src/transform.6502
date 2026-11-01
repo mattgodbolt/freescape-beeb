@@ -482,8 +482,10 @@ CUBE_EDGE   = {0, 1, 2, 2, 3, 3, 3, 3}
 
 ENDSECTION
 
-SECTION ObjConst
-\ f64(n - 64) = 64 ((n - 64)^2 DIV 4), n = 0..255, three bytes.
+SECTION ObjTables
+\ f64(n - 64) = 64 ((n - 64)^2 DIV 4), n = 0..255, three bytes: read in the
+\ frame, so never in sideways RAM nor &3000-&7FFF (the builds put it in
+\ HAZEL, on a page boundary, so no read of it crosses a page).
 FQ = 64 * (((0..255) - 64) * ((0..255) - 64) DIV 4)
 .fq0
     EQUB FQ AND &FF

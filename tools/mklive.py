@@ -7,18 +7,15 @@ cameras its check saw (tools/livecheck.mjs).
 
 The first form writes into OUTDIR:
 
-    data.6502   for the assembly, included by src/live.6502:
-                - the banks tools/mkareas.py's records fill (LIVE_RECORD_BANKS)
-                  and where the last one's records end (LIVE_DATA_BANK,
-                  LIVE_DATA_ORG), from AREAS.json;
-                - section LiveData, after those records in that bank: each
-                  area's name (TEXT_COLS characters, centred) and its
-                  patterns (sky, then colour indices 1-15, four bytes each:
-                  tools/model/colours.py's, decision 8b) in the records'
-                  directory order; every entrance's area (its index in that
-                  directory), Driller's id and camera (tools/model/camera.py's
-                  from_entrance), in the database's order; and the step along
-                  the view for each yaw;
+    data.6502   for the assembly, included by src/live.6502, which places
+                section LiveData: each area's name (TEXT_COLS characters,
+                centred) and its patterns (sky, then colour indices 1-15,
+                four bytes each: tools/model/colours.py's, decision 8b) in
+                the database's order of areas (AREAS.json's, which
+                area_enter takes an area's index in); every entrance's area
+                (its index in that order), Driller's id and camera
+                (tools/model/camera.py's from_entrance), in the database's
+                order; and the step along the view for each yaw;
     live.json   the same entrances, for the check.
 
 The step is the model's walk (tools/objectcases.py's): LIVE_STEP world units
@@ -42,7 +39,6 @@ sys.path.insert(0, str(ROOT))
 from tools.model import camera as cam, parts, render, view, writer  # noqa: E402
 
 TEXT_COLS = view.read_defs()["SCREEN_COLS"] // 4
-BANK_ORG, BANK_END = 0x8000, 0xC000
 LIVE_STEP = 32                      # world units a frame's step: half a cell
 
 
@@ -77,9 +73,6 @@ def generate(db, layout, out):
     by_id = {a["id"]: a for a in db["areas"]}
     areas = [by_id[a["id"]] for a in layout["areas"]]
     ens = entrances(db, layout)
-    banks = sorted(int(b) for b in layout["banks"])
-    last = max(banks)
-    end = max(a["address"] + a["bytes"] for a in layout["areas"] if a["bank"] == last)
     sin, cos = db["tables"]["sin"], db["tables"]["cos"]
     for v in ens:
         assert all(0 <= p < 0x8000 for p in v["camera"][:3]), v
@@ -90,14 +83,11 @@ def generate(db, layout, out):
         "\\ committed; included by src/live.6502, which documents the layout.",
         f"LIVE_AREAS = {len(areas)}",
         f"LIVE_ENTRANCES = {len(ens)}",
-        "LIVE_RECORD_BANKS = {" + ", ".join(str(b) for b in banks) + "}",
-        f"LIVE_DATA_BANK = {last}",
-        f"LIVE_DATA_ORG = &{end:04X}",
         f"LIVE_STEP = {LIVE_STEP}",
         f"LIVE_TEXT_COLS = {TEXT_COLS}",
         f"LIVE_DISPLAY = \"{parts.colours.DISPLAY}\"",
         "",
-        f"SECTION LiveData, org = LIVE_DATA_ORG, guard = &{BANK_END:04X}, filename = \"LDATA\", cmos = TRUE",
+        "SECTION LiveData",
     ]
     names = "".join(centred(a["name"]) for a in areas).encode("ascii")
     L += equb("ld_names", names)
@@ -124,8 +114,7 @@ def generate(db, layout, out):
         "display": parts.colours.DISPLAY, "step": LIVE_STEP, "entrances": ens,
         "areas": [{"index": i, "id": a["id"], "name": a["name"].strip()} for i, a in enumerate(areas)],
     }, indent=1) + "\n")
-    print(f"live: {len(ens)} entrances in {len(areas)} areas; records in banks {banks}, "
-          f"bank {last}'s from &{end:04X} free")
+    print(f"live: {len(ens)} entrances in {len(areas)} areas")
 
 
 def render_cameras(db, layout_areas, cameras):

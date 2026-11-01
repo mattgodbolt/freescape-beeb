@@ -3,10 +3,14 @@
 // transform, clip, order) headless on every case of tools/objectcases.py,
 // each stage's output against the model's exactly.
 //
-//   node tools/objectcheck.mjs BUILD [--view TEXT] [--verbose] [--json OUT]
+//   node tools/objectcheck.mjs BUILD [--db build/logic6502/LOGIC] [--cases CASES.json]
+//                              [--areas build/gen/areas.json] [--entrance]
+//                              [--view TEXT] [--verbose] [--json OUT]
 //
-// BUILD holds the check build (OCODE, OAREA, OCONST, OTMP, AREAS*, symbols.json) and
-// cases.json (mk/objects.mk). It checks:
+// BUILD holds the check build (OCODE, OAREA, OCONST, OMATHS, OTABLES, ACONV,
+// symbols.json) and, unless --cases names them, cases.json (mk/objects.mk);
+// --db is the logic's database bank (LOGIC), which area_enter builds each
+// area's working copy from (tools/areacheck.mjs checks that). It checks:
 //   - stage 1: every matrix of cases.json's (matrix_build);
 //   - for each view, through objects_frame:
 //     - stage 2: the candidates, their seen faces and the vertices those use;
@@ -16,6 +20,11 @@
 //     - stage 7: the drawn objects' order;
 //     - the output, the faces nearest first, as the rasteriser reads them;
 //   - that nothing outside the pipeline's own memory was written.
+// A build that takes what's hidden from the logic's flags (OBJ_LOGIC) gets
+// them in ix_flags as the logic would have them at the area's start (from
+// --areas): each hidden object's invisible or destroyed, each shown one's
+// flags but those, and ob_state saying every slot is hidden, so a pass that
+// read the wrong flags, or ob_state, would change the candidates.
 // It reports each stage's cycles, median and maximum over the entrance
 // views and over all the views: an instruction-level count, each
 // instruction's cycles going to the innermost stage routine on the stack
@@ -28,7 +37,10 @@ import { headless } from "./run6502.mjs";
 const args = process.argv.slice(2);
 const dir = args[0];
 if (!dir) {
-    console.error("usage: objectcheck.mjs BUILD [--view TEXT] [--verbose] [--json OUT]");
+    console.error(
+        "usage: objectcheck.mjs BUILD [--db LOGIC] [--cases CASES.json] [--areas AREAS.json] [--entrance] " +
+            "[--view TEXT] [--verbose] [--json OUT]",
+    );
     process.exit(2);
 }
 const opt = (name) => {
@@ -38,12 +50,13 @@ const opt = (name) => {
 const only = opt("--view");
 const jsonOut = opt("--json");
 const verbose = args.includes("--verbose");
+const dbFile = opt("--db") ?? "build/logic6502/LOGIC";
 
 const symFile = `${dir}/symbols.json`;
 const sections = {};
 for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
     for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
-const cases = JSON.parse(fs.readFileSync(`${dir}/cases.json`, "utf8"));
+const cases = JSON.parse(fs.readFileSync(opt("--cases") ?? `${dir}/cases.json`, "utf8"));
 const entranceOnly = args.includes("--entrance");
 const views = cases.views.filter(
     (v) => (!only || v.name.includes(only)) && (!entranceOnly || /^a\d+-e\d+(-w\d+)?$/.test(v.name)),
@@ -52,15 +65,14 @@ const views = cases.views.filter(
 const m = await headless({ symbols: symFile });
 const S = (name) => m.sym(name);
 const has = (name) => name in m.syms;
-m.load(`${dir}/OCODE`, sections.ObjCode.org);
-m.load(`${dir}/OCONST`, sections.ObjConst.org);
-m.load(`${dir}/OAREA`, sections.AreaCode.org);
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
-m.load(`${dir}/OMATHS`, sections.ObjMaths.org, space(sections.ObjMaths.org));
-for (const name of Object.keys(sections)) {
-    const b = /^AreaBank(\d+)$/.exec(name);
-    if (b) m.load(`${dir}/AREAS${b[1]}`, 0x8000, Number(b[1]));
-}
+for (const [file, section] of [["OCODE", "ObjCode"], ["OCONST", "ObjConst"], ["OAREA", "AreaCode"],
+                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"]])
+    m.load(`${dir}/${file}`, sections[section].org, space(sections[section].org));
+m.load(`${dir}/ACONV`, sections.AreaConv.org, has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
+m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
+const logic = has("OBJ_LOGIC");
+const layout = logic ? JSON.parse(fs.readFileSync(opt("--areas") ?? "build/gen/areas.json", "utf8")) : null;
 
 const s8 = (v) => (v & 0x80 ? v - 256 : v);
 const s16 = (lo, hi) => {
@@ -243,6 +255,15 @@ for (const view of views) {
         m.poke(S("check_area"), view.area);
         await m.call(S("check_enter"));
         area = view.area;
+        if (logic) {
+            // the logic's flags for its index (the area's records, then the
+            // globals'): the hidden invisible or destroyed by turns, the
+            // shown with every other bit set; and ob_state, which mustn't be
+            // read, hiding everything
+            const hidden = [...layout.areas[area].hidden, ...layout.globals.hidden];
+            hidden.forEach((h, i) => m.poke(S("ix_flags") + i, h ? (i & 1 ? 0x20 : 0x40) : 0x9f));
+            for (let s = 0; s < S("N_OBJ"); s++) m.poke(S("ob_state") + s, 0x80);
+        }
     }
     const [x, y, z, yaw, pitch, roll] = view.camera;
     m.pokew(S("cam_x"), x);

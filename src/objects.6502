@@ -3,8 +3,10 @@
 \ tools/model/objects.py's object_pass) and the frame's object pipeline
 \
 \ For each slot, the area's then the globals' (the model's order, less what
-\ can't be drawn): skip it if it's hidden; skip it if the coarse cull puts
-\ it wholly behind the camera; then each face's test, and the object is a
+\ can't be drawn): skip it if it's hidden (ob_state's bit 7, or with the
+\ player logic, OBJ_LOGIC, its flags in ix_flags by ob_ix: src/area.6502);
+\ skip it if the coarse cull puts it wholly behind the camera; then each
+\ face's test, and the object is a
 \ candidate if the camera sees a face. A sensor is a candidate when it's
 \ watching (the model's sensor_watching).
 \
@@ -111,7 +113,12 @@ ASSERT CULL_K > 0 AND CULL_K < 128
     LDA #G_OBJ : STA last
     LDX #0
 .object
-    LDA ob_state,X : BMI next
+    IF DEFINED(OBJ_LOGIC)
+        \ hidden by the logic's flags for its index's object (src/area.6502)
+        LDY ob_ix,X : LDA ix_flags,Y : AND #IX_HIDDEN : BNE next
+    ELSE
+        LDA ob_state,X : BMI next
+    ENDIF
     LDA ob_bhx,X : CMP cull_hi+0 : BCC next
     LDA ob_bhy,X : CMP cull_hi+1 : BCC next
     LDA ob_bhz,X : CMP cull_hi+2 : BCC next
