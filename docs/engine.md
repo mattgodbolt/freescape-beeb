@@ -291,11 +291,16 @@ come with it, to see where the cycles go.
 
 - Zero page: baron's allocator (`ZA_AUTO`), with long-lived state in fixed
   locations.
-- `&0800-&0CFF`: the player logic's variables, `LogicWork`
-  (`docs/research/logic6502.md`).
+- `&0400-&0CFF`, the OS's pages: the engine's variables (`Work`) and the
+  rasteriser's input, which the object pipeline's output lies over.
+- Page `&0D` below `&0D9F` (the Master's extended vectors, which a soft
+  BREAK reads): the live disc's start, which runs once, once the disc is
+  done with.
 - `&0E00-&2FFF`: the engine's main code, and whatever is read whatever
   ACCCON's X and whatever bank is paged: the interrupt, the code that
-  pages, the rasteriser's state, the maths' code (which patches itself).
+  pages, the rasteriser's state, the player logic's variables
+  (`LogicWork`, `docs/research/logic6502.md`), the maths' code (which
+  patches itself).
 - `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
   RAM's. Data kept per buffer (section 4, stage 10) needs the same
   addresses free in both. The live disc keeps the front end's data in main
@@ -306,7 +311,9 @@ come with it, to see where the cycles go.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
-  f64 table) and the front end's work.
+  f64 table) and the front end's work. The maths' quarter squares serve the
+  logic and the fill too. HAZEL holds the filing system's workspace until
+  the OS is gone, so nothing goes in before.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
@@ -315,6 +322,10 @@ come with it, to see where the cycles go.
 - Not used yet: ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the
   paged bank's first 4K), and parts of the OS's pages, free once the
   engine owns the machine (`docs/research/live.md`, "Room").
+- The disc puts it all there: `!BOOT`, the loader (`src/loader.6502`),
+  reads the packed parts from one other file a track at a time and unpacks
+  each into its place, HAZEL's and ANDY's once the OS is gone
+  (`docs/research/live.md`, "The disc").
 
 The tracks size these as they go. The live disc's map, the whole engine
 in one build, is `src/live.6502`'s, every boundary ASSERTed

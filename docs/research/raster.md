@@ -85,7 +85,9 @@ same, `docs/research/rtw-sources.md` 1.5-1.6):
 The products by r are quarter squares, `q(u + f) - q(|u - f|)` a byte, from
 a table of `n^2 DIV 4` (n up to 510) that `raster_init` builds, 1K in the
 bank's work, so the rasteriser needs nothing of HAZEL or of the maths
-track's tables. Each chain's step in each copy of the line loop is a `BRA`
+track's tables; or, where the includer names one (`RASTER_SQUARES`), the
+same table already in memory: the live disc names the maths' in HAZEL.
+Each chain's step in each copy of the line loop is a `BRA`
 patched to the edge's kind: the 16-bit add, or none for a vertical edge.
 
 How it's done (`chain_next`, which sets up each edge inline):

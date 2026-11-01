@@ -150,3 +150,12 @@ includes.)
 - `mk/*.mk` are included in sorted order, and a rule's prerequisites
   expand as the rule is read: a variable from a file that sorts later is
   empty there. Give it a `?=` default (`mk/logic.mk` does for `ZXSNAP`).
+- A disc is `!BOOT` (the loader, `src/loader.6502`) and one packed file. A
+  new saved section must go in its disc's parts list (`LIVE_PARTS`,
+  `SLIDE_PARTS`), or `tools/loadcheck.mjs` fails.
+- Baron: a section opened in many places can't be nested in another, and
+  a section must hold less than 64K before its transform packs it.
+- The Master DFS's OSGBPB reads a sector a revolution; read a track at a
+  time by OSWORD `&7F`.
+- Page `&0D` is the DFS's NMI code while the disc is read: a run to an
+  address there stops in it. Run to the code that jumps there.

@@ -11,14 +11,17 @@ writer (stages 8-10, `raster_frame`), between `frame_begin` and
 free camera instead of the logic, for checking views. `tools/livecheck.mjs`
 holds every frame either shows to the model's render of that frame's
 camera, byte for byte, and the logic's every pass to the transcription's.
-Figures are in the journal and the tracks' reports, and in the dated
-measurements at the end.*
+Each disc is two files: `!BOOT`, the loader (`src/loader.6502`), and
+`DRILLER`, every other part packed ("The disc", below). Figures are in the
+journal and the tracks' reports, and in the dated measurements at the
+end.*
 
 ## Running it
 
 ```sh
 make live        # both discs and their checks (one of make check's)
 make live-run    # screenshots of LIVE_SHOTS' entrances on the free disc, RGB and PAL, into shots/
+node tools/loadcheck.mjs --disc build/live.ssd --json build/live/load.json   # every part in place, the boot's times
 node tools/livecheck.mjs --trace build/live/trace.json --verbose     # every frame's camera and cycles
 node tools/livecheck.mjs --free --walks 3,30 --json build/live/check-free.json
 make live LIVE_SCENARIOS="walls jet turns"                           # other scenarios of tests/logic/
@@ -124,7 +127,7 @@ ends.
 
 ### Driller's logic on the disc
 
-- **The start**: `!BOOT` loads `LOGICW` (the logic's variables, the
+- **The start**: the loader puts in `LOGICW` (the logic's variables, the
   original's in play: area 1, entrance 19, on the probe), `LOGIC` (its
   database and the code that reads it) and `LOGICC` (the rest of its code);
   `lv_start` indexes the area (`logic_go_init`), enters it (`area_enter`
@@ -277,6 +280,54 @@ counted when the clock is read counts. The check holds the BBC's own figure
 for every frame to the emulator's count of the same span, within
 `CLOCK_SLACK` cycles.
 
+## The disc
+
+`!BOOT` and `DRILLER`, built in two passes (`mk/live.mk`). The first
+assembles `src/live.6502` and writes each saved section as a file into
+`build/live/parts/` (baron's `-p`), and `PRINT`s the disc's description into
+`build/live/parts.6502` (channel 1, `-log1`): the line to show while it
+loads, where the loader runs (`SCREEN`), where to start (`start`), and every
+part, `{file, where, from, to}`, where a sideways bank or -1 for main RAM
+(`LIVE_PARTS` and `LIVE_LATE`). The second assembles `src/loader.6502` on that
+description. It packs the parts into one stream for each place (a bank,
+main RAM below `&8000`, HAZEL): an image from the lowest part's start to the
+highest's end, each part over those before it (`LGLUE` over the gap in
+`LOGIC`), gaps zero, packed by ZX02 (`src/zx02.6502`, baron's compressor as
+a section transform). Baron can't make a section that's opened in many
+places, as the banks' are, a child of another, so the parts go through
+files; a stream's section must hold less than 64K before it's packed, so
+there is one for each place (`LD_STREAMS` at most).
+
+The boot option `*RUN`s `!BOOT` into screen memory (the loader and a
+track's buffer, below MODE 7's screen; `screen_init` clears it later). It
+shows the build's line, finds `DRILLER`'s first sector and length in the
+catalogue, and reads it a track at a time by OSWORD `&7F` (the DFS's 8271
+read), unpacking each stream into its place as its bytes come: a bank paged
+by `romsel` and the OS's copy at `&F4` (which the MOS puts back after its
+calls), or main RAM with ACCCON's X clear. The DFS's own OSGBPB reads a
+sector a revolution on the Master, and `*RUN` loads a whole file into main
+RAM, which can't hold the packed parts, so the parts are read by sector,
+from a second file (measured below). HAZEL holds the filing system's
+workspace until the OS is gone, and page `&0D` its NMI code, so their
+streams ride in `!BOOT` itself (`LIVE_LATE`): after the last read the
+loader turns interrupts off for good, sets ACCCON's Y, unpacks them, and
+jumps to `start`. That's in page `&0D`: it runs once, and nothing uses the
+page after the disc is done with (`LiveBoot`, `&0D00` an RTI for any NMI).
+
+The unpacker is dmsc's ZX02 decoder (zx02-optim) with its copies by Y and a
+match's source made once, reading the stream through `ld_page` when a page
+is done, which reads the next track when the buffer's are. The slideshow
+uses the same loader, with the OS left running (`LD_KEEP_OS`: its
+`text_init` reads the MOS's font).
+
+`tools/loadcheck.mjs` boots the disc from power on and runs to the
+loader's jump to `start`, where every place's image must be in memory as
+the loader's rule makes it from the parts' files, byte for byte, and every
+section the first pass saved must be a part, from its section's start to
+its end. It reports the files and the boot's times (power on to the loader,
+to `start`, to `live_loop` and to the first frame shown). Both live discs'
+and the slideshow's are one of `make check`'s.
+
 ## Memory
 
 Each region's bounds are ASSERTed at the end of `src/live.6502`, and the
@@ -288,15 +339,16 @@ logic's code and variables unused.
 
 | Where | What |
 |---|---|
-| bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, loaded after `LOGIC`): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
+| bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, written over `LOGIC`'s gap): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
 | bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' patterns and index by id, the lines' code), the panel's code and tables (`PanelData`, `PDATA`), and the working copy's conversion (`AreaConv`, `ACONV`) |
-| bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20) |
+| bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20); its quarter squares are the maths' in HAZEL (`RASTER_SQUARES`: the same table, ASSERTed) |
 | bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below) |
-| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), loaded from `HAZEL_LOAD` (the screen) on by `!BOOT` and copied up once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies read the maths' quarter squares here (`LOGIC_SQUARES`: the same table, ASSERTed) |
+| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), which the loader unpacks once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies and the fill read the maths' quarter squares here (`LOGIC_SQUARES`, `RASTER_SQUARES`) |
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
-| main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`) in the cache's place |
+| page `&0D`, below `&0D9F` | `start`, which runs once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
+| main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`, which the loader puts there) in the cache's place |
 | shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
 | `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
 
@@ -324,12 +376,16 @@ below the bytes (2026-11-01).
   `mk/objects.mk`'s check build keeps room for the bank full
   (`CHECK_CODE_GUARD`, ASSERTed against `OBJ_CODE_ORG`), and for
   `ObjMore`'s room without the maths.
-- **The fill**: its bank from `raster_work_end` to `&C000`. Its own
-  quarter squares (`rq_lo`, `rq_hi`, built by `raster_init`) are the
-  maths' `sq_lo` and `sq_hi` in HAZEL for every index it uses, as the
-  logic's are (`LOGIC_SQUARES`): reading those would free their pages in
-  the bank, a change to `src/raster.6502` (a `RASTER_SQUARES` as
-  `LOGIC_SQUARES`; the slideshow, which has no maths, keeps its own).
+- **The fill**: its bank from `raster_work_end` to `&C000`. It reads the
+  maths' quarter squares in HAZEL (`RASTER_SQUARES`), as the logic does,
+  rather than building its own there (the slideshow, which has no maths,
+  still builds them).
+- **The front end's bank holds the front end alone**, so it gains room only
+  as the front end's own code goes elsewhere it can reach: `ObjMore` (any X,
+  any bank), main RAM's `&3000` room (with X clear, as it runs; code there
+  would be a decision, as the rest of the map keeps code below `&3000`),
+  HAZEL, or ANDY as a second window over its bank's first 4K (below). The
+  measurements below list its code by how often it runs.
 - **Both, at the same address**: main RAM's room past `obj_area_end` and
   shadow RAM's at the same addresses, if the front end leaves it, is
   per-buffer room (ACCCON's X picks the buffer drawn), for the fill's
@@ -341,15 +397,23 @@ below the bytes (2026-11-01).
 - **Not used yet**, measured on jsbeeb with the OS gone (below):
   - ANDY, `&8000-&8FFF` with ROMSEL's bit 7: the Master's private RAM, the
     MOS's own (it pages it only in set-up, through the font's OSWORD 10),
-    so free once the engine owns the machine. It stands in for the first
-    4K of whichever bank is paged, so it adds room only where that bank's
-    first 4K isn't needed while it's paged in.
-  - the OS's pages: from `work_end` to `RASTER_IN_ORG`; page `&0D` below
-    `&0D9F` (the NMI's, free with no disc access; a soft BREAK reads the
-    Master's extended vectors from `&0D9F` on, and pages 2 and 3, so those
-    stay the MOS's); page 1 below the stack's deepest; zero page above
-    baron's pool's highest allocation up to `&FB` (`&FC` is the MOS's IRQ
-    entry's, `&F4` `ROMSEL_COPY`).
+    so free once the engine owns the machine; the loader can fill it once
+    the OS is gone (`LD_LATE`, a bank OR `ROMSEL_ANDY`). It stands in for
+    the first 4K of whichever bank is paged, so it adds room only where
+    that bank's first 4K isn't needed while it's paged in. Two uses fit
+    (proposed, below): the front end's second window, its code above
+    `&9000` paging ANDY in to call what's there; or the working copy's
+    conversion (`AreaConv`), which runs only on entering an area and reads
+    only main RAM and the database: at `&8000` with ROMSEL `&80 OR
+    BANK_DB`, its last bytes in `BANK_DB`'s gap above `&9000` and the
+    database in view, freeing its place in `BANK_DATA` with no code
+    changed (a harness hook keyed on a bank then needs ANDY's bit too).
+  - the OS's pages: from `work_end` to `RASTER_IN_ORG`; page `&0D` from
+    `live_boot_end` to `&0D9F` (a soft BREAK reads the Master's extended
+    vectors from `&0D9F` on, and pages 2 and 3, so those stay the MOS's),
+    and below it once `start` is done; page 1 below the stack's deepest;
+    zero page above baron's pool's highest allocation up to `&FB` (`&FC`
+    is the MOS's IRQ entry's, `&F4` `ROMSEL_COPY`).
 
 ## The check
 
@@ -462,14 +526,16 @@ disc's demo.
   `ObjCache`, `ObjMemo`, `ObjConst` or `ObjArea` needs ACCCON's X clear.
   The front end's hot loops fall where `OBJ_CODE_ORG` puts them; aligning
   them (an `ASSERT` that their branches stay on a page) would free the
-  bytes before it. The fill could read the maths' quarter squares rather
-  than keep its own ("Room").
+  bytes before it. The fill reads the maths' quarter squares here
+  (`RASTER_SQUARES`), so a change to that table is the fill's too. A new
+  saved section is a part the loader must be told of (`LIVE_PARTS`):
+  `tools/loadcheck.mjs` fails a section left out.
 - **The player logic (J)**: the hooks this disc fills in, and the names it
   sets (`LOGIC_*`), are the logic's interface now; `tools/logiccheck.6502`
   keeps the defaults.
 - **The maths (F)**: the projection's shared-coordinate entries are reached
-  by a stub (`live_shared`) until a stage calls them; the logic reads the
-  maths' quarter squares. The maths' code is in `ObjMore`, from a page, as
+  by a stub (`live_shared`) until a stage calls them; the logic and the
+  fill read the maths' quarter squares. The maths' code is in `ObjMore`, from a page, as
   in `tools/mathscheck.6502`.
 
 ## What's left
@@ -489,6 +555,13 @@ disc's demo.
   fraction 0 is the camera before it, which the idle loop skips). Timing a
   pass from rest from the field before would show the first part-step at
   once.
+- The boot unpacks between reads, not during them: the DFS's OSWORD
+  returns when a track's sectors are in. A disc driver of the disc's own,
+  its NMI code filling one buffer while the unpacker empties the other
+  (`../porting-to-the-beeb.md`, "Reading the disc yourself"), would hide
+  the unpacking; a quicker format than ZX02 would shorten it.
+- ANDY's use (Room, above), and the front end's colder code out of its
+  bank (measured below), are the front end's to choose.
 
 ## Decisions to record
 
@@ -512,7 +585,38 @@ decision 42.)
   the front end's bank into `ObjMore`, from a page; the rasteriser's state
   out of its bank into main RAM at `&0E00`; and the front end's code starts
   `OBJ_CODE_ORG` into its bank, the page offset measured fastest. Shadow
-  RAM's `&3000` up to `SCREEN` stays the logic's. Measured below.
+  RAM's `&3000` up to `SCREEN` stays the logic's. Measured below. (These
+  two are decision 43.)
+- **The discs in two files, packed** (proposed 2026-11-01, track Y): a disc
+  is `!BOOT`, the loader (`src/loader.6502`), and `DRILLER`, every other
+  part packed by ZX02 at assembly, a stream for each place, which the
+  loader reads a track at a time by OSWORD `&7F` and unpacks into place as
+  it comes; what can only go in once the OS is gone (HAZEL's tables, the
+  start in page `&0D`) rides packed in `!BOOT`. The slideshow's too. Why:
+  the boot loaded a file for every section (`*SRLOAD`s and `*LOAD`s); now
+  one description, which the build makes, says where every part goes, and
+  the loader's check holds every byte to it. The packing about halves
+  what's read, and the discs come up from power on sooner (measured
+  below). Two files, not one: `*RUN` loads a whole file into main RAM, which
+  can't hold the parts even packed, so they come by sector from a file of
+  their own; and the DFS's OSGBPB on the Master reads a sector a
+  revolution, so not that. Measured below.
+- **The fill reads the maths' quarter squares** (proposed 2026-11-01,
+  track Y): on the live disc the rasteriser takes `sq_lo` and `sq_hi` in
+  HAZEL (`RASTER_SQUARES`, the same table for every index it uses,
+  ASSERTed), as the logic does, rather than building its own in its bank.
+  No byte of a frame changes, nor a cycle (both tables are on pages). Its
+  bank gains their pages.
+- **The start runs from page `&0D`** (proposed 2026-11-01, track Y):
+  `start` runs once, so it goes where the DFS's NMI code was, which the
+  loader writes once the disc is done with, behind an RTI at `&0D00`. Main
+  RAM below `&3000` gains it, which takes the maths' code down a page and
+  so gives `ObjMore` a page more.
+- **ANDY** (open, for Matt): the front end's second window (it gains up to
+  4K for code it calls through a ROMSEL switch from above `&9000`, the
+  front end's change), or the area conversion's place (`BANK_DATA` gains
+  the conversion's bytes, with no code changed and nothing measurable on a
+  frame). Not both. "Room", above.
 
 ## Measurements
 
@@ -627,3 +731,86 @@ written. ANDY: paged only by the MOS, in set-up (once a character of
 `text_init`'s OSWORD 10s), never written by the disc, and left holding
 3,633 non-zero bytes of the MOS's own: 4K for the engine once the OS is
 gone.
+
+### Two files, packed, and the room scavenged (2026-11-01, track Y)
+
+On jsbeeb's Master from power on (SHIFT-BREAK), `tools/loadcheck.mjs`
+(and, for the discs before, the same run to the loop and the first flip),
+the discs before against main at the fault track's merge:
+
+| disc | files before | after | first frame before | after |
+|---|---|---|---|---|
+| `build/live.ssd` | 18, 77,754 bytes | 2: `!BOOT` 3,200, `DRILLER` 38,246 | 16.51s | 11.19s |
+| `build/live-free.ssd` | 18 | 2: 3,202 and 38,140 | - | 11.15s |
+| `build/slides.ssd` | 6, 37,340 bytes | 2: 596 and 18,747 | 8.01s | 6.37s |
+
+The live disc's boot after: the loader starts at 2.62s (the MOS, the
+drive's spin-up, the catalogue and `!BOOT`'s 13 sectors), jumps to `start`
+at 10.13s, and `live_loop` comes at 11.03s. In between, 17 reads by OSWORD
+`&7F` (the catalogue, then `DRILLER`'s 150 sectors a track at a time), each
+taking 0.2-0.4s, and the unpacking between them 0.12-0.16s a track,
+4,595,643 cycles in all, about 63 a byte; then 0.2s for `!BOOT`'s own
+streams. The reads don't overlap the unpacking (the DFS's call returns when
+its sectors are in), so the unpacker's speed counts: copying a run's bytes
+by Y and making a match's source once took it from 4,935,310 cycles with
+dmsc's decoder as written. A test disc of 40K: read in 10K OSGBPB calls,
+38.8s from power on; a track at a time by OSWORD `&7F`, 6.9s.
+
+The streams (the live disc's, unpacked, then packed): `BANK_DB` 16,384 to
+10,061; `BANK_DATA` 15,387 to 9,136; `BANK_OBJ` 16,137 to 8,636;
+`BANK_RASTER` 11,153 to 4,958; main RAM (`&0F1F` up to `&4328`, the gap
+zero) 13,321 to 5,454; HAZEL 5,632 to 2,517; page `&0D` 89 to 75. The
+loader's code is the rest of `!BOOT`'s 3,200 bytes. On the first build,
+the parts packed a file at a time came to 41,083 bytes, and as streams to
+40,878.
+
+**The free bytes**, the logic's disc (the tighter), before (main) and after:
+
+| | before | after |
+|---|---|---|
+| the front end's bank, `obj_code_end` to `&C000` | 119 (and 128 before `OBJ_CODE_ORG`) | 119 (and 128) |
+| `ObjMore`, to `&3000` | 596 | 852 |
+| main RAM's `&3000` room, to `SCREEN` | 746 | 746 |
+| HAZEL, `obj_work_end` to `&E000` | 150 | 150 |
+| the fill's bank, `raster_work_end` to `&C000` | 760 | 1,784 |
+| `BANK_DATA`, `area_conv_end` to `&C000` | 997 | 997 |
+| `BANK_DB`, `live_glue_end` to `LOGIC_DB` | 983 | 983 |
+| shadow RAM's `&3000` room, to `SCREEN` | 6,368 | 6,368 |
+| the OS's pages, `work_end` to `RASTER_IN_ORG` | 197 | 197 |
+| page `&0D`, to `&0D9F` | 159 | 70 (all 159 once `start` is done) |
+| ANDY | 4,096 | 4,096 |
+
+The fill's bank gains its quarter squares' pages. `ObjMore` gains a page
+as `start` (89 bytes with its RTI) and the HAZEL copy (`hazel_fill`, 38)
+leave `LIVE`, taking `logic_work_end` below a page and the maths' code
+with it. The free disc's `ObjMore` is 1,108 before and after (its `LIVE`
+is smaller, so no page is crossed).
+
+**Packed until needed**, weighed and not done: what runs only on entering
+an area or at the start would need a buffer to unpack into that's free and
+in view when it runs, and the unpacking costs about 63 cycles a byte (the
+loader's rate). The area conversion (`AreaConv`, 4,423 bytes, 2,936
+packed): 1,487 bytes saved in `BANK_DATA`, about 280,000 cycles at every
+area's entry, and no buffer: ANDY, the only one in view with its bank, is
+4,096 bytes. Placed in ANDY with its last bytes in `BANK_DB`'s gap (Room,
+above), it frees all 4,423 and costs nothing a time. The logic's area
+loading (`src/logic/area.6502`, about 750 bytes in `BANK_DB`, which has
+room): not worth an unpacker. The panel's picture is packed already and
+holds its place only until `clear_work`. Start-up code beside `start`
+(`panel_init`, `raster_init`, `area_init`, `screen_init`'s tables, the
+interrupt's setting up) is a few hundred bytes in five files and four
+places. Tables built at start-up rather than stored: the fill's own were,
+and now aren't needed; the maths' tables pack to 2,237 bytes of the
+2,517 HAZEL's stream takes, so building them would save at most a track's
+read.
+
+**The front end's code by how often it runs**, the free disc's tour of
+every entrance (SPACE, then a turn and a look at each), cycles in its bank
+by routine: 327 bytes never ran (`fill_slow_point`, `fill_slow_edge`,
+`quad_across`, `quad_x`, `dedupe`, `stage_pa`); 35 routines, 2,318 bytes,
+took under 0.1% of the front end's cycles each and 1.17% together; 60
+routines, 5,066 bytes, under 0.5% each and 8.4% together. The lines' and
+points' code (`seg_f`, `seg_point`, `seg_clip`, `draw_segment`,
+`line_quad`, `point_square`, `quad_across`, `quad_x`), 1,125 bytes, took
+0.29%. Code like that could leave the bank for `ObjMore` or, through a
+ROMSEL switch, ANDY.

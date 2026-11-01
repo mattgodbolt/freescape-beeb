@@ -661,3 +661,40 @@ its pass), it let keys go between passes that named the same keys in
 another order, and a long run's idle loops overflowed its maximum. The live
 check now takes every scenario of `tests/logic/` but `keys.txt`, whose E
 (a ZX key with no action) the disc doesn't read.
+
+## 2026-11-01: two files on the disc, and the room scavenged (track Y)
+
+The live disc booted eighteen files, a section each. Now it's two: `!BOOT`,
+a loader (`src/loader.6502`), and `DRILLER`, every other part packed by
+ZX02 at assembly, which the loader reads a track at a time and unpacks into
+its place as it comes; HAZEL's tables and the start go in from `!BOOT`
+itself once the OS is gone. The slideshow uses it too. Baron can't nest a
+section that's opened in many places, as the banks' are, in another, so
+the build has two passes: `src/live.6502` writes its parts as files and
+`PRINT`s where each goes, and the loader's build packs them, a stream to
+each place (a bank, main RAM, HAZEL), its parts one image. One file wasn't
+to be had: `*RUN` loads a file whole into main RAM, which can't hold the
+packed parts, so they're read by sector from a second. The DFS's OSGBPB
+was the first way tried, and on the Master it takes a revolution a sector:
+40K in 38.8s, against 6.9s by OSWORD `&7F` a track at a time. From power on
+the live disc shows its first frame at 11.19s, from 16.51s; the slideshow
+at 6.37s, from 8.01s. The unpacking doesn't overlap the reads, so it
+counts: 2.3s of the live disc's boot, about 63 cycles a byte, after its
+copies were made by Y. `tools/loadcheck.mjs` holds every part's place to
+its file at the loader's end, and fails a saved section the loader isn't
+told of; the first mutation it caught (a run of 256 not counted) put
+eleven thousand of bank 4's bytes out.
+
+The fill now reads the maths' quarter squares in HAZEL (`RASTER_SQUARES`),
+which frees its bank's 1K, and `start` runs from page `&0D`, which gives
+`ObjMore` a page: 852 bytes free there, from 596, and 1,784 in the fill's
+bank, from 760. The front end's bank holds the front end alone, so it
+stays at 119: it gains only as the front end's code leaves it. Measured
+over the free disc's tour of the entrances, 2,318 bytes of its code each
+took under 0.1% of its cycles, 1.17% in all, and the lines' and points'
+code (1,125 bytes) 0.29%. ANDY's 4K could be the front end's second window
+for code like that, or the area conversion's place, which would free its
+4,423 bytes in `BANK_DATA` with no code changed: a choice for Matt
+(`docs/research/live.md`, "Decisions to record"). Nothing else was worth
+keeping packed until needed: the area conversion has no buffer to unpack
+into, and the rest is small or packed already.

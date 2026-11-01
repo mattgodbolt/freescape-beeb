@@ -108,7 +108,7 @@ differ: below), and names the vehicle under them in its font.
 - **The picture**: everything outside the view, the same in both buffers
   always (decision 21). `tools/mkpanel.py` packs it (runs given or copied
   from up to 256 bytes back; a dither repeats every four bytes down a
-  column) into the file `PANEL`, which `!BOOT` loads into the transform's
+  column) into the part `PANEL`, which the loader puts in the transform's
   cache in main RAM (nothing's there until `clear_work`); `panel_init`
   unpacks it into main RAM's buffer, copies that to shadow RAM's a page at
   a time through RasterIn's, and is done before `clear_work`.
@@ -167,7 +167,7 @@ differ: below), and names the vehicle under them in its font.
 | `BANK_DATA`, `PanelData` (`PDATA`), after `LiveData` | the panel's code and tables: where the text's widened MOS font (`TextRAM`) was |
 | main RAM, `LIVE` | `panel_set`, so code in any bank sets a cell |
 | `Work` | `panel_want`, `panel_shown`, the cache and the drawing's lines |
-| main RAM's `&3000` (`PANEL_LOAD`), from `!BOOT` to `clear_work` | the packed picture (`PanelPack`, `PANEL`) |
+| main RAM's `&3000` (`PANEL_LOAD`), from the loader to `clear_work` | the packed picture (`PanelPack`, `PANEL`) |
 
 `src/live.6502` ASSERTs that the packed picture lies inside the cache
 `clear_work` clears, and the page it's copied through inside RasterIn.
