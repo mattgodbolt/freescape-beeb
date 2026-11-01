@@ -542,3 +542,15 @@ instead of a division. Against the model before it: 382 of 3,515,200
 pixels differ over the entrance views and walks (at most 43 in one view),
 no draw order changes; against the ZX oracle away from edges, 1,293,937 of
 1,294,548 pixels agree (1,294,087 of 1,294,706 before).
+
+## 46. The cone's lines from images (2026-11-01, autonomous; amends 33, 41 and 45)
+
+An edge with an end the projection takes gets its line through that end's
+projected image: through both images when the projection takes both, or
+toward the edge's vanishing point for a box edge, with no 32-bit normal;
+and a unit line's side crossing is exact (`clip.UNIT_SIDES`). Against the
+model before them (journal 2026-11-01): 991 of 3,515,200 pixels differ over
+the entrance views and walks (at most 43 in one view), no draw order
+changes there; 11,753 of 35,314,240 over every check view, the order
+different in 6; against the ZX oracle away from edges, 1,294,081 of
+1,294,700 pixels agree (1,293,937 of 1,294,548 before).
