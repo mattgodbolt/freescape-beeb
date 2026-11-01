@@ -86,9 +86,8 @@ ENDIF
 \   BANK_RASTER  the rasteriser's row runs, code and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
 \   the maths' tables (the logic's multiplies share their quarter squares)
-\   and the transform's f64 table (ObjTables), copied in at start from where
-\   !BOOT loaded them (HAZEL_LOAD on); then the pipeline's work (ObjWork,
-\   the camera with it)
+\   and the transform's f64 table (ObjTables), which the loader unpacks once
+\   the OS is gone; then the pipeline's work (ObjWork, the camera with it)
 \ Main RAM below &3000 (which ACCCON's X switches), read whatever X and
 \ whatever bank is paged:
 \   &0E00 on: the rasteriser's state (RasterState, on a page), this code
@@ -99,6 +98,7 @@ ENDIF
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
 \   array for array, so no copy goes between them
+\   page &0D: the start (LiveBoot), which runs once
 \ Main RAM's &3000 up to SCREEN: the front end's data, which only
 \   objects_frame and area_enter read and write: the transform's cache
 \   (ObjCache), the sort's memory (ObjMemo), the pipeline's tables
@@ -107,7 +107,7 @@ ENDIF
 \   drawn, after), and lv_enter_area before area_enter. The rest, to
 \   SCREEN, is the front end's room for more of the same. Until clear_work
 \   clears the cache at the start, the panel's packed picture is there
-\   (PanelPack, PANEL: !BOOT loads it, panel_init unpacks it).
+\   (PanelPack, PANEL: the loader puts it there, panel_init unpacks it).
 \ Shadow RAM's &3000 up to SCREEN: the logic's lists by face (LogicFaces),
 \   which only its passes read and write, so lv_pass sets ACCCON's X round
 \   each
@@ -115,6 +115,12 @@ ENDIF
 \ A routine in a bank is called with its bank paged (PAGE_IN); area_enter puts
 \ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too. The logic's entries
 \ (src/logic/call.6502) page their own banks and leave one in.
+\
+\ The disc (src/loader.6502): this build writes each part's section as a
+\ file (baron -p) and PRINTs where each goes (channel 1, below: LD_PARTS and
+\ LD_LATE); the loader's build packs them into !BOOT and DRILLER, and the
+\ loader unpacks each into its place, HAZEL's once the OS is gone, then
+\ starts this at start.
 
 BANK_DB     = 4                 ; src/logic/vars.6502's LOGIC_BANK
 BANK_DATA   = 5                 ; ... and its LOGIC_CODE_BANK
@@ -135,12 +141,11 @@ MACRO PAGE_IN bank
 ENDMACRO
 
 \ HAZEL: the maths' tables and the f64 table, then the work.
-HAZEL_LOAD  = SCREEN             ; where !BOOT loads the tables (the screen, cleared after)
-SECTION Hazel, org = &C000, load = &FFFF0000 OR HAZEL_LOAD, filename = "HAZEL"
+SECTION Hazel, org = &C000, filename = "HAZEL"
 INCLUDE "../build/maths/tables.6502"
 .hazel_tables_end
 ENDSECTION
-SECTION ObjTables, org = hazel_tables_end, load = &FFFF0000 OR (HAZEL_LOAD + hazel_tables_end - &C000), filename = "OTABLE"
+SECTION ObjTables, org = hazel_tables_end, filename = "OTABLE"
 ENDSECTION
 SECTION ObjWork, org = obj_tables_end, guard = &E000, virtual = TRUE
 ENDSECTION
@@ -151,15 +156,14 @@ ENDSECTION
 \ the sort's memory after it, likewise only objects_frame's (src/order.6502)
 SECTION ObjMemo, org = obj_cache_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
-\ then the pipeline's tables (!BOOT loads them there, in main RAM) and the
-\ area's working copy, which objects_frame reads and area_enter writes,
+\ then the pipeline's tables (the loader puts them there, in main RAM) and
+\ the area's working copy, which objects_frame reads and area_enter writes,
 \ both with X clear; the rest up to SCREEN is the front end's room for
 \ such data
-SECTION ObjConst, org = obj_memo_end, load = &FFFF0000 OR obj_memo_end, filename = "OCONST", guard = SCREEN
+SECTION ObjConst, org = obj_memo_end, filename = "OCONST", guard = SCREEN
 ENDSECTION
 SECTION ObjArea, org = obj_const_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
-ASSERT HAZEL_LOAD + (obj_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
 \ The logic, in this build's map: its variables after area_enter's code,
 \ its keys' bitmap this file's, its quarter squares the maths' in HAZEL,
@@ -168,6 +172,9 @@ ASSERT HAZEL_LOAD + (obj_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 LOGIC_WORK_ORG    = area_code_end
 LOGIC_WORK_GUARD  = &3000
 LOGIC_SQUARES     = sq_lo
+\ The fill's quarter squares the same (src/raster.6502's RASTER_SQUARES):
+\ HAZEL is paged whenever it runs.
+RASTER_SQUARES    = sq_lo
 IF LIVE_LOGIC
     LOGIC_KEYS        = lv_lkeys
     LOGIC_HOOK_WAIT   = lv_hook_wait
@@ -213,7 +220,7 @@ INCLUDE "../build/live/data.6502"
 RASTER_STATE_ORG = &0E00
 SECTION RasterState, org = RASTER_STATE_ORG, guard = &3000, virtual = TRUE
 ENDSECTION
-SECTION AreaCode, org = live_end, load = &FFFF0000 OR live_end, filename = "LAREA", guard = &3000, cmos = TRUE
+SECTION AreaCode, org = live_end, filename = "LAREA", guard = &3000, cmos = TRUE
 ENDSECTION
 \ (LogicWork after it: src/logic/vars.6502, LOGIC_WORK_ORG above)
 \ ObjMore: the front end's code outside its bank, and its room, the rest of
@@ -222,7 +229,7 @@ ENDSECTION
 \ patches itself so lives in RAM, then the 2D clip's (src/clip.6502). The
 \ maths' code starts on a page, as in its own check (tools/mathscheck.6502),
 \ so its branches take the cycles that check counts.
-SECTION ObjMore, org = logic_work_end, load = &FFFF0000 OR logic_work_end, filename = "OMORE", guard = &3000, cmos = TRUE
+SECTION ObjMore, org = logic_work_end, filename = "OMORE", guard = &3000, cmos = TRUE
 ALIGN 256
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
@@ -249,13 +256,21 @@ RASTER_IN_HEAD = 11                     ; rs_nfaces .. rs_overflow
 RASTER_IN_ORG = RASTER_IN_END - 5 * 256 - 3 * RS_FACES - RASTER_IN_HEAD
 SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
+\ Page &0D: the start, which runs once (LiveBoot: start, before live_loop,
+\ with lv_start and clock_init). The
+\ DFS's NMI code is there until the loader's last read, and nothing after;
+\ a soft BREAK reads the Master's extended vectors from &0D9F, so the start
+\ stays below. The loader puts it in once the OS is gone (LIVE_LATE).
+LIVE_BOOT_ORG = RASTER_IN_END
+SECTION LiveBoot, org = LIVE_BOOT_ORG, guard = &0D9F, filename = "LBOOT", cmos = TRUE
+ENDSECTION
 SECTION ObjOut, org = rs_fn - 2, guard = rs_pat, virtual = TRUE
 ENDSECTION
-\ The panel's packed picture, loaded by !BOOT into the transform's cache,
-\ which nothing uses until clear_work clears it after panel_init; and the
-\ page panel_init copies the picture through, RasterIn's, likewise.
+\ The panel's packed picture, which the loader puts in the transform's
+\ cache, which nothing uses until clear_work clears it after panel_init;
+\ and the page panel_init copies the picture through, RasterIn's, likewise.
 PANEL_LOAD = OBJ_CACHE_ORG
-SECTION PanelPack, org = PANEL_LOAD, load = &FFFF0000 OR PANEL_LOAD, filename = "PANEL", guard = SCREEN
+SECTION PanelPack, org = PANEL_LOAD, filename = "PANEL", guard = SCREEN
 ENDSECTION
 PANEL_BOUNCE = RASTER_IN_ORG
 
@@ -282,33 +297,9 @@ ASSERT rs_fn - rs_nfaces = RASTER_IN_HEAD
 LIVE_PATTERNS = 16
 ASSERT LIVE_PATTERNS <= RS_PATTERNS
 
-\ !BOOT: the banks (*SRLOAD's Q loads through user memory, a whole file at
-\ once, which is free until LIVE loads), then main RAM's and HAZEL's files.
-\ LGLUE goes into the gap in LOGIC, so after it.
-SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
-    EQUS "*| FREESCAPE for the BBC Master: Driller, live ", build_stamp, 13
-    EQUS "*SRLOAD LOGIC 8000 ", AS_STRING(BANK_DB), " Q", 13
-    EQUS "*SRLOAD LGLUE ", ~logic_db_code_end, " ", AS_STRING(BANK_DB), " Q", 13
-    EQUS "*SRLOAD LOGICC 8000 ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD LDATA ", ~logic_code_end, " ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD PDATA ", ~live_data_end, " ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD ACONV ", ~panel_data_end, " ", AS_STRING(BANK_DATA), " Q", 13
-    EQUS "*SRLOAD OCODE ", ~OBJ_CODE_ORG, " ", AS_STRING(BANK_OBJ), " Q", 13
-    EQUS "*SRLOAD RRUNS 8000 ", AS_STRING(BANK_RASTER), " Q", 13
-    EQUS "*SRLOAD RCODE ", ~raster_runs_end, " ", AS_STRING(BANK_RASTER), " Q", 13
-    EQUS "*LOAD HAZEL", 13
-    EQUS "*LOAD OTABLE", 13
-    EQUS "*LOAD OCONST", 13
-    EQUS "*LOAD LAREA", 13
-    EQUS "*LOAD LOGICW", 13
-    EQUS "*LOAD OMORE", 13
-    EQUS "*LOAD PANEL", 13                      ; (after the banks: *SRLOAD's Q passes through this memory)
-    EQUS "*RUN LIVE", 13
-ENDSECTION
-
 \ ---------------------------------------------------------------------------
 \ LIVE: all below &3000, after the rasteriser's state.
-SECTION Live, org = raster_state_end, load = &FFFF0000 OR raster_state_end, exec = &FFFF0000 OR start, filename = "LIVE", guard = &3000, cmos = TRUE
+SECTION Live, org = raster_state_end, filename = "LIVE", guard = &3000, cmos = TRUE
 
 \ User VIA T2, which nothing else uses: free-running down at 1MHz (clock).
 usrvia_t2cl = &FE68
@@ -353,16 +344,22 @@ MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a fr
 ASSERT PASS_FIELDS >= 2 AND PASS_FIELDS < 128   ; (lv_setup: a pass's first frame isn't its last)
 ASSERT REPEAT_FIELDS < 256
 
-\ start: the machine taken, HAZEL filled, the panel's picture unpacked
-\ into both buffers before clear_work clears where it was loaded,
-\ everything set up, then the frames, for ever.
+\ ---------------------------------------------------------------------------
+\ The start, run once, in page &0D (LiveBoot, above). An NMI comes to
+\ &0D00: none does with the disc done with, but one would find an RTI.
+SECTION LiveBoot
+    RTI
+
+\ start (the loader's LD_EXEC, with every part in place and the OS gone):
+\ the machine taken, the panel's picture unpacked into both buffers before
+\ clear_work clears where it was loaded, everything set up, then the
+\ frames, for ever.
 .start
     ZA_ENTRY
     SEI
     LDX #&FF : TXS                              ; (nothing returns to the OS)
     LDA #ACCCON_D OR ACCCON_X OR ACCCON_E : TRB acccon
     LDA #ACCCON_Y : TSB acccon                  ; HAZEL, for good
-    JSR hazel_fill
     JSR screen_init
     PAGE_IN BANK_DATA
     JSR panel_init
@@ -385,7 +382,8 @@ ENDIF
     JSR input_init
     JSR irq_install
     JSR clock_init
-    \ (on into live_loop)
+    JMP live_loop
+ENDSECTION
 
 \ live_loop: a frame at a time. The logic's pass when one is due, and the
 \ frame's camera (or the free camera's keys); then, if anything the view is
@@ -498,24 +496,6 @@ ASSERT cam_pitch = cam_x + 7 AND cam_roll = cam_x + 8 AND LV_CAM_BYTES = 9
 \ ---------------------------------------------------------------------------
 \ Setting up.
 
-\ hazel_fill: the maths' tables and the f64 table from HAZEL_LOAD into
-\ HAZEL (paged).
-.hazel_fill
-{
-    ZA_AUTO2 src, dst
-    LDA #LO(HAZEL_LOAD) : STA src : LDA #HI(HAZEL_LOAD) : STA src+1
-    LDA #LO(&C000) : STA dst : LDA #HI(&C000) : STA dst+1
-    LDX #HI(obj_tables_end - &C000 + 255)
-    LDY #0
-.copy
-    LDA (src),Y : STA (dst),Y
-    INY : BNE copy
-    INC src+1 : INC dst+1
-    DEX : BNE copy
-    RTS
-}
-ASSERT LO(hazel_tables_end) = 0
-
 \ clear_work: the object pipeline's and the rasteriser's memory zeroed, as
 \ their checks start from (the matrix and the cache know nothing yet).
 .clear_work
@@ -539,7 +519,7 @@ ASSERT LO(hazel_tables_end) = 0
     EQUW OBJ_CACHE_ORG, obj_cache_end           ; (with ACCCON's X clear)
     EQUW obj_area_start, obj_area_end           ; (likewise)
     EQUW RASTER_IN_ORG, raster_in_end
-    EQUW RASTER_STATE_ORG, raster_state_end     ; (*SRLOAD's Q passed its files through it)
+    EQUW RASTER_STATE_ORG, raster_state_end     ; (the OS's user memory before)
 REGIONS = P% - regions
 }
 
@@ -612,7 +592,9 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2
 
 \ lv_start: the game's start, as LOGICW and LOGIC load it: the logic's
-\ index, its area and camera. The clock's first minute from now.
+\ index, its area and camera. The clock's first minute from now. (Run once,
+\ with start, in page &0D.)
+SECTION LiveBoot
 .lv_start
     STZ lv_now : STZ lv_now+1                   ; (frame_init's fields)
     STZ lv_repeat : STZ lv_repeat+1
@@ -620,7 +602,8 @@ ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll
     STZ lv_xon : STZ lv_xon+1
     LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
     LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
-    \ (on into lv_requested)
+    JMP lv_requested
+ENDSECTION
 
 \ lv_requested: the logic's state set from outside (tools/livecheck.mjs
 \ writes it, then lv_request): its index made again, its area entered, and
@@ -824,11 +807,13 @@ SECTION Work
 ENDSECTION
 
 \ clock_init: T2 started, one-shot (so free-running down), its interrupt
-\ left off.
+\ left off. (Run once, with start, in page &0D.)
+SECTION LiveBoot
 .clock_init
     LDA usrvia_acr : AND #&DF : STA usrvia_acr
     LDA #&FF : STA usrvia_t2cl : STA usrvia_t2ch
     RTS
+ENDSECTION
 
 \ clock: the time now in clk_t and clk_f. Keeps X.
 .clock
@@ -1763,6 +1748,9 @@ ENDSECTION
 SECTION AreaCode
 .area_code_end
 ENDSECTION
+SECTION LiveBoot
+.live_boot_end
+ENDSECTION
 SECTION ObjConst
 .obj_const_end
 ENDSECTION
@@ -1851,8 +1839,10 @@ ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
 ASSERT LO(RASTER_STATE_ORG) = 0 AND RASTER_STATE_ORG >= &0E00
 ASSERT live_end <= area_code_end AND area_code_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
 ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
-\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's page.
+\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's
+\ page, and there the start, below the MOS's extended vectors.
 ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
+ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 \ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
 \ memory, the pipeline's tables and the area's working copy.
 ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
@@ -1861,3 +1851,40 @@ ASSERT obj_const_end <= obj_area_end AND obj_area_end <= SCREEN
 ASSERT logic_faces_end <= SCREEN AND LOGIC_FACES_ORG >= &3000
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
+
+\ The disc's parts, for the loader (src/loader.6502), which the build has
+\ this PRINT into its description: every section saved, {file, where,
+\ from, to}, where a sideways bank or -1 (main RAM, nothing paged). The
+\ loader writes LIVE_PARTS while the OS reads them, in this order (LGLUE
+\ over the gap in LOGIC), and LIVE_LATE, HAZEL's and page &0D's, once it's
+\ gone; then it starts this at start. It runs from SCREEN, which
+\ screen_init clears.
+LIVE_PARTS = {
+    {"LOGIC", BANK_DB, &8000, &C000},
+    {"LGLUE", BANK_DB, logic_db_code_end, live_glue_end},
+    {"LOGICC", BANK_DATA, &8000, logic_code_end},
+    {"LDATA", BANK_DATA, logic_code_end, live_data_end},
+    {"PDATA", BANK_DATA, live_data_end, panel_data_end},
+    {"ACONV", BANK_DATA, panel_data_end, area_conv_end},
+    {"OCODE", BANK_OBJ, OBJ_CODE_ORG, obj_code_end},
+    {"RRUNS", BANK_RASTER, &8000, raster_runs_end},
+    {"RCODE", BANK_RASTER, raster_runs_end, raster_code_end},
+    {"LIVE", -1, raster_state_end, live_end},
+    {"LAREA", -1, live_end, area_code_end},
+    {"LOGICW", -1, LOGIC_WORK, logic_work_end},
+    {"OMORE", -1, logic_work_end, obj_more_end},
+    {"PANEL", -1, PANEL_LOAD, panel_pack_end},
+    {"OCONST", -1, obj_memo_end, obj_const_end}
+}
+LIVE_LATE = {
+    {"HAZEL", -1, &C000, hazel_tables_end},
+    {"OTABLE", -1, hazel_tables_end, obj_tables_end},
+    {"LBOOT", -1, LIVE_BOOT_ORG, live_boot_end}
+}
+PRINT #1, "\ src/live.6502's parts, for src/loader.6502"
+PRINT #1, "LD_TITLE = ", CHR(34) + "FREESCAPE for the BBC Master: Driller, live " + build_stamp + CHR(34)
+PRINT #1, "LD_ORG = ", SCREEN
+PRINT #1, "LD_EXEC = ", start
+PRINT #1, "LD_KEEP_OS = FALSE"
+PRINT #1, "LD_PARTS = ", LIVE_PARTS
+PRINT #1, "LD_LATE = ", LIVE_LATE

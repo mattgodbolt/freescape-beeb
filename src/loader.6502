@@ -1,0 +1,511 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the loader: a disc's every part from one
+\ file, packed
+\
+\ A disc is two files. !BOOT is this loader, which the boot option *RUNs
+\ into screen memory (the screen clears it later); LD_FILE holds the rest:
+\ every part the disc's build assembles, packed by ZX02 (src/zx02.6502, at
+\ assembly), one stream for each place they go. The loader reads LD_FILE a
+\ track at a time by OSWORD &7F (the DFS's OSGBPB takes a revolution a
+\ sector), unpacking each stream into its place as its bytes arrive: a
+\ sideways bank paged by ROMSEL (and the OS's copy at &F4), or main RAM.
+\ The parts that can only go in once the OS is gone (HAZEL, which holds the
+\ filing system's workspace until then; page &0D, its NMI code's while it
+\ reads; ANDY, the MOS's) ride packed in !BOOT itself, and go in after the
+\ last read, with interrupts off for good; then the disc's code starts at
+\ LD_EXEC. A disc that wants the OS still there (LD_KEEP_OS) has no such
+\ parts, and starts with it running.
+\
+\ The build assembles it on its own, after the disc's own build (the first
+\ pass) has written each part as a file (baron -p) into LD_BUILD + "parts/"
+\ and PRINTed its description into LD_BUILD + "parts.6502", which this
+\ includes:
+\
+\   LD_TITLE    a line to show while it loads
+\   LD_ORG      where the loader runs: screen memory, below MODE 7's screen
+\   LD_EXEC     where the disc's code starts
+\   LD_KEEP_OS  TRUE: start it with the OS as the boot left it
+\   LD_PARTS    the parts in LD_FILE, in the order they're written: each
+\               {file, where, from, to}, where a sideways bank (ROMSEL's
+\               value) or -1 (main RAM, nothing paged)
+\   LD_LATE     the parts in !BOOT, the same; where may also be ANDY (a
+\               bank OR ROMSEL_ANDY) or HAZEL (-1, from &C000)
+\
+\ The parts going to one place (a bank; main RAM; HAZEL) are one image, from
+\ the lowest's start to the highest's end, each part over those before it
+\ and any gap zero, packed as one stream. A stream: the place (a byte:
+\ ROMSEL's value, or LD_RAM), the image's address (a word), then the ZX02
+\ stream; LD_END ends them.
+\
+\ tools/loadcheck.mjs boots the disc, runs to the loader's jump to LD_EXEC,
+\ and holds every part's place in memory to its file, byte for byte, timing
+\ the boot.
+\ ***************************************************************************
+
+INCLUDE "defs.6502"
+INCLUDE LD_BUILD + "parts.6502"
+INCLUDE "zx02.6502"
+
+\ The MOS's and the hardware's (romsel, acccon and its bits: src/defs.6502).
+osasci      = &FFE3
+osword      = &FFF1
+ROMSEL_COPY = &F4               ; the OS's copy of romsel
+ROMSEL_ANDY = &80               ; romsel's bit 7: ANDY over the bank's &8000-&8FFF
+MODE7_SCREEN = &7C00            ; the screen the boot shows, while this loads
+
+\ The disc: drive 0's, as SHIFT-BREAK boots it, ten 256-byte sectors a
+\ track (an .ssd's).
+LD_DRIVE    = 0
+LD_SECTORS  = 10
+LD_TRIES    = 4                 ; reads of a track before a disc error
+LD_FILE     = "DRILLER"
+LD_RAM      = &40               ; a stream's place: main RAM (or HAZEL), nothing paged
+LD_END      = &FF               ; ... no more streams
+LD_ERROR    = &C7               ; the MOS's "Disc error"
+
+\ Each part: {file, where, from, to}.
+FUNCTION ld_size(p) = p[3] - p[2]
+
+\ ld_place(p): the place a part goes: its where, but HAZEL (-2) apart from
+\ main RAM.
+FUNCTION ld_place(p)
+    IF p[1] < 0 AND p[2] >= &C000
+        r = -2
+    ELSE
+        r = p[1]
+    ENDIF
+= r
+
+\ ld_places(parts): each place the parts go, in the order they first come.
+FUNCTION ld_places(parts)
+    r = {}
+    FOR p = parts
+        IF FIND(r, ld_place(p), -9) == -9
+            r = CONCAT(r, ld_place(p))
+        ENDIF
+    NEXT
+= r
+
+\ ld_going(parts, i): the parts going to the i-th place, in their order.
+FUNCTION ld_going(parts, i)
+    w = ld_places(parts)[i]
+    r = {}
+    FOR p = parts
+        IF ld_place(p) == w
+            r = CONCAT(r, {p})
+        ENDIF
+    NEXT
+= r
+
+\ ld_span(parts): {from, to} of their image: from the lowest's start to the
+\ highest's end.
+FUNCTION ld_span(parts)
+    lo = &10000
+    hi = 0
+    FOR p = parts
+        lo = MIN({lo, p[2]})
+        hi = MAX({hi, p[3]})
+    NEXT
+= {lo, hi}
+
+\ ld_stream(parts, data): the stream of parts going to one place, from
+\ data, their bytes one after another: the place, the image's address,
+\ and the image packed, each part over those before it and gaps zero.
+FUNCTION ld_stream(parts, data)
+    s = ld_span(parts)
+    image = REPEATED(s[1] - s[0], 0)
+    at = 0
+    FOR p = parts
+        o = p[2] - s[0]
+        image = CONCAT(image[0..<o], data[at..<at + ld_size(p)], image[o + ld_size(p)..])
+        at = at + ld_size(p)
+    NEXT
+    ASSERT at == LEN(data), "the parts' files aren't the sizes their sections were"
+    IF parts[0][1] < 0
+        place = LD_RAM
+    ELSE
+        place = parts[0][1]
+    ENDIF
+= CONCAT(place, LO(s[0]), HI(s[0]), zx02(image))
+
+\ A section for each stream (each must hold less than baron's 64K before
+\ it's packed), LD_STREAMS of them at most, and LD_LATE_STREAMS in !BOOT.
+LD_STREAMS      = 8
+LD_LATE_STREAMS = 2
+FUNCTION ld_pack0(data) = ld_stream(ld_going(LD_PARTS, 0), data)
+FUNCTION ld_pack1(data) = ld_stream(ld_going(LD_PARTS, 1), data)
+FUNCTION ld_pack2(data) = ld_stream(ld_going(LD_PARTS, 2), data)
+FUNCTION ld_pack3(data) = ld_stream(ld_going(LD_PARTS, 3), data)
+FUNCTION ld_pack4(data) = ld_stream(ld_going(LD_PARTS, 4), data)
+FUNCTION ld_pack5(data) = ld_stream(ld_going(LD_PARTS, 5), data)
+FUNCTION ld_pack6(data) = ld_stream(ld_going(LD_PARTS, 6), data)
+FUNCTION ld_pack7(data) = ld_stream(ld_going(LD_PARTS, 7), data)
+FUNCTION ld_late0(data) = ld_stream(ld_going(LD_LATE, 0), data)
+FUNCTION ld_late1(data) = ld_stream(ld_going(LD_LATE, 1), data)
+LD_N      = LEN(ld_places(LD_PARTS))
+LD_LATE_N = LEN(ld_places(LD_LATE))
+ASSERT LD_N <= LD_STREAMS AND LD_LATE_N <= LD_LATE_STREAMS
+
+\ The loader's zero page: the user's, which the OS leaves alone.
+SECTION LoaderZP, org = &70, guard = &90, virtual = TRUE
+.ld_src     SKIP 2      ; the stream's next byte
+.ld_top     SKIP 1      ; the page after its bytes in the buffer
+.ld_track   SKIP 1      ; LD_FILE's next track to read ...
+.ld_sector  SKIP 1      ; ... and its first sector there
+.ld_left    SKIP 2      ; LD_FILE's sectors not read yet
+.ld_n       SKIP 1      ; sectors read; a catalogue entry's place
+.ld_try     SKIP 1      ; reads left before a disc error
+.ld_romsel  SKIP 1      ; ROMSEL_COPY as the boot left it
+.zx_dst     SKIP 2      ; the unpacker's: the next byte out ...
+.zx_src     SKIP 2      ; ... a match's first byte in ...
+.zx_neg     SKIP 2      ; ... the last offset, negated ...
+.zx_bitr    SKIP 1      ; ... and the bit reservoir
+ENDSECTION
+
+SECTION Loader, org = LD_ORG, load = &FFFF0000 OR LD_ORG, exec = &FFFF0000 OR ld_start, filename = "!BOOT", cmos = TRUE
+
+.ld_start
+{
+    LDA ROMSEL_COPY : STA ld_romsel
+    LDA #ACCCON_X : TRB acccon                  ; (main RAM's &3000 on, not shadow RAM's)
+    LDX #0
+.title
+    LDA ld_title,X : JSR osasci
+    INX : CMP #13 : BNE title
+    \ LD_FILE's first sector and its length in sectors, from the catalogue:
+    \ sector 0 the names (8 bytes from 8, the last the directory and the
+    \ lock), sector 1 the rest (the entries' bytes at 5; for each, the
+    \ length's low 16 bits at 4, then its bits 16-17 in bits 4-5 of 6, the
+    \ first sector's bits 8-9 in bits 0-1, its low byte at 7)
+    STZ ld_track : STZ ld_sector
+    LDA #2 : JSR ld_read
+    LDX #8
+.entry
+    CPX LD_BUF + &105 : BEQ look : BCS missing
+.look
+    STX ld_n
+    LDY #0
+.char
+    LDA LD_BUF,X
+    CPY #7 : BNE plain
+    AND #&7F                                    ; (the lock)
+.plain
+    CMP ld_name,Y : BNE next
+    INX : INY : CPY #8 : BNE char
+    LDX ld_n
+    LDA LD_BUF + &106,X : AND #&30
+    LSR A : LSR A : LSR A : LSR A : STA ld_left+1
+    LDA LD_BUF + &105,X : STA ld_left
+    LDA LD_BUF + &104,X : BEQ whole             ; (a part sector at the end)
+    INC ld_left
+    BNE whole
+    INC ld_left+1
+.whole
+    \ the first sector: track = s DIV LD_SECTORS, sector = s MOD LD_SECTORS
+    LDA LD_BUF + &106,X : AND #3 : TAY
+    LDA LD_BUF + &107,X
+.tracks
+    CPY #0 : BNE track
+    CMP #LD_SECTORS : BCC divided
+.track
+    SEC : SBC #LD_SECTORS
+    BCS borrowed
+    DEY
+.borrowed
+    INC ld_track
+    BRA tracks
+.next
+    LDA ld_n : CLC : ADC #8 : TAX
+    BCC entry
+.missing
+    BRK : EQUB LD_ERROR : EQUS LD_FILE, " not found", 0
+.divided
+    STA ld_sector
+    \ LD_FILE's streams as it's read
+    JSR ld_fill
+    JSR ld_streams
+IF LD_KEEP_OS
+    LDA ld_romsel : STA ROMSEL_COPY : STA romsel
+ELSE
+    \ the OS is done with: !BOOT's own streams (LD_LATE's)
+    SEI
+    LDA #ACCCON_Y : TSB acccon
+    LDA #LO(ld_late) : STA ld_src : LDA #HI(ld_late) : STA ld_src+1
+    LDA #HI(MODE7_SCREEN) : STA ld_top          ; (never reached: nothing more is read)
+    JSR ld_streams
+ENDIF
+.go                                             ; (tools/loadcheck.mjs: every part in place)
+    JMP LD_EXEC
+}
+
+\ ld_streams: each stream from ld_next into its place, until LD_END.
+.ld_streams
+{
+    JSR ld_next : CMP #LD_END : BEQ done
+    TAX
+    JSR ld_next : STA zx_dst
+    JSR ld_next : STA zx_dst+1
+    CPX #LD_RAM : BEQ unpaged
+    STX ROMSEL_COPY : STX romsel
+.unpaged
+    JSR zx_unpack
+    BRA ld_streams
+.done
+    RTS
+}
+
+\ LD_GET: the stream's next byte in A, reading the next sectors when the
+\ buffer's are done (ld_page). Keeps X, Y and C. ld_next: the same, called.
+MACRO LD_GET
+    LDA (ld_src)
+    INC ld_src
+    BNE got
+    JSR ld_page
+.got
+ENDMACRO
+.ld_next
+    LD_GET
+    RTS
+\ ld_page: on to the stream's next page, and if the buffer's done, its next
+\ sectors. Keeps A, X, Y and the flags.
+.ld_page
+{
+    PHP : PHA
+    INC ld_src+1
+    LDA ld_src+1 : CMP ld_top : BCC more
+    JSR ld_fill
+.more
+    PLA : PLP
+    RTS
+}
+
+\ ld_fill: LD_FILE's next sectors, to the end of their track, into LD_BUF,
+\ and the stream from its start. Keeps X and Y.
+.ld_fill
+{
+    PHX : PHY
+    LDA ld_left : ORA ld_left+1 : BNE more
+    BRK : EQUB LD_ERROR : EQUS LD_FILE, " is short", 0
+.more
+    LDA #LD_SECTORS : SEC : SBC ld_sector
+    LDX ld_left+1 : BNE fits
+    CMP ld_left : BCC fits
+    LDA ld_left
+.fits
+    STA ld_n
+    JSR ld_read
+    LDA ld_left : SEC : SBC ld_n : STA ld_left
+    LDA ld_left+1 : SBC #0 : STA ld_left+1
+    STZ ld_sector : INC ld_track
+    STZ ld_src
+    LDA #HI(LD_BUF) : STA ld_src+1
+    CLC : ADC ld_n : STA ld_top
+    PLY : PLX
+    RTS
+}
+
+\ ld_read: A sectors from ld_track's ld_sector into LD_BUF, by OSWORD &7F
+\ (the DFS's 8271 command &53, read data), tried LD_TRIES times.
+.ld_read
+{
+    ORA #&20 : STA ld_block_count               ; (256-byte sectors)
+    LDA ld_track : STA ld_block_track
+    LDA ld_sector : STA ld_block_sector
+    LDA #LD_TRIES : STA ld_try
+.again
+    LDX #LO(ld_block) : LDY #HI(ld_block) : LDA #&7F : JSR osword
+    LDA ld_block_result : BEQ done
+    DEC ld_try : BNE again
+    BRK : EQUB LD_ERROR : EQUS "Disc error", 0
+.done
+    RTS
+}
+.ld_block
+    EQUB LD_DRIVE
+    EQUD &FFFF0000 OR LD_BUF
+    EQUB 3, &53
+.ld_block_track     EQUB 0
+.ld_block_sector    EQUB 0
+.ld_block_count     EQUB 0
+.ld_block_result    EQUB 0
+
+\ zx_unpack: a ZX02 stream (LD_GET's) into zx_dst on. dmsc's zx02-optim.asm
+\ (https://github.com/dmsc/zx02, "(c) 2022 DMSC, code under MIT license";
+\ MIT License, Copyright (c) 2020 Daniel Serpell), as baron's
+\ examples/compress/dzx02.6502 has it, but for the copies: each run's bytes
+\ go out by Y, and a match's come in from a pointer made once (zx_src, from
+\ zx_neg, the offset negated), not from zx_dst again for every byte. A count
+\ or a length is 1 to 256, 0 in X meaning 256.
+.zx_unpack
+{
+    LDA #&80 : STA zx_bitr                      ; an empty reservoir: just the sentinel bit
+    LDA #&FF : STA zx_neg : STA zx_neg+1        ; the last offset starts at 1
+    LDX #0
+    \ a literal run: gamma(count), then the bytes
+.literal
+    INX
+    JSR get_elias
+    LDY #0
+.literal_byte
+    LD_GET
+    STA (zx_dst),Y
+    INY
+    DEX : BNE literal_byte
+    JSR advance
+    ASL zx_bitr
+    BCS new_offset
+    \ a repeat: gamma(length), copying from the last offset again
+    INX
+    JSR get_elias
+.copy
+    LDA zx_dst : CLC : ADC zx_neg : STA zx_src
+    LDA zx_dst+1 : ADC zx_neg+1 : STA zx_src+1
+    LDY #0
+.copy_byte
+    LDA (zx_src),Y
+    STA (zx_dst),Y
+    INY
+    DEX : BNE copy_byte
+    JSR advance
+    ASL zx_bitr
+    BCC literal
+    \ a new offset: gamma of its high part, its low 7 bits, then gamma(length - 1)
+.new_offset
+    INX
+    JSR get_elias
+    BEQ exit                                    ; (a high part of 256: the end)
+    DEX
+    TXA : LSR A : EOR #&FF : STA zx_neg+1       ; HI(-offset), = NOT HI(offset - 1)
+    LD_GET                                      ; (keeps C, the high part's bit 0)
+    ROR A
+    EOR #&FF : STA zx_neg                       ; LO(-offset)
+    LDX #1                                      ; the length, from the bit in C
+    JSR elias_skip1
+    INX
+    BRA copy
+    \ an interlaced Elias gamma code into X (and A)
+.elias_get
+    ASL zx_bitr
+    ROL A
+    TAX
+.get_elias
+    ASL zx_bitr
+    BNE elias_skip1
+    LD_GET                                      ; a new byte of bits (C set: the sentinel)
+    ROL A
+    STA zx_bitr
+.elias_skip1
+    TXA
+    BCS elias_get
+.exit
+    RTS
+    \ advance: zx_dst on by the run just written, Y bytes (0: 256)
+.advance
+    TYA : BEQ whole
+    CLC : ADC zx_dst : STA zx_dst
+    BCC advanced
+.whole
+    INC zx_dst+1
+.advanced
+    RTS
+}
+
+.ld_title   EQUS LD_TITLE, 13
+.ld_name    EQUS LD_FILE, CHR(REPEATED(7 - LEN(LD_FILE), ' ')), "$"
+
+\ !BOOT's own streams: the parts that go in once the OS is gone.
+.ld_late
+IF LD_LATE_N > 0
+    SECTION Late0, org = 0, transform = "ld_late0"
+    FOR p = ld_going(LD_LATE, 0) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_LATE_N > 1
+    SECTION Late1, org = 0, transform = "ld_late1"
+    FOR p = ld_going(LD_LATE, 1) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+    EQUB LD_END
+.ld_end
+ENDSECTION
+
+\ The buffer: a track's sectors, from a page.
+SECTION LoaderBuf, org = (ld_end + 255) AND &FF00, guard = MODE7_SCREEN, virtual = TRUE
+.LD_BUF     SKIP LD_SECTORS * 256
+ENDSECTION
+
+\ LD_FILE: the other parts' streams.
+SECTION Packed, org = 0, filename = LD_FILE
+IF LD_N > 0
+    SECTION Packed0, org = 0, transform = "ld_pack0"
+    FOR p = ld_going(LD_PARTS, 0) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 1
+    SECTION Packed1, org = 0, transform = "ld_pack1"
+    FOR p = ld_going(LD_PARTS, 1) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 2
+    SECTION Packed2, org = 0, transform = "ld_pack2"
+    FOR p = ld_going(LD_PARTS, 2) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 3
+    SECTION Packed3, org = 0, transform = "ld_pack3"
+    FOR p = ld_going(LD_PARTS, 3) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 4
+    SECTION Packed4, org = 0, transform = "ld_pack4"
+    FOR p = ld_going(LD_PARTS, 4) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 5
+    SECTION Packed5, org = 0, transform = "ld_pack5"
+    FOR p = ld_going(LD_PARTS, 5) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 6
+    SECTION Packed6, org = 0, transform = "ld_pack6"
+    FOR p = ld_going(LD_PARTS, 6) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+IF LD_N > 7
+    SECTION Packed7, org = 0, transform = "ld_pack7"
+    FOR p = ld_going(LD_PARTS, 7) : INCBIN LD_BUILD + "parts/" + p[0] : NEXT
+    ENDSECTION
+ENDIF
+    EQUB LD_END
+ENDSECTION
+
+\ Every image where it can go as it's unpacked: LD_FILE's while the OS
+\ runs, in a sideways bank or main RAM from &0E00 (page &0D is the DFS's
+\ while it reads), never over the loader or its buffer; !BOOT's anywhere
+\ but the loader. ANDY and HAZEL are the OS's until it's gone.
+ASSERT LO(LD_BUF) = 0 AND LEN(LD_FILE) <= 7 AND LEN(LD_TITLE) < 255
+ASSERT LD_ORG >= &0E00 AND LD_BUF + LD_SECTORS * 256 <= MODE7_SCREEN
+FUNCTION ld_clear(s) = s[1] <= LD_ORG OR s[0] >= LD_BUF + LD_SECTORS * 256
+FOR p = CONCAT(LD_PARTS, LD_LATE)
+    ASSERT ld_size(p) > 0, p[0], " is empty or ends before it starts"
+NEXT
+FOR i = 0..<LD_N
+    w = ld_places(LD_PARTS)[i]
+    s = ld_span(ld_going(LD_PARTS, i))
+    IF w < 0
+        ASSERT s[0] >= &0E00 AND s[1] <= &8000 AND ld_clear(s), "main RAM's image can't go there while it loads"
+    ELSE
+        ASSERT w < 16 AND s[0] >= &8000 AND s[1] <= &C000, "bank ", w, "'s image isn't the bank's"
+    ENDIF
+NEXT
+FOR i = 0..<LD_LATE_N
+    w = ld_places(LD_LATE)[i]
+    s = ld_span(ld_going(LD_LATE, i))
+    IF w < 0
+        ASSERT s[1] <= &E000 AND ((s[0] >= &C000) OR (s[1] <= &8000 AND ld_clear(s))), "main RAM's or HAZEL's late image can't go there"
+    ELSE
+        ASSERT (w AND NOT(ROMSEL_ANDY)) < 16 AND s[0] >= &8000 AND s[1] <= &C000, "the late image ", w, " isn't a bank's"
+    ENDIF
+NEXT
+ASSERT NOT(LD_KEEP_OS) OR LEN(LD_LATE) = 0
+ASSERT LD_END <> LD_RAM AND LD_RAM >= 16 AND LD_RAM < ROMSEL_ANDY

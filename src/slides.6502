@@ -9,9 +9,11 @@
 \ with their patterns. The stages before the rasteriser aren't in 6502 yet,
 \ so their output comes off the disc.
 \
-\ !BOOT loads the rasteriser into sideways RAM bank BANK_RASTER and the
-\ views into the banks after it (*SRLOAD), then runs SLIDES, which reads
-\ the MOS's font, owns the machine from then on as FS does (src/main.6502),
+\ The loader (src/loader.6502: !BOOT, from one packed file, DRILLER) puts
+\ the rasteriser into sideways RAM bank BANK_RASTER, the views into the
+\ banks after it, and SLIDES at &0E00 (SLIDE_PARTS, below), and starts
+\ SLIDES with the OS still there. It reads the MOS's font, owns the
+\ machine from then on as FS does (src/main.6502),
 \ and draws a view every frame: the view's inputs copied into RasterIn when
 \ it comes up (slide_load), then frame_begin, raster_frame, frame_end, for
 \ as long as it's held, so the frames a second shown are the rasteriser's
@@ -52,18 +54,6 @@ FOR i = 0..<LEN(SLIDE_BANKS)
     ASSERT SLIDE_BANKS[i] <> BANK_RASTER
 NEXT
 
-\ (*SRLOAD's Q loads through user memory, a whole file at once, which is
-\ free until SLIDES loads; without it a bank takes many seconds.)
-SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
-    EQUS "*| FREESCAPE for the BBC Master: Driller's views ", build_stamp, 13
-    EQUS "*SRLOAD RRUNS ", ~raster_runs_org, " ", AS_STRING(BANK_RASTER), " Q", 13
-    EQUS "*SRLOAD RCODE ", ~raster_code_org, " ", AS_STRING(BANK_RASTER), " Q", 13
-    FOR i = 0..<LEN(SLIDE_BANKS)
-        EQUS "*SRLOAD S", AS_STRING(SLIDE_BANKS[i]), " ", ~SLIDE_BANK_ORG, " ", AS_STRING(SLIDE_BANKS[i]), " Q", 13
-    NEXT
-    EQUS "*RUN SLIDES", 13
-ENDSECTION
-
 \ The rasteriser's sections, one after another in bank BANK_RASTER; its
 \ inputs (RasterIn) in main RAM, after SLIDES.
 raster_runs_org = &8000
@@ -83,7 +73,7 @@ ENDSECTION
 
 \ SLIDES: the slideshow, all below &3000, which ACCCON's X moves to shadow
 \ RAM.
-SECTION Slides, org = &0E00, load = &FFFF0E00, exec = &FFFF0000 OR start, filename = "SLIDES", guard = &3000, cmos = TRUE
+SECTION Slides, org = &0E00, filename = "SLIDES", guard = &3000, cmos = TRUE
 
 \ The text's lines: {character row, logical colour}, below the view.
 TL_NAME     = 0             ; the record's lines (SLIDE_TEXT_LINES): the name, ...
@@ -502,3 +492,49 @@ ASSERT raster_state_end <= &C000
 SECTION TextRAM
 .text_ram_end
 ENDSECTION
+
+\ The disc's parts, for the loader (src/loader.6502), which the build has
+\ this PRINT into its description: every section saved, {file, where, from,
+\ to}, where a sideways bank or -1 (main RAM). The loader writes them while
+\ the OS reads them, and starts SLIDES at start with the OS still there
+\ (text_init reads its font). The views' banks are tools/mkslides.py's
+\ (its --banks, 5, 6 and 7), each a section Slides<bank> to its end.
+IF FIND(SLIDE_BANKS, 5, -1) >= 0
+    SECTION Slides5
+    .slides5_end
+    ENDSECTION
+    SLIDE_PARTS5 = {{"S5", 5, SLIDE_BANK_ORG, slides5_end}}
+ELSE
+    SLIDE_PARTS5 = {}
+ENDIF
+IF FIND(SLIDE_BANKS, 6, -1) >= 0
+    SECTION Slides6
+    .slides6_end
+    ENDSECTION
+    SLIDE_PARTS6 = {{"S6", 6, SLIDE_BANK_ORG, slides6_end}}
+ELSE
+    SLIDE_PARTS6 = {}
+ENDIF
+IF FIND(SLIDE_BANKS, 7, -1) >= 0
+    SECTION Slides7
+    .slides7_end
+    ENDSECTION
+    SLIDE_PARTS7 = {{"S7", 7, SLIDE_BANK_ORG, slides7_end}}
+ELSE
+    SLIDE_PARTS7 = {}
+ENDIF
+FOR b = SLIDE_BANKS
+    ASSERT b >= 5 AND b <= 7, "a views' bank this file doesn't name a part for"
+NEXT
+SLIDE_RASTER = {
+    {"RRUNS", BANK_RASTER, raster_runs_org, raster_runs_end},
+    {"RCODE", BANK_RASTER, raster_code_org, raster_code_end}
+}
+SLIDE_PARTS = CONCAT(SLIDE_RASTER, SLIDE_PARTS5, SLIDE_PARTS6, SLIDE_PARTS7, {{"SLIDES", -1, &0E00, slides_end}})
+PRINT #1, "\ src/slides.6502's parts, for src/loader.6502"
+PRINT #1, "LD_TITLE = ", CHR(34) + "FREESCAPE for the BBC Master: Driller's views " + build_stamp + CHR(34)
+PRINT #1, "LD_ORG = ", SCREEN
+PRINT #1, "LD_EXEC = ", start
+PRINT #1, "LD_KEEP_OS = TRUE"
+PRINT #1, "LD_PARTS = ", SLIDE_PARTS
+PRINT #1, "LD_LATE = {}"

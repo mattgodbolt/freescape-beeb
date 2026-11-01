@@ -31,6 +31,12 @@
 \                   selects, with HAZEL paged if the sections are there
 \ Each clobbers A, X and Y, and writes nothing but its own sections, its
 \ zero page and the view. docs/research/raster.md has the design.
+\
+\ The includer may name RASTER_SQUARES: a table of n^2 DIV 4 already in
+\ memory whenever the rasteriser runs (low bytes for n = 0..510 at least,
+\ from a page; the high bytes 512 on), to read instead of building its own
+\ (rq_lo, rq_hi) in RasterWork. The live disc names the maths' (sq_lo, in
+\ HAZEL), and checks it's the same table.
 \ ***************************************************************************
 
 RS_FACES    = 128                   ; faces in one frame, at most
@@ -108,10 +114,16 @@ SECTION RasterWork
 .vk         SKIP RS_VERTICES        ; each vertex's line (raster_face)
 .k8         SKIP 256                ; n's bit length (raster_init)
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
+IF NOT(DEFINED(RASTER_SQUARES))
 .rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
 .rq_hi      SKIP 512
+ENDIF
 .pools      SKIP 4 * 4 * POOL_FIELD
 ENDSECTION
+IF DEFINED(RASTER_SQUARES)
+    rq_lo = RASTER_SQUARES
+    rq_hi = RASTER_SQUARES + 512
+ENDIF
 
 \ What lasts from frame to frame: each screen's lines' backgrounds
 \ (raster_background).
@@ -165,7 +177,9 @@ SECTION RasterCode
 .raster_init
 {
     ZA_ENTRY
+IF NOT(DEFINED(RASTER_SQUARES))
     ZA_AUTO2 i_q
+ENDIF
     LDX #0
 .shift
     TXA : CLC : ADC #SUB DIV 2 - 1 : ROR A : LSR A : LSR A : LSR A : STA line7,X
@@ -185,6 +199,7 @@ SECTION RasterCode
 .normed
     STA nrm,X
     INX : BNE shift
+IF NOT(DEFINED(RASTER_SQUARES))
     \ rq: q(n) = n^2 DIV 4, from q(n + 1) = q(n) + (n + 1) DIV 2
     STZ i_q : STZ i_q+1
     LDX #0
@@ -208,6 +223,7 @@ SECTION RasterCode
     TXA : SEC : ROR A                   ; (256 + n + 1) DIV 2
     BRA q_high
 .q_done
+ENDIF
     STZ hz_sky
     JSR raster_forget
     JMP writer_init
