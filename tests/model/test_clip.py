@@ -204,9 +204,13 @@ class Cone(unittest.TestCase):
             self.assertEqual(clip.drawable(cone), clip.drawable(flat))
             if not cone or not flat:
                 continue
-            # every vertex of each near some vertex of the other
+            # every vertex of each near some vertex of the other (with the
+            # cone's side crossings by the reciprocal, side_d, each within
+            # about 2^-8 of its distance along the side more, as the 2D
+            # clip's crossings are of theirs, the other way at worst)
+            limit = 12 + 2 * ((clip.WIDTH >> 8) + 1) if clip.SIDE_RECIP else 12
             for p in cone:
-                self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in flat), 12)
+                self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in flat), limit)
             checked += 1
         self.assertGreater(checked, 100)
 
@@ -235,10 +239,18 @@ class Cone(unittest.TestCase):
 
     def test_side_crossing(self):
         """A line's crossing with a side is its exact crossing rounded half
-        up from the corner inside it, whichever way the line faces."""
+        up from the corner inside it (with SIDE_RECIP, within the
+        reciprocal's error of it, about 2^-7 of the distance from that
+        corner), whichever way the line faces."""
         from fractions import Fraction
         rng = random.Random(61)
         checked = 0
+
+        def tolerance(dist):
+            if not clip.SIDE_RECIP:
+                return Fraction(1, 2)
+            return Fraction(1, 2) + Fraction(1, 8) + abs(dist) / 128
+
         for _ in range(3000):
             line = (rng.randint(-1 << 14, 1 << 14), rng.randint(-1 << 13, 1 << 13),
                     rng.randint(-1 << 25, 1 << 25))
@@ -250,15 +262,35 @@ class Cone(unittest.TestCase):
                 axis = 0 if k in (0, 2) else 1
                 a, b, c = line
                 exact = (-(b * p[1] + c) / Fraction(a)) if axis == 0 else (-(a * p[0] + c) / Fraction(b))
-                self.assertLessEqual(abs(p[axis] - exact), Fraction(1, 2))
+                inside = c0 if clip.line_f(line, c0) >= 0 else c1
+                outside = c1 if inside is c0 else c0
+                self.assertLessEqual(abs(p[axis] - exact), tolerance(exact - inside[axis]))
                 self.assertTrue(0 <= p[0] <= clip.WIDTH and 0 <= p[1] <= clip.HEIGHT)
                 self.assertEqual(p[1 - axis], c0[1 - axis])
-                # the line facing the other way crosses at the same point, but
-                # for a tie, from the other corner
+                # the line facing the other way crosses at the same point (from
+                # the other corner): within both ways' errors
                 q = clip.side_crossing(tuple(-v for v in line), k)
-                self.assertLessEqual(abs(p[axis] - q[axis]), 1)
+                self.assertLessEqual(abs(p[axis] - q[axis]),
+                                     max(1, tolerance(exact - inside[axis]) + tolerance(exact - outside[axis])))
                 checked += 1
         self.assertGreater(checked, 1000)
+
+    def test_side_d(self):
+        """side_d's reciprocal is within about 2^-7 of f / a, and never past
+        the side, for every a's bit length and f up to a WIDTH."""
+        from fractions import Fraction
+        rng = random.Random(71)
+        for bits in range(1, 16):
+            for _ in range(300):
+                a = rng.randint(1 << (bits - 1), (1 << bits) - 1)
+                f = rng.randint(0, a * clip.WIDTH - 1)
+                d = clip.side_d(f, a)
+                exact = Fraction(f, a)
+                self.assertTrue(0 <= d <= clip.WIDTH)
+                if clip.SIDE_RECIP:
+                    self.assertLessEqual(abs(d - exact), Fraction(5, 8) + exact / 128)
+                else:
+                    self.assertLessEqual(abs(d - exact), Fraction(1, 2))
 
     def test_behind_edges_redundant(self):
         """An edge with both ends behind the eye takes nothing off the

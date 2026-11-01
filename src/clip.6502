@@ -125,6 +125,8 @@ SECTION ObjWork
 .pb_lb      SKIP NP2
 .ln_v0      SKIP NLINES             ; a kept line's edge: its vertices
 .ln_v1      SKIP NLINES
+.ln_scl     SKIP NLINES             ; ... and a line square to two sides: its
+.ln_sch     SKIP NLINES             ; crossing with them (side_cut), or ln_sch &FF
 .cp_src     SKIP 1                  ; the cone's polygon: at pa (0) or pb (NP2)
 ENDSECTION
 ASSERT pb_xl = pa_xl + NP2 AND pb_xh = pa_xh + NP2 AND pb_yl = pa_yl + NP2 AND pb_yh = pa_yh + NP2
@@ -843,13 +845,14 @@ ENDMACRO
 \ drawable: C set if the polygon staged in out_v (p_n vertices from out_vn,
 \ its repeats dropped, inside the view) is drawn (the model's drawable):
 \ three or more vertices, one off the line through the first two. dx ey =
-\ dy ex is decided by the products' signs and zeros where it can be, then
-\ by the sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger,
-\ and the other way about), else by the products.
+\ dy ex is decided by the products' zeros and signs where it can be (from
+\ the differences' high bytes, before any size is taken), then by the
+\ sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger, and the
+\ other way about), else by the products.
 .drawable
 {
     ZA_AUTO2 dx, dy, ex, ey
-    ZA_AUTO1 i, sa, sb, s, s1, end
+    ZA_AUTO1 i, s1, end, dxz, dyz, sized, sxy
     LDA p_n : CMP #3 : BCS enough
     RTS                             ; (C clear)
 .enough
@@ -857,21 +860,48 @@ ENDMACRO
     LDY out_vn : LDX out_vn : INX
     DIFF2D dx, out_vxl, out_vxh
     DIFF2D dy, out_vyl, out_vyh
-    ABS16 dx : STA sa               ; (dx, dy kept as sizes, their signs here)
-    ABS16 dy : STA sb
-    ORDER16 dx, dy : STA s1
+    \ dxz, dyz: non-zero if dx, dy are zero; sxy: their signs EORed (bit 7)
+    LDA dx : ORA dx+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dxz
+    LDA dy : ORA dy+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dyz
+    LDA dx+1 : EOR dy+1 : STA sxy
+    STZ sized
     LDA out_vn : CLC : ADC #2 : STA i
 .vertex
     LDX i : LDY out_vn
     DIFF2D ex, out_vxl, out_vxh
     DIFF2D ey, out_vyl, out_vyh
-    ABS16 ey : PSIGN sa : STA s     ; dx ey's sign
-    ABS16 ex : PSIGN sb             ; dy ex's
-    CMP s : BNE off_line            ; (their signs or zeros differ)
-    CMP #0 : BEQ next               ; (both zero: on the line)
+    \ dx ey zero? then dy ex must be too, else it's off the line
+    LDA dxz : BNE e1_zero
+    LDA ey : ORA ey+1 : BEQ e1_zero
+    \ dx ey not zero: dy ex must be, with the same sign, for it to be on the line
+    LDA dyz : BNE off_line
+    LDA ex : ORA ex+1 : BEQ off_line
+    LDA ey+1 : EOR ex+1 : EOR sxy : BMI off_line
+    JMP sizes                       ; (the same sign)
+.e1_zero
+    LDA dyz : BNE next
+    LDA ex : ORA ex+1 : BNE off_line
+.next
+    INC i : LDA i : CMP end : BEQ on_line
+    JMP vertex
+.on_line
+    CLC
+    RTS
+.off_line
+    SEC
+    RTS
+.sizes
     \ the same sign: the sizes decide, by their order if it can
+    LDA sized : BNE have_sizes
+    INC sized
+    ABS16 dx
+    ABS16 dy
+    ORDER16 dx, dy : STA s1
+.have_sizes
+    ABS16 ex
+    ABS16 ey
     LDA s1 : BEQ products
-    ORDER16 ey, ex : CMP s1 : BEQ off_line
+    ORDER16 ey, ex : CMP s1 : BEQ off
 .products
     LDA dx : STA umul16.ma
     LDA dx+1 : STA umul16.ma+1
@@ -890,20 +920,15 @@ ENDMACRO
     PLA : CMP umul16.mp+3 : BNE pop3
     PLA : CMP umul16.mp+2 : BNE pop2
     PLA : CMP umul16.mp+1 : BNE pop1
-    PLA : CMP umul16.mp : BNE off_line
-.next
-    INC i : LDA i : CMP end : BEQ on_line
-    JMP vertex
-.on_line
-    CLC
-    RTS
+    PLA : CMP umul16.mp : BNE off
+    JMP next
 .pop3
     PLA
 .pop2
     PLA
 .pop1
     PLA
-.off_line
+.off
     SEC
     RTS
 }
@@ -1094,7 +1119,6 @@ ASSERT VMAX + 5 <= VALL                 ; (a new vertex a plane at most)
 .project
     LDA #&FF : STA vs_last
     LDX fp_idx : JSR vertex_shared
-    STX vs_last
     LDA n : CMP #2 : BNE projected
     LDX fp_idx+1 : JSR vertex_shared
 .projected
@@ -1327,6 +1351,145 @@ ZA_AUTO 12, en_n                        ; N: Nx, Ny, Nz, 32-bit signed
 ZA_AUTO 4, en_p                         ; a term
 ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
 
+\ en_store: en_n's component at X (0, 4, 8) = en_p, or less it if A's bit
+\ 7 is set. Clobbers A.
+.en_store
+{
+    ASL A : BCS less
+    LDA en_p : STA en_n,X : ZA_INDEXEDBY 0,4,8
+    LDA en_p+1 : STA en_n+1,X : ZA_INDEXEDBY 0,4,8
+    LDA en_p+2 : STA en_n+2,X : ZA_INDEXEDBY 0,4,8
+    LDA en_p+3 : STA en_n+3,X : ZA_INDEXEDBY 0,4,8
+    RTS
+.less
+    LDA #0 : SBC en_p : STA en_n,X : ZA_INDEXEDBY 0,4,8      ; (C set)
+    LDA #0 : SBC en_p+1 : STA en_n+1,X : ZA_INDEXEDBY 0,4,8
+    LDA #0 : SBC en_p+2 : STA en_n+2,X : ZA_INDEXEDBY 0,4,8
+    LDA #0 : SBC en_p+3 : STA en_n+3,X : ZA_INDEXEDBY 0,4,8
+    RTS
+}
+
+\ en_term: en_n's component at X (0, 8) = c times the coordinate at vx0 + Y
+\ (24-bit signed), c = A, a signed byte within -64..64, negated if en_fl's
+\ bit 7 is set. Clobbers A, X.
+.en_term
+{
+    STX en_k
+    TAX : BEQ zero
+    EOR en_fl : STA en_sg               ; (the term's sign)
+    TXA : BPL positive
+    EOR #&FF : INC A
+.positive
+    CMP #64 : BEQ by64
+    STA en_ca
+    QS_SET
+    JSR en_mul
+    BRA store
+.by64
+    JSR en_shl6
+.store
+    LDX en_k
+    LDA en_sg
+    JMP en_store
+.zero
+    LDX en_k
+    STZ en_n,X : ZA_INDEXEDBY 0,8
+    STZ en_n+1,X : ZA_INDEXEDBY 0,8
+    STZ en_n+2,X : ZA_INDEXEDBY 0,8
+    STZ en_n+3,X : ZA_INDEXEDBY 0,8
+    RTS
+}
+ZA_AUTO1 en_fl, en_sg, en_k
+
+\ en_cell: en_d = 64 times the cell A (its high byte; the caller takes the
+\ camera's coordinate off). Clobbers A.
+.en_cell
+    STA en_d
+    LSR A : LSR A : STA en_d+1
+    LDA en_d : LSR A : ROR A : ROR A : AND #&C0 : STA en_d
+    RTS
+ZA_AUTO 2, en_d                         ; a world offset, 16-bit signed
+
+\ en_dmul: en_p = mat_d times en_d, mat_d's bytes in the quarter squares'
+\ instructions (en_dset, as the matrix is built): the products of en_d's
+\ raw bytes, and mat_d off the top two bytes for a negative en_d (whose high
+\ byte reads 256 more). Clobbers A, X.
+.en_dmul
+{
+    LDA mat_d : BNE bytes
+    \ mat_d = 4096 (the yaw a multiple of 90 degrees): a shift
+    LDA mat_d+1 : CMP #&10 : BNE bytes
+    STZ en_p
+    LDA en_d : ASL A : ASL A : ASL A : ASL A : STA en_p+1
+    LDA en_d+1 : ASL A : ASL A : ASL A : ASL A : STA en_p+2
+    LDA en_d : LSR A : LSR A : LSR A : LSR A : ORA en_p+2 : STA en_p+2
+    LDA en_d+1
+    FOR k = 1..4
+        CMP #&80 : ROR A
+    NEXT
+    STA en_p+3
+    RTS
+.bytes
+    LDX en_d
+    SEC
+.a1 LDA sq_lo,X
+.a2 SBC ng_lo,X
+    STA en_p
+.a3 LDA sq_hi,X
+.a4 SBC ng_hi,X
+    STA en_p+1                          ; lo d0
+    SEC
+.b1 LDA sq_lo,X
+.b2 SBC ng_lo,X
+    TAY
+.b3 LDA sq_hi,X
+.b4 SBC ng_hi,X
+    STA en_p+2                          ; lo d1 (under 2^14)
+    TYA : CLC : ADC en_p+1 : STA en_p+1
+    BCC c1
+    INC en_p+2
+.c1
+    LDX en_d+1
+    SEC
+.c1l LDA sq_lo,X
+.c2l SBC ng_lo,X
+    TAY
+.c3l LDA sq_hi,X
+.c4l SBC ng_hi,X
+    STA en_p+3                          ; hi d0, at byte 1
+    TYA : CLC : ADC en_p+1 : STA en_p+1
+    LDA en_p+3 : ADC en_p+2 : STA en_p+2
+    LDA #0 : ROL A : STA en_p+3
+    SEC
+.d1 LDA sq_lo,X
+.d2 SBC ng_lo,X
+    TAY
+.d3 LDA sq_hi,X
+.d4 SBC ng_hi,X
+    TAX                                 ; hi d1, at byte 2
+    TYA : CLC : ADC en_p+2 : STA en_p+2
+    TXA : ADC en_p+3 : STA en_p+3
+    LDA en_d+1 : BPL done
+    LDA en_p+2 : SEC : SBC mat_d : STA en_p+2
+    LDA en_p+3 : SBC mat_d+1 : STA en_p+3
+.done
+    RTS
+}
+
+\ en_dset: mat_d's bytes into en_dmul's instructions (matrix_build).
+.en_dset
+{
+    LDA mat_d
+    STA en_dmul.a1+1 : STA en_dmul.a3+1 : STA en_dmul.c1l+1 : STA en_dmul.c3l+1
+    EOR #&FF
+    STA en_dmul.a2+1 : STA en_dmul.a4+1 : STA en_dmul.c2l+1 : STA en_dmul.c4l+1
+    LDA mat_d+1
+    STA en_dmul.b1+1 : STA en_dmul.b3+1 : STA en_dmul.d1+1 : STA en_dmul.d3+1
+    EOR #&FF
+    STA en_dmul.b2+1 : STA en_dmul.b4+1 : STA en_dmul.d2+1 : STA en_dmul.d4+1
+    RTS
+}
+
 \ edge_normal: en_n (Nx, Ny, Nz, 32-bit each) = the plane through the eye
 \ and the edge from vertex X to vertex Y of the object being drawn: the
 \ model's edge_normal_axis for a box's edge, along a world axis (sign
@@ -1336,11 +1499,12 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
 \ A box's: each non-zero entry c of the column (negated going down the
 \ axis) gives two terms of N = A x col: entry r adds A's (r + 2) MOD 3
 \ times c to N's (r + 1) MOD 3, and takes A's (r + 1) MOD 3 times c from
-\ N's (r + 2) MOD 3. A product by 64 is a shift (a level camera's column
-\ for y is (0, 64, 0)); any other's, three byte products.
+\ N's (r + 2) MOD 3. A product by 64 is a shift; any other's, three byte
+\ products. Under a level camera (mat_tilt 0), the same N by the cofactors
+\ (level, below), with fewer products.
 .edge_normal
 {
-    ZA_AUTO1 vi, vk, axis, down, r
+    ZA_AUTO1 vi, vk, axis, down, r, bits
     STX vi : STY vk
     LDX of_slot
     LDA ob_flags,X : AND #K_MASK
@@ -1349,7 +1513,8 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
     JMP generic
 .cuboid
     \ vertex i's bit k is the high side on axis k
-    LDA vi : EOR vk
+    LDA vi : STA bits
+    EOR vk
     LDX #0
 .which
     LSR A : BCS found
@@ -1362,6 +1527,8 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
     \ vertex (du, dv) = 0 (0, 0), 1 (1, 0), 2 (1, 1), 3 (0, 1): an edge with
     \ ends differing by 1 runs along u, by 3 along v
     LDY ob_aux,X
+    TYA : ASL A : ASL A : ORA vi : TAX
+    LDA rect_bits,X : STA bits
     LDA vi : EOR vk : CMP #1 : BNE along_v
     LDA rect_u,Y : STA axis
     LDX vk : LDA rect_du,X
@@ -1372,6 +1539,9 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
 .column
     \ down = &FF going down the axis, else 0: c = (m EOR down) - down
     CMP #1 : LDA #0 : SBC #0 : STA down
+    LDA mat_tilt : BNE general
+    JMP level
+.general
     FOR k = 0..11
         STZ en_n + k
     NEXT
@@ -1413,6 +1583,56 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
     JMP entry
 .entries
     RTS
+.level
+    \ A level camera's box edge: M = [[m00, 0, m02], [0, 64, 0], [m20, 0,
+    \ m22]]. Along y, A x (0, 64, 0) = (-64 Az, 0, 64 Ax). Along x or z, A x
+    \ M e_k = cof(M) (D x e_k), D = A's world offset from the eye (A = M D),
+    \ so along x N = (m20 Ay, d dz, -m00 Ay) and along z N = (m22 Ay, -d dx,
+    \ -m02 Ay), d = mat_d, the y cofactor. All exact, as the general way's.
+    LDX axis : CPX #1 : BNE flat
+    LDA vi : CLC : ADC #2 * 3 * VALL : TAY
+    JSR en_shl6
+    LDA down : EOR #&80 : LDX #0 : JSR en_store
+    LDY vi
+    JSR en_shl6
+    LDA down : LDX #8 : JSR en_store
+    STZ en_n+4 : STZ en_n+5 : STZ en_n+6 : STZ en_n+7
+    RTS
+.flat
+    LDA down : STA en_fl
+    LDA vi : CLC : ADC #3 * VALL : STA r          ; (Ay's offset)
+    LDA mat + 6,X : LDY r : LDX #0 : JSR en_term  ; Nx: m20 (m22) Ay
+    LDA down : EOR #&80 : STA en_fl
+    LDX axis : LDA mat,X : LDY r : LDX #8 : JSR en_term   ; Nz: -m00 (-m02) Ay
+    \ Ny: d times the world offset on the other horizontal axis, z along x
+    \ and -x along z
+    LDX of_slot
+    LDA axis : BNE along_z
+    LDA bits : AND #4 : BEQ low_z
+    LDA ob_hz,X : BRA cell_z
+.low_z
+    LDA ob_lz,X
+.cell_z
+    JSR en_cell
+    LDA en_d : SEC : SBC cam_z : STA en_d
+    LDA en_d+1 : SBC cam_z+1 : STA en_d+1
+    JSR en_dmul
+    LDA down
+    BRA ny
+.along_z
+    LDA bits : AND #1 : BEQ low_x
+    LDA ob_hx,X : BRA cell_x
+.low_x
+    LDA ob_lx,X
+.cell_x
+    JSR en_cell
+    LDA en_d : SEC : SBC cam_x : STA en_d
+    LDA en_d+1 : SBC cam_x+1 : STA en_d+1
+    JSR en_dmul
+    LDA down : EOR #&80
+.ny
+    LDX #4
+    JMP en_store
 .generic
     LDX vi
     CN_COORD 0
@@ -1483,6 +1703,12 @@ ZA_AUTO1 en_c, en_ca                    ; a column entry, signed, and its size
     EQUB 0, 1, 1, 0                     ; each vertex's du
 .rect_dv
     EQUB 0, 0, 1, 1                     ; ... and dv
+.rect_bits
+    \ by 4 (the zero axis) + the vertex: its high sides, a bit an axis, as a
+    \ cuboid's vertex's index has them
+    EQUB 0, 2, 6, 4                     ; across x: u is y, v is z
+    EQUB 0, 1, 5, 4                     ; across y: x, z
+    EQUB 0, 1, 3, 2                     ; across z: x, y
 }
 ASSERT vx1 = vx0 + VALL AND vx2 = vx1 + VALL AND vy0 = vx0 + 3 * VALL
 ASSERT vy1 = vy0 + VALL AND vy2 = vy1 + VALL AND vz0 = vy0 + 3 * VALL
@@ -1617,6 +1843,7 @@ ENDMACRO
     ZA_AUTO 4, nr                       ; -R
     ZA_AUTO 4, u                        ; -R - Q, then -R + Q
     STX slot
+    LDA #&FF : STA ln_sch,X             ; (no side crossing kept)
     STZ el_or : STZ el_or+1 : STZ el_or+2 : STZ el_or+3
     EL_OR 0
     EL_OR 1
@@ -1820,9 +2047,12 @@ ASSERT LINE_BITS = 13                   ; (|N'| at most 2^13: 13 |N'| fits 24 bi
 ZA_AUTO1 ce_lo
 
 \ cone_line: line X's |A| and |B| patched into the readers, their signs in
-\ ce_as and ce_bs (bit 7). X is kept.
+\ ce_as and ce_bs (bit 7), and whether each is non-zero in ce_az and ce_bz
+\ (bit 7). X is kept.
 .cone_line
 {
+    LDA lna0,X : ORA lna1,X : CMP #1 : ROR ce_az
+    LDA lnb0,X : ORA lnb1,X : CMP #1 : ROR ce_bz
     LDA lna1,X : STA ce_as : BPL a_pos
     LDA #0 : SEC : SBC lna0,X : PHA
     LDA #0 : SBC lna1,X
@@ -1857,6 +2087,7 @@ ZA_AUTO1 ce_lo
 }
 ZA_AUTO1 ce_as
 ZA_AUTO1 ce_bs
+ZA_AUTO1 ce_az, ce_bz
 
 \ CE_TERM lo, hi, rl, rh, sign: ce_t (4 bytes) = |a| v, v = pa's coordinate
 \ (lo, hi at Y, under 2^11), |a| in the readers rl (its low byte) and rh
@@ -1934,12 +2165,17 @@ ENDMACRO
     CE_BASE 0 : JMP ce_x
 .ce_bottom
     CE_BASE 3 : JMP ce_x
+.ce_none
+    RTS
 .ce_in
     CE_BASE 0 : JSR ce_x
 .ce_y
+    BIT ce_bz : BPL ce_none             ; (B zero: nothing to add)
     CE_TERM pa_yl, pa_yh, ce_bl, ce_bh, ce_bs
+.ce_y_done
     RTS
 .ce_x
+    BIT ce_az : BPL ce_y_done
     CE_TERM pa_xl, pa_xh, ce_al, ce_ah, ce_as
     RTS
 CE_JUMPS = {ce_in, ce_left, ce_right, ce_top, ce_bottom, ce_c0, ce_c1, ce_c2, ce_c3}
@@ -2024,7 +2260,6 @@ ENDMACRO
     BIT vp_done : BNE projected
     TSB vp_done
     JSR vertex_shared
-    STX vs_last
 .projected
     LDY cp_m
     LDA #0 : STA pa_tg,Y
@@ -2280,38 +2515,44 @@ ENDMACRO
 ENDSECTION
 SECTION ObjMore
 
-\ SC_STEP: a step of side_cut's division: the next dividend bit from sc_l's
-\ top into the remainder (sc_r and A), the last quotient bit (C) into sc_l's
-\ bottom, and the divisor taken off if it goes (C set).
-MACRO SC_STEP
-    ROL sc_l : ROL sc_l+1
-    ROL sc_r : ROL A
-    CMP sc_a+1 : BCC zero : BNE one
-    LDY sc_r : CPY sc_a : BCC zero
-.one
-    TAY
-    LDA sc_r : SBC sc_a : STA sc_r      ; (C set)
-    TYA : SBC sc_a+1
-    SEC
-.zero
-ENDMACRO
-
 \ side_cut: the cone's vertex cp_m = where line cp_line crosses side
 \ Y of the rectangle (0 top, 1 right, 2 bottom, 3 left), which it cuts (the
 \ model's side_crossing): from the side's corner K inside the line (f >= 0),
-\ d = (f(K) + (a >> 1)) DIV a along it, a = |A| along the top and bottom
-\ and |B| down the sides, which is f(K) / a rounded half up; tagged with
-\ the side. f(K) < a W (the side's other corner is outside), so d has
-\ eleven bits and D >> 11 is under a: eleven steps of a long division.
+\ d = f(K) / a along it (the model's side_d), a = |A| along the top and
+\ bottom and |B| down the sides, by the 2D clip's reciprocals: a's nine
+\ bits from its top one, an = a >> s (s = bitlen(a) - 9, a shift left when
+\ it's negative), R = 256 + clip_m[an - 256], and d = ((f(K) >> (s + 4)) R
+\ + 2^12) >> 13, at most W; tagged with the side. f(K) < a W (the side's
+\ other corner is outside), so f(K) >> (s + 4) has 16 bits. A line square
+\ to the side (B zero for the top and bottom, A for the sides) crosses the
+\ opposite side at the same point, which is kept by line (ln_scl, ln_sch;
+\ edge_line marks none kept).
 .side_cut
 {
-    ZA_AUTO1 side, flip
+    ZA_AUTO1 side, flip, keep
     ZA_AUTO 4, dv
     STY side
+    STZ keep
+    LDX cp_line
+    TYA : LSR A : BCS across
+    LDA lnb0,X : ORA lnb1,X
+    BRA square
+.across
+    LDA lna0,X : ORA lna1,X
+.square
+    BNE fresh
+    LDA ln_sch,X : BMI keep_it
+    STA sc_l+1
+    LDA ln_scl,X : STA sc_l
+    JMP along
+.keep_it
+    DEC keep
+.fresh
     \ K: the side's first corner (corner Y) if f >= 0 there, else the next;
     \ the coordinate along the side is d from the side's start (top, right)
     \ or its end (bottom, left), the other way from the second corner
-    TYA : LSR A : AND #1 : STA flip     ; (sides 2 and 3: from the end)
+    LDA side : LSR A : AND #1 : STA flip     ; (sides 2 and 3: from the end)
+    LDY side
     TYA : ASL A : ASL A : ASL A : ASL A : ASL A
     ORA cp_line : TAX                   ; lfc's index for corner Y
     LDA lfc + 24,X : BPL first
@@ -2342,33 +2583,83 @@ ENDMACRO
     STA sc_a+1
     LDA lnb0,X : STA sc_a
 .got_a
-    \ D = f(K) + (a >> 1), then D << 5 as D << 8 >> 3: the remainder starts
-    \ at D >> 11 (sc_r and A), and D's low eleven bits at sc_l's top
-    LDA sc_a+1 : LSR A : TAY
-    LDA sc_a : ROR A
-    CLC : ADC dv : STA dv
-    TYA : ADC dv+1 : STA dv+1
-    BCC added
-    INC dv+2
-    BNE added
-    INC dv+3
-.added
-    STZ sc_l
+    \ k = bitlen(a) - 8 (s + 1), and an's low byte, as clip_cut's: from a's
+    \ high byte shifted down s, or its low byte shifted up 1 - k
+    LDA sc_a+1 : BEQ small
+    TAY : LDA proj_bl2,Y : LSR A : STA sc_k     ; 1 to 7
+    TAY : DEY
+    LDA sc_a+1 : STA sc_r
+    LDA sc_a
+    CPY #0 : BEQ indexed
+.right
+    LSR sc_r : ROR A
+    DEY : BNE right
+    BRA indexed
+.small
+    LDY sc_a : LDA proj_bl2,Y : LSR A
+    SEC : SBC #8 : STA sc_k             ; -7 to 0
+    EOR #&FF : TAY : INY : INY          ; 1 - k
+    LDA sc_a
+.left
+    ASL A
+    DEY : BNE left
+.indexed
+    TAY : LDA clip_m,Y
+    QS_SET                              ; (cone_qs: by M)
+    \ f(K) >> (s + 4) = f(K) >> (k + 3): a byte down when that's 8 or more
+    LDA sc_k : CLC : ADC #3 : BMI up
+    CMP #8 : BCC bits
+    SBC #8                              ; (C set)
+    LDY dv+1 : STY dv
+    LDY dv+2 : STY dv+1
+    LDY dv+3 : STY dv+2
+.bits
+    TAY : BEQ shifted
+.down
+    LSR dv+2 : ROR dv+1 : ROR dv
+    DEY : BNE down
+    BRA shifted
+.up
+    EOR #&FF : TAY : INY                ; -(k + 3), 1 to 4
+.lift
+    ASL dv : ROL dv+1
+    DEY : BNE lift
+.shifted
+    \ its product with R = 256 + M (f M, and f a byte up), plus 2^12, then
+    \ >> 13 as << 3 and two bytes down
+    LDX dv : JSR cone_qs : STA sc_l
+    LDX dv+1 : JSR cone_qs : STA sc_r
+    LDA cq_lo : CLC : ADC sc_l : STA sc_l
+    LDA sc_r : ADC #0 : STA sc_r        ; f M >> 8 (bytes 1, 2)
+    LDA sc_l : CLC : ADC dv : TAY
+    LDA sc_r : ADC dv+1 : STA sc_r
+    LDA #0 : ROL A : STA sc_l+1         ; (f R >> 8: Y, sc_r, sc_l+1)
+    TYA : CLC : ADC #&10                ; + 2^12
+    BCC rounded
+    INC sc_r
+    BNE rounded
+    INC sc_l+1
+.rounded
     FOR k = 1..3
-        LSR dv+3 : ROR dv+2 : ROR dv+1 : ROR dv : ROR sc_l
+        ASL A : ROL sc_r : ROL sc_l+1
     NEXT
-    LDA dv : STA sc_l+1
-    LDA dv+1 : STA sc_r
-    LDA dv+2
-    CLC
-    FOR k = 1..11
-        SC_STEP
-    NEXT
-    ROL sc_l : ROL sc_l+1               ; (d: eleven bits)
+    LDA sc_r : STA sc_l
+    \ at most W
+    LDA #LO(CLIP_W) : CMP sc_l
+    LDA #HI(CLIP_W) : SBC sc_l+1
+    BCS fits
+    LDA #LO(CLIP_W) : STA sc_l
+    LDA #HI(CLIP_W) : STA sc_l+1
+.fits
     \ the point: d, or W less it, along the side
-    LDA flip : BEQ along
+    LDA flip : BEQ placed
     LDA #LO(CLIP_W) : SEC : SBC sc_l : STA sc_l
     LDA #HI(CLIP_W) : SBC sc_l+1 : STA sc_l+1
+.placed
+    BIT keep : BPL along
+    LDX cp_line
+    LDA sc_l : STA ln_scl,X
+    LDA sc_l+1 : STA ln_sch,X
 .along
     LDY cp_m
     LDX side
@@ -2395,7 +2686,7 @@ ENDMACRO
     EQUB HI(0), HI(CLIP_W), HI(CLIP_H), HI(0)
 }
 ZA_AUTO2 sc_l, sc_a
-ZA_AUTO1 sc_r
+ZA_AUTO1 sc_r, sc_k
 ASSERT CLIP_W = CLIP_H AND CLIP_W < 2048    ; (d has eleven bits whichever side)
 ASSERT NLINES <= 32                         ; (lfc's index: 32 corner + slot)
 ENDSECTION
@@ -2410,23 +2701,35 @@ SECTION ObjCode
 \ 2^(n + BAND_XS) or y beyond 2^(n + BAND_YS) either way, n = bitlen(z). v
 \ is within 2^k when v + 2^k has no bit from k + 1 up: the band_* tables,
 \ indexed by 2n, have that bias and the mask of those bits for each of v's
-\ top two bytes. X is kept.
+\ top two bytes, read 32 on (2 bitlen(z's top byte) indexing them) or 16 on
+\ (2 bitlen(its middle byte)). From BAND_MID up, k is past 15 for both x and
+\ y, so the top byte alone decides. X is kept.
 MACRO BAND_TEST
-    LDY vz2,X : BMI off : BEQ near
-    LDA proj_bl2,Y : CLC : ADC #32 : TAY     ; 2n, n >= 17: k past 15 for both
-    LDA vx2,X : CLC : ADC band_xb2,Y : AND band_xm2,Y : BNE off
-    LDA vy2,X : CLC : ADC band_yb2,Y : AND band_ym2,Y : BNE off
+    LDY vz2,X : BEQ near : BMI off_top
+    LDA proj_bl2,Y : TAY                ; 2n - 32
+    LDA vx2,X : CLC : ADC band_xb2 + 32,Y : AND band_xm2 + 32,Y : BNE off_top
+    LDA vy2,X : CLC : ADC band_yb2 + 32,Y : AND band_ym2 + 32,Y : BNE off_top
     CLC
+    BRA done
+.off_top
+    SEC
     BRA done
 .near
     LDY vz1,X : BEQ off                 ; (z < 256: nearer than ZNEAR)
-    LDA proj_bl2,Y : CLC : ADC #16 : TAY
-    LDA vx1,X : CLC : ADC band_xb1,Y : STA band_t
-    LDA vx2,X : ADC band_xb2,Y : AND band_xm2,Y : BNE off
-    LDA band_t : AND band_xm1,Y : BNE off
-    LDA vy1,X : CLC : ADC band_yb1,Y : STA band_t
-    LDA vy2,X : ADC band_yb2,Y : AND band_ym2,Y : BNE off
-    LDA band_t : AND band_ym1,Y : BNE off
+    CPY #BAND_MID : BCC low
+    LDA proj_bl2,Y : TAY                ; 2n - 16
+    LDA vx2,X : CLC : ADC band_xb2 + 16,Y : AND band_xm2 + 16,Y : BNE off
+    LDA vy2,X : CLC : ADC band_yb2 + 16,Y : AND band_ym2 + 16,Y : BNE off
+    CLC
+    BRA done
+.low
+    LDA proj_bl2,Y : TAY                ; 2n - 16
+    LDA vx1,X : CLC : ADC band_xb1 + 16,Y : STA band_t
+    LDA vx2,X : ADC band_xb2 + 16,Y : AND band_xm2 + 16,Y : BNE off
+    LDA band_t : AND band_xm1 + 16,Y : BNE off
+    LDA vy1,X : CLC : ADC band_yb1 + 16,Y : STA band_t
+    LDA vy2,X : ADC band_yb2 + 16,Y : AND band_ym2 + 16,Y : BNE off
+    LDA band_t : AND band_ym1 + 16,Y : BNE off
     CLC
     BRA done
 .off
@@ -2435,6 +2738,10 @@ MACRO BAND_TEST
 ENDMACRO
 ASSERT ZNEAR = 256                      ; (BAND_TEST's: not nearer, a top byte non-zero)
 ZA_AUTO1 band_t
+\ z's middle byte from BAND_MID up (z's top byte 0): n at least 14, so k
+\ past 15 for x and y both, and the band's low bytes (biases and masks) 0
+BAND_MID = 1 << (16 - 1 - BAND_YS - 8)
+ASSERT BAND_XS >= BAND_YS AND 14 + BAND_YS >= 16
 
 \ band_test: BAND_TEST, as a routine.
 .band_test
@@ -2442,9 +2749,19 @@ ZA_AUTO1 band_t
     RTS
 
 \ vertex_shared: vertex X projected (the maths' project) into vsx and vsy,
-\ its outcode into voc: by project_y if it has the last one's x and z
-\ (vs_last; its x's outcode too), by project_z if its z, else by project.
-\ X is kept.
+\ its outcode into voc, and vs_last made X: by project_y if it has the last
+\ one's x and z (vs_last; its x's outcode too), by project_z if its z, else
+\ by project. X is kept. vertex_shared.full: by project, sharing nothing.
+\ vertex_up: for vertex X when under a level camera (mat_tilt 0) it has
+\ vertex Y's x and z, by project_y without the compares if Y was the last
+\ projected.
+.vertex_up
+    CPY vs_last : BNE vertex_shared
+    LDA mat_tilt : BNE vertex_shared
+    LDA vy0,X : STA proj_y
+    LDA vy1,X : STA proj_y+1
+    LDA vy2,X : STA proj_y+2
+    BRA vertex_shared.xz_shared
 .vertex_shared
 {
     LDY vs_last : BMI full
@@ -2457,6 +2774,7 @@ ZA_AUTO1 band_t
     LDA vx0,X : CMP vx0,Y : BNE z_shared
     LDA vx1,X : CMP vx1,Y : BNE z_shared
     LDA vx2,X : CMP vx2,Y : BNE z_shared
+.xz_shared
     PHX : JSR project_y : PLX           ; (proj_sx is the last one's, the same)
     LDA proj_sy : STA vsyl,X
     LDA proj_sy+1 : STA vsyh,X
@@ -2497,6 +2815,7 @@ ZA_AUTO1 band_t
     BCS x_done                          ; (no borrow: sx <= CLIP_W)
     LDA #OC_RIGHT
 .x_done
+    STX vs_last
     LDY proj_sy+1 : BPL y_down
     ORA #OC_TOP
     STA voc,X
@@ -2520,17 +2839,22 @@ ZA_AUTO1 band_t
 \ object's kind, which puts those likely to share x and z, or z, together.
 .vertex_pass
 {
-    ZA_AUTO1 used, mask, ord
+    ZA_AUTO1 used, mask
     LDX of_cand : LDA cd_vmask,X : STA used : STA vp_need
     STZ vp_off
     LDX #0
+    BRA band
+.unused
+    INX
 .band
-    LSR used : BCC band_next
+    LSR used : BCC unused
     BAND_TEST : BCC band_next
     LDA bit8,X : TSB vp_off
 .band_next
     INX
-    LDA used : BNE band
+    LDA used : BEQ banded
+    JMP band
+.banded
     \ the vertices to project: every one used, unless some are off the band
     LDA vp_off : BEQ needed
     STZ vp_need
@@ -2545,29 +2869,71 @@ ZA_AUTO1 band_t
     LDA mask : BNE need
 .needed
     LDA vp_need : STA vp_done           ; (the cone projects more as it needs them)
-    \ the order
-    LDX of_slot
-    LDA ob_flags,X : AND #K_MASK : TAY
-    LDA order_at,Y
-    CPY #K_RECT : BNE ordered
-    LDA ob_aux,X : ASL A : ASL A : ADC #VP_RECT     ; (C clear: ob_aux < 3)
-.ordered
-    STA ord
     LDA #&FF : STA vs_last
-.project
-    LDA vp_need : BEQ done
-    LDY ord : INC ord
-    LDX vp_order,Y
-    LDA bit8,X : TRB vp_need : BEQ project
-    JSR vertex_shared
-    STX vs_last
-    BRA project
-.done
-    RTS
-.order_at
-    EQUB VP_CUBOID, VP_RECT, VP_GENERIC, VP_GENERIC
+    \ projected in an order for the object's kind (vp_*)
+    LDX of_slot
+    LDA ob_flags,X : AND #K_MASK : BEQ cuboid
+    CMP #K_RECT : BEQ rect
+    JMP vp_generic
+.cuboid
+    JMP vp_cuboid
+.rect
+    LDY ob_aux,X : BEQ across_x
+    DEY : BEQ across_y
+    JMP vp_rect_z
+.across_x
+    JMP vp_rect_x
+.across_y
+    JMP vp_rect_y
     ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2 AND K_SENSOR = 3
 }
+
+\ VP_ONE j: vertex j projected if vp_need has it (vertex_need); VP_FIRST j,
+\ the same for an order's first (vertex_first); VP_UP j, p, for vertex j,
+\ which under a level camera has vertex p's x and z (vertex_up)
+MACRO VP_ONE j
+    LDA #1 << j : BIT vp_need : BEQ skip
+    LDX #j : JSR vertex_shared
+.skip
+ENDMACRO
+MACRO VP_FIRST j
+    LDA #1 << j : BIT vp_need : BEQ skip
+    LDX #j : JSR vertex_shared.full
+.skip
+ENDMACRO
+MACRO VP_UP j, p
+    LDA #1 << j : BIT vp_need : BEQ skip
+    LDX #j : LDY #p : JSR vertex_up
+.skip
+ENDMACRO
+
+\ The orders: a cuboid's vertex i + 2 is vertex i up its y edge, which under
+\ a level camera adds to y alone, as does a rectangle's edge along y (its u
+\ across x, its v across z). The order puts those pairs together.
+.vp_cuboid
+    VP_FIRST 0 : VP_UP 2, 0
+    VP_ONE 1 : VP_UP 3, 1
+    VP_ONE 4 : VP_UP 6, 4
+    VP_ONE 5 : VP_UP 7, 5
+    RTS
+.vp_rect_x                              ; (u, v) = (y, z)
+    VP_FIRST 0 : VP_UP 1, 0
+    VP_ONE 3 : VP_UP 2, 3
+    RTS
+.vp_rect_y                              ; (x, z)
+    VP_FIRST 0 : VP_ONE 1 : VP_ONE 2 : VP_ONE 3
+    RTS
+.vp_rect_z                              ; (x, y)
+    VP_FIRST 0 : VP_UP 3, 0
+    VP_ONE 1 : VP_UP 2, 1
+    RTS
+.vp_generic
+    VP_FIRST 0
+    FOR j = 1..7
+        VP_ONE j
+    NEXT
+    RTS
+ASSERT VMAX = 8
 
 \ ===========================================================================
 \ A face projected whole (the model's draw_faces, its every vertex
@@ -2716,18 +3082,9 @@ ZA_AUTO1 band_t
 \ The vertex pass's tables.
 .bit8
     EQUB 1 << (0..7)
-\ The vertex pass's orders: a cuboid's vertices i and i + 2 have the same x
-\ and z under a level camera; so do a rectangle's along y.
-VP_CUBOID = 0 : VP_RECT = 8 : VP_GENERIC = 20
-.vp_order
-    EQUB 0, 2, 1, 3, 4, 6, 5, 7         ; a cuboid
-    EQUB 0, 1, 3, 2                     ; a rectangle across x: (u, v) = (y, z)
-    EQUB 0, 1, 2, 3                     ; ... across y: (x, z)
-    EQUB 0, 3, 1, 2                     ; ... across z: (x, y)
-    EQUB 0, 1, 2, 3, 4, 5, 6, 7         ; anything else
-ASSERT VMAX = 8
 ASSERT CONE                             ; (the model's render.CONE: the 6502 has only it)
 ASSERT BEHIND_EDGES AND FRONT_FIRST AND SIDE_CROSSINGS AND JOINS AND RECIP_2D   ; (and these)
+ASSERT SIDE_RECIP
 \ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
 \ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
 \ bytes and the mask of the bits from k + 1 up.

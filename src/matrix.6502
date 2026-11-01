@@ -34,6 +34,8 @@ SECTION ObjWork
 .mat_angles SKIP 3                  ; the yaw, pitch and roll it was built for
 .mat_valid  SKIP 1                  ; non-zero once built
 .mat_big    SKIP 1                  ; non-zero if an entry is beyond -64..64
+.mat_tilt   SKIP 1                  ; 0 for a level camera's: y row and column (0, 64, 0); else &FF
+.mat_d      SKIP 2                  ; ... and then M's y cofactor, M00 M22 - M02 M20
 ENDSECTION
 
 M00 = mat + 0 : M01 = mat + 1 : M02 = mat + 2
@@ -157,8 +159,23 @@ ENDMACRO
     STA mat_big
 .small
     DEX : BPL big
+    \ mat_tilt: 0 if M's y row and column are (0, 64, 0), every entry within
+    \ -64..64 (a level camera: pitch and roll 0), else &FF; and then its y
+    \ cofactor, which the cone's edge planes take (src/clip.6502's en_dmul,
+    \ patched with it)
+    LDA #&FF : STA mat_tilt
+    LDA mat_big : ORA M01 : ORA M10 : ORA M12 : ORA M21 : BNE done
+    LDA M11 : CMP #64 : BNE done
+    STZ mat_tilt
+    MMUL M00, M22 : LDA mp : STA mat_d : LDA mp+1 : STA mat_d+1
+    MMUL M02, M20
+    LDA mat_d : SEC : SBC mp : STA mat_d
+    LDA mat_d+1 : SBC mp+1 : STA mat_d+1
+    JMP en_dset
+.done
     RTS
 }
+ASSERT 2 * 64 * 64 < &8000              ; (mat_d: a positive 16-bit number)
 
 ENDSECTION
 
