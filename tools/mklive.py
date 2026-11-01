@@ -9,12 +9,12 @@ the model's views of the cameras its check saw (tools/livecheck.mjs).
 The first form writes into OUTDIR:
 
     data.6502   for the assembly, included by src/live.6502, which places
-                section LiveData: each area's name (TEXT_COLS characters,
-                centred) and its patterns (sky, then colour indices 1-15,
-                four bytes each: tools/model/colours.py's, decision 8b) in
-                the database's order of areas (AREAS.json's, which
-                area_enter takes an area's index in), and each area id's
-                index in it; and, for the free camera's build, in section
+                section LiveData: each area's patterns (sky, then colour
+                indices 1-15, four bytes each: tools/model/colours.py's,
+                decision 8b) in the database's order of areas (AREAS.json's,
+                which area_enter takes an area's index in), and each area
+                id's index in it (the panel's names are tools/mkpanel.py's);
+                and, for the free camera's build, in section
                 LiveGlue, every entrance's area (its index in that order),
                 Driller's id and camera (tools/model/camera.py's
                 from_entrance), in the database's order, and the step along
@@ -46,16 +46,8 @@ sys.path.insert(0, str(ROOT))
 
 from tools.model import camera as cam, parts, render, view, writer  # noqa: E402
 
-TEXT_COLS = view.read_defs()["SCREEN_COLS"] // 4
 LIVE_STEP = 32                      # world units a frame's step: half a cell
 AREA_IDS = 128                      # the logic's area ids are below this (tools/mklogicdata.py's check)
-
-
-def centred(text):
-    text = text.strip()
-    if len(text) > TEXT_COLS:
-        raise SystemExit(f"{text!r} is wider than {TEXT_COLS} characters")
-    return text.center(TEXT_COLS)
 
 
 def equb(name, values, per=16):
@@ -93,13 +85,10 @@ def generate(db, layout, out):
         f"LIVE_AREAS = {len(areas)}",
         f"LIVE_ENTRANCES = {len(ens)}",
         f"LIVE_STEP = {LIVE_STEP}",
-        f"LIVE_TEXT_COLS = {TEXT_COLS}",
         f"LIVE_DISPLAY = \"{parts.colours.DISPLAY}\"",
         "",
         "SECTION LiveData",
     ]
-    names = "".join(centred(a["name"]) for a in areas).encode("ascii")
-    L += equb("ld_names", names)
     pats = []
     for a in areas:
         pats += list(parts.sky(a))

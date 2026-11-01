@@ -57,7 +57,8 @@ fields a demo turns on the spot and goes on after a whole turn.
 7. `frame_begin`; the crosshair this buffer had taken off (`lv_cross_off`);
    `raster_frame` with `BANK_RASTER` paged; the crosshair drawn
    (`lv_cross_on`).
-8. The figures (`live_measure`), the text as the beam allows, `frame_end`.
+8. The figures (`live_measure`), the panel as the beam allows
+   (`docs/research/panel.md`), `frame_end`.
 
 A frame that's drawn is drawn whole (decision 30), so the figures are
 always the pipeline's cost. On the free disc, `live_keys` moves the camera
@@ -81,8 +82,8 @@ ends.
   reads through `ob_ix`), and the crosshair (`CrossOn`, and `CrossX` and
   `CrossY` while it's on). Nothing else a frame reads changes but as an
   area is entered (the patterns, the working copy, `raster_forget`). The
-  text below the view is no input: it's drawn into both buffers outside
-  the frames, as before.
+  panel round the view is no input: it's drawn into both buffers outside
+  the frames.
 - **The last frame handed over is enough.** The buffer not shown may hold
   an older view: it's never shown without a frame drawn into it first, as
   only `frame_end` hands a buffer over, and each buffer's own records (the
@@ -118,8 +119,8 @@ ends.
   shown (`live_idle_measure`); a window with no frames starts again from
   each idle loop, so frames a second and fields a frame are over the
   frames drawn, not the fields nothing was drawn in.
-- **The text** needs no waiting for in the idle loop: `text_sync`, once a
-  loop, finds the beam's window.
+- **The panel** needs no waiting for in the idle loop: `panel_sync`, once
+  a loop, finds the beam's window.
 
 ### Driller's logic on the disc
 
@@ -148,8 +149,10 @@ ends.
   fields more, and frames go on being drawn. `hook_walked` (each move's
   walk, before the margin's push) and `hook_loaded` (an area's load) are
   the disc's own, for the frames between passes. The rest do nothing yet,
-  as the transcription's defaults: the sound, the panel and its key lights,
-  the crosshair's drawing (the frame draws it, below), the screen's colours,
+  as the transcription's defaults: the sound, the panel (the disc draws
+  its own from the logic's variables after each pass: `panel_values`,
+  `docs/research/panel.md`) and its key lights, the crosshair's drawing
+  (the frame draws it, below), the screen's colours,
   the FCL's `REDRAW`, the draw list, the sensors, the laser and the shot,
   the rigs, the information screen and the game's end.
 - **The clock**: a minute is `MINUTE_FIELDS` fields, as the original's
@@ -252,25 +255,19 @@ move them), so the logic's own `hook_crosshair` does nothing.
   page their own banks (`LOGIC_PAGE`, with `logic_paged`) and leave one of
   them in; the glue pages back what it needs.
 
-### The figures
+### The panel and the figures
 
-Below the view, drawn into both buffers (`src/text.6502`): frames a second
-and fields a frame from the flips and fields counted (`frames`, `fields`),
-and the mean cycles a frame of each half, in thousands; each over the
-frames since the figures were last drawn, every `FIGURE_FIELDS` fields.
-
-The screen is Driller's 192 lines (`docs/engine.md`, section 1), so the
-text has the ten character rows below the view, one line each, from the
-row straight below it (`TEXT_LAYOUT`): the area's name; the entrance (the
-free disc) or the game's end; `dd.dfps  dd.d f/f`, frames a second then
-fields a frame; `cycles dddk dddk`, stages 1-7's then 8-10's; the keys on
-two lines; and the credit on four. The row straight below the view begins
-a line before `FLIP_LINE`, so a character there is begun early enough to
-be done before the beam reaches it (`TEXT_LEAD_US` in `src/text.6502`).
+The screen is Driller's 192 lines (`docs/engine.md`, section 1): round the
+view, drawn into both buffers, is Driller's panel (`src/panel.6502`,
+`docs/research/panel.md`), the ST's console with the logic's instruments,
+the area's name and its message (the entrance, with the free camera), the
+credit and the frames a second: from the flips and fields counted
+(`frames`, `fields`), over the frames since the figure was last drawn,
+every `FIGURE_FIELDS` fields.
 
 The window is measured early when the loop goes idle with its frames all
-shown (the idle loop, above). The halves are timed on the BBC by User VIA
-T2, which runs free down at
+shown (the idle loop, above). The halves (no longer on the screen) are
+timed on the BBC by User VIA T2, which runs free down at
 1MHz and wraps every 65,536 microseconds, beside the fields counted
 (`clock`, `clock_to`). A span that saw n vertical syncs is longer than n − 1
 fields and shorter than n + 1, a window of two fields, narrower than T2's
@@ -292,14 +289,14 @@ logic's code and variables unused.
 | Where | What |
 |---|---|
 | bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, loaded after `LOGIC`): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
-| bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' names, patterns and index by id, the lines' code), the text's widened font (`TextRAM`), and the working copy's conversion (`AreaConv`, `ACONV`) |
+| bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' patterns and index by id, the lines' code), the panel's code and tables (`PanelData`, `PDATA`), and the working copy's conversion (`AreaConv`, `ACONV`) |
 | bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20) |
 | bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below) |
 | HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), loaded from `HAZEL_LOAD` (the screen) on by `!BOOT` and copied up once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies read the maths' quarter squares here (`LOGIC_SQUARES`: the same table, ASSERTed) |
-| `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, the text, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
+| `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
-| main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31) |
+| main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`) and the area's working copy (`ObjArea`), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`) in the cache's place |
 | shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
 | `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
 
@@ -396,8 +393,8 @@ same loop. It fails unless:
 - a key pressed when the disc has settled is taken by a pass (`lv_pass`'s
   `key_take`) within `KEY_FIELDS` fields of its going down: the next
   vertical sync reads it, and the next loop's pass takes it, after the loop
-  going round then (which may be drawing the text below the view or
-  working out the figures);
+  going round then (which may be drawing the panel or working out the
+  figures);
 - with the camera still at the end, every indexed object hidden in
   `ix_flags` (written between loops, as `logic_go_shown` writes them), and
   then shown again as they were, must each bring a frame, the model's
@@ -416,8 +413,10 @@ On both:
 
 - every flip shows the one frame handed over, after the last was shown
   whole; both buffers hold the same outside the view at every flip, and
-  the text there is `text_shown`'s at every eighth;
-- every frame handed over shows its area's lines below it;
+  that is the panel's model's render of the cells drawn
+  (`docs/research/panel.md`, "The check", which has the panel's other
+  checks);
+- every frame handed over shows its area's name and message;
 - every write to the view is inside a frame, into the buffer not shown,
   and every write outside it to the buffer shown comes with the beam above
   its row;
@@ -438,7 +437,7 @@ It reports fields a frame, median, p90 and most: flip to flip (what the BBC
 shows), the loop (`frame_end` to `frame_end`, or after loops that drew
 nothing from the frame's own loop's start), each half (from the call to
 `live_front_done` and `live_fill_done`) and the rest (the logic, the
-animation, the text, the crosshair, and the wait for the last frame's
+animation, the panel, the crosshair, and the wait for the last frame's
 flip); over every frame and by what the frame did: an area's first frame,
 standing (the camera as the last frame's), walking (moved: the transform's
 cache kept), turning (the angles changed: the cache refilled), and the free
@@ -466,8 +465,8 @@ disc's demo.
 
 ## What's left
 
-- The hooks still empty: the sound, the panel and its key lights, the
-  laser and the shot's pick (`$B153`, from the renderer's faces), the draw
+- The hooks still empty: the sound, the panel's key lights (and what else
+  `docs/research/panel.md` leaves), the laser and the shot's pick (`$B153`, from the renderer's faces), the draw
   list (`hook_undraw`), the sensors' tests and shots, the rigs, the
   information screen, the game's end and a new game (the database and
   `LOGICW` would have to be kept to start again).

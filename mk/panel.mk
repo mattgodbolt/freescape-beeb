@@ -1,0 +1,50 @@
+# Track X: Driller's panel below the view (src/panel.6502,
+# docs/research/panel.md).
+#
+#   make panel-data  build/panel/: the panel's picture and tables
+#                    (tools/mkpanel.py, from the ST's console and the ZX's
+#                    data; tools/model/panel.py is the specification), with
+#                    previews: picture.png, sample.png and sample4x.png
+#   make panel       the panel's values on the live disc (panel_values)
+#                    against the model's, over edge values and a fuzz
+#                    (tools/panelcheck.mjs). One of make check's
+#   make panel-shots the live disc's panel in play, on an RGB monitor and
+#                    through PAL (tools/pal.py): shots/panel_*.png and
+#                    panel_*_pal.png, PANEL_SHOTS: the start, after a turn
+#                    and a step, in the jet (its flag set and the logic's
+#                    state taken again)
+#
+# The live discs' check (make live, tools/livecheck.mjs) holds the panel on
+# the screen to the model at every flip, and its values after every pass.
+#
+# Everything here derives from the originals (decision 6): built, never
+# committed.
+
+PANEL_DIR  = build/panel
+PANEL_GEN  = $(PANEL_DIR)/panel.6502 $(PANEL_DIR)/panel.json
+# (mk/objects.mk's and mk/zx.mk's, read before or after this file)
+AREAS_JSON ?= build/gen/areas.json
+ZXSNAP     ?= build/zx/driller.z80
+
+.PHONY: panel panel-data panel-shots
+CHECKS += panel
+panel-data: $(PANEL_GEN)
+
+# (mk/live.mk's disc)
+panel: build/live.ssd $(PANEL_GEN) tools/panelcheck.mjs
+	node tools/panelcheck.mjs --disc build/live.ssd
+
+PANEL_SHOTS = start walk jet
+panel-shots: build/live.ssd
+	node tools/play.mjs 'f60,!panel_start,W:down,f70,W:up,f40,O:down,f140,O:up,f80,!panel_walk,=InJet:1,=lv_request:1,f80,!panel_jet' \
+	    shots/ --disc build/live.ssd --until live_loop
+	for s in $(PANEL_SHOTS); do \
+	    $(PYTHON) -I tools/pal.py --shrink 2 shots/panel_$$s.png shots/panel_$${s}_pal.png || exit 1; \
+	done
+
+$(PANEL_GEN) &: tools/mkpanel.py tools/model/panel.py tools/model/view.py tools/model/colours.py \
+                src/defs.6502 tools/colour/sources.py tools/colour/images.py \
+                tools/colour/database.py tools/colour/patterns.py tools/pal.py \
+                tools/research/tap.py tools/logic/oracle.py originals/st/Driller.st \
+                $(ZXSNAP) $(AREAS_JSON) $(DATA_JSON)
+	$(PYTHON) -I tools/mkpanel.py $(PANEL_DIR) $(ZXSNAP) $(AREAS_JSON) $(DATA_JSON)

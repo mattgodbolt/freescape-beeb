@@ -28,12 +28,12 @@ LIVE_FREE    = build/live-free.ssd
 LIVE_SYMBOLS = build/live.json
 LIVE_GEN     = $(LIVE_DIR)/data.6502 $(LIVE_DIR)/live.json
 LIVE_TRACE   = $(LIVE_DIR)/trace.json
-LIVE_SOURCES = src/live.6502 src/text.6502 src/defs.6502 src/zp.6502 src/macros.6502 \
+LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros.6502 \
                src/screen.6502 src/irq.6502 src/input.6502 src/raster.6502 src/writer.6502 \
                src/area.6502 src/matrix.6502 src/transform.6502 src/objects.6502 src/clip.6502 \
                src/order.6502 src/maths.6502 src/project.6502 $(wildcard src/logic/*.6502)
 LIVE_SHOTS  ?= 0 18 26 40 57
-LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise
+LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise fcl
 # mk/maths.mk, mk/objects.mk and mk/logic6502.mk name these too, but are
 # read after this file.
 MATHS_GEN   ?= build/maths/consts.6502 build/maths/tables.6502
@@ -43,6 +43,8 @@ MODEL_PY    ?= $(wildcard tools/model/*.py tools/model/standin/*.py)
 L6_DIR      ?= build/logic6502
 ZXSNAP      ?= build/zx/driller.z80
 LIVE_L6     = $(L6_DIR)/data.6502 $(L6_DIR)/db.bin
+# (mk/panel.mk's: the panel's data)
+PANEL_GEN   ?= build/panel/panel.6502 build/panel/panel.json
 
 ALL    += $(LIVE_DISC) $(LIVE_FREE)
 CHECKS += live
@@ -50,11 +52,11 @@ CHECKS += live
 $(LIVE_GEN) &: tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(MODEL_PY) $(COLOUR_MODEL)
 	$(PYTHON) -I tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(LIVE_DIR)
 
-$(LIVE_DISC) $(LIVE_SYMBOLS) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) | build
+$(LIVE_DISC) $(LIVE_SYMBOLS) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -o $(LIVE_DISC) --title DRILLER --opt 3 --warn 2 \
 	    --symbols $(LIVE_SYMBOLS) src/live.6502
 
-$(LIVE_FREE) $(LIVE_FREE:.ssd=.json) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) | build
+$(LIVE_FREE) $(LIVE_FREE:.ssd=.json) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -D FREE_CAMERA=TRUE -o $(LIVE_FREE) --title DRILLER --opt 3 --warn 2 \
 	    --symbols $(LIVE_FREE:.ssd=.json) src/live.6502
 
