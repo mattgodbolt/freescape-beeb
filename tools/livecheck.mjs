@@ -20,10 +20,13 @@
 // point in the field from a fixed pseudo-random sequence, and held until the
 // disc's pass takes them; then, in that instant, held on for the next pass
 // if it has the same keys (with any pokes between put in at once), or let
-// go. A minute's end comes by its clock (the minute otherwise kept away),
-// with its pass's keys; a poke or an FCL script's result is written into
-// the logic's state and the disc asked to take it (lv_request). It fails
-// (exit status 1) unless:
+// go; or, if the pass leaves the logic's input a minute to take (the
+// trace's "soon"), the next pass comes at once, so its keys go down then
+// (none, for the pass of none the trace puts in where the next step isn't
+// one of keys). A minute's end comes by its clock (the minute otherwise
+// kept away), with its pass's keys; a poke or an FCL script's result is
+// written into the logic's state and the disc asked to take it
+// (lv_request). It fails (exit status 1) unless:
 //
 // - the disc's state at boot is the game's start, and after every pass
 //   every variable of the original's (tools/logic/state.py) and the whole
@@ -87,11 +90,12 @@
 //   frame is drawn with the inputs of the frame before it.
 //
 // "Settled" is: a loop has drawn nothing since the last frame was handed
-// over, and with the logic, the request is taken and no pass's frames or
-// waits are left. It reports when each key pressed so had its pass and
-// when the first view it changed was shown (by the frame's flip, the
-// view's bytes compared with the last shown), by what changed: the
-// latency a player sees.
+// over, and with the logic, since the last pass's frames ended (a loop
+// while they show may find the camera standing a field, and the one that
+// ends them draw), the request is taken and no wait is left. It reports
+// when each key pressed so had its pass and when the first view it changed
+// was shown (by the frame's flip, the view's bytes compared with the last
+// shown), by what changed: the latency a player sees.
 //
 // It reports fields a frame (median, p90, max) for the whole frame (flip to
 // flip, as the BBC shows them; and the loop, from frame_end to frame_end,
@@ -206,7 +210,11 @@ let panelWaits = 0; // frames that waited for the beam to catch the panel up
 // frame drawn.)
 const IDLE = syms.live_idle;
 let idles = 0, idlesOk = 0, idlesAtEnd = 0; // (idlesAtEnd: idles when the last frame was handed over)
-let idleSeen = false; // an idle loop since the last frame was handed over
+// An idle loop since the last frame was handed over, with no pass's frames
+// left to show (an_on, with the logic): one while they show only finds the
+// camera standing for a field, and the loop that ends them may draw.
+let idleSeen = false;
+const AN_ON = syms.an_on;
 const JSR = 0x20;
 const s16 = (v) => (v & 0x8000 ? v - 0x10000 : v);
 const camera = () => {
@@ -241,7 +249,7 @@ const idleLoops = []; // cycles from live_loop to live_idle, each loop that drew
 function onIdle() {
     idles++;
     if (current) idleLoops.push(now() - current.tLoop);
-    idleSeen = true;
+    if (AN_ON === undefined || !ram[AN_ON]) idleSeen = true;
     const last = frames.at(-1);
     if (!last) return; // (before the hooks' first frame)
     const inputs = inputsNow();
@@ -796,11 +804,19 @@ async function logicScript() {
         // now, before the disc can take another pass, as the original
         // takes it without a pass with no key between)
         const { steps, i } = want;
-        const same = (r) => r?.keys && !r.tick && r.names.join() === rec.names.join();
+        // (the same keys in any order: the scenario may name them so)
+        const keySet = (r) => [...r.names].sort().join();
+        const same = (r) => r?.keys && !r.tick && keySet(r) === keySet(rec);
         let j = i + 1;
         const batch = [];
         for (; steps[j] && (steps[j].poke || steps[j].fcl); j++) batch.push(...steps[j].changes, ...steps[j].then);
-        if (same(steps[j])) {
+        if (rec.soon) {
+            // the logic's input has a minute to take, so the next pass comes
+            // at once, on the keys held then: the next step's, down now
+            // (tools/mklive.py makes it a pass, of no keys if need be)
+            want = { rec: steps[i + 1], where: `${script} ${steps[i + 1].line}`, steps, i: i + 1 };
+            hold(steps[i + 1].names);
+        } else if (same(steps[j])) {
             want = { rec: steps[j], where: `${script} ${steps[j].line}`, steps, i: j };
             if (batch.length) {
                 early.add(steps[i + 1]);
@@ -1266,7 +1282,10 @@ const median = (xs) => {
     const m = s.length >> 1;
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
-const stats = (xs) => (xs.length ? `${two(median(xs))} / ${two(pct(xs, 90))} / ${two(Math.max(...xs))}` : "-");
+// (the most by a fold: a long run's idle loops are more than a call's
+// arguments can be)
+const most = (xs) => xs.reduce((a, b) => Math.max(a, b), -Infinity);
+const stats = (xs) => (xs.length ? `${two(median(xs))} / ${two(pct(xs, 90))} / ${two(most(xs))}` : "-");
 const counted = frames.filter((f) => f.kind !== "start");
 const row = (label, fs) => {
     const cols = [

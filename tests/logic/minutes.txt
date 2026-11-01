@@ -1,0 +1,20 @@
+# A minute left for the next pass: at minute 9 the global conditions set
+# variable 31 (MinuteCount) back to 0 under the input, which takes it in
+# the next pass whatever is held, without waiting for a key, as soon as
+# the pass before is done (ticks.txt holds O through it). Here a script
+# comes after one, and the run ends on one: on the live disc each is a
+# pass of no keys first (tools/mklive.py --trace). (Not a tick: the
+# original's input takes the minute left before the clock can end
+# another in that pass.)
+tick x9
+expect MinuteCount 0
+expect MinuteSeen 9
+goto 2 4
+expect MinuteCount 0
+expect MinuteSeen 0
+O
+tick x9
+expect MinuteCount 0
+expect MinuteSeen 9
+expect FclVar30 18
+expect Energy 30
