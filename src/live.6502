@@ -17,7 +17,8 @@
 \ (decision 4): a pass's camera goes from where the last left it to where
 \ this one does over PASS_FIELDS fields, along the segment its move walked,
 \ a turn in its 5-degree steps (lv_setup, lv_camera). A held key's passes
-\ follow on without a gap. An area's change comes once the old area's
+\ follow on without a gap once it repeats (lv_pass: the pace, decision 48,
+\ with the port's start sizes). An area's change comes once the old area's
 \ frames of the walk into it are shown. The crosshair (B) is drawn over the
 \ view, by EOR as the original draws it.
 \
@@ -340,13 +341,17 @@ FIELDS_100S = 200000000 DIV FIELD_CYCLES
 FIELD_US2 = FIELD_US            ; (clock's window, below)
 ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 
-\ The pace (decision 4, docs/research/live.md, "The pace"): a pass's frames
-\ take PASS_FIELDS fields, so a key held takes 50 / PASS_FIELDS passes a
-\ second: Driller's default step (250 world units) and turn (15 degrees)
-\ each that often.
-PASS_FIELDS   = 44
+\ The pace (decisions 4, 36 and 48, docs/research/live.md, "The pace"):
+\ PASS_FIELDS and REPEAT_FIELDS are tools/logic/state.py's, with the
+\ port's start (through build/logic6502/data.6502), Matt's to change there.
+\ A pass's frames take PASS_FIELDS fields, so a key held takes
+\ 50 / PASS_FIELDS passes a second, each a step or a turn of its size; a
+\ key going down gives a pass at once, and the keys held repeat
+\ REPEAT_FIELDS fields after it (lv_pass), so a tap shorter than that is
+\ one pass, as a keyboard's auto-repeat.
 MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a frame of its
-ASSERT PASS_FIELDS < 128
+ASSERT PASS_FIELDS >= 2 AND PASS_FIELDS < 128   ; (lv_setup: a pass's first frame isn't its last)
+ASSERT REPEAT_FIELDS < 256
 
 \ start: the machine taken, HAZEL filled, the panel's picture unpacked
 \ into both buffers before clear_work clears where it was loaded,
@@ -577,6 +582,8 @@ SECTION Work
 .lv_now         SKIP 2      ; fields at the frame's start
 .lv_lkeys       SKIP KEYS_BYTES     ; the logic's keys: held, or gone down since the last pass
 .lv_until       SKIP 2      ; fields before which no pass comes: its frames and its waits
+.lv_repeat      SKIP 2      ; ... and before which the keys held don't repeat, if none goes down
+.lv_made        SKIP 1      ; non-zero: the pass took a key gone down since the last
 .lv_minute      SKIP 2      ; fields when the clock's minute ends
 .lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer)
 .lv_switch      SKIP 1      ; non-zero: the area changes once the old area's frames are shown
@@ -608,6 +615,7 @@ ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll
 \ index, its area and camera. The clock's first minute from now.
 .lv_start
     STZ lv_now : STZ lv_now+1                   ; (frame_init's fields)
+    STZ lv_repeat : STZ lv_repeat+1
     STZ lv_request
     STZ lv_xon : STZ lv_xon+1
     LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
@@ -649,9 +657,14 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 \ down since the last pass, and the frames that show it (lv_setup). None is
 \ due until the last pass's frames are shown and its waits done (lv_until);
 \ an area's change waits for the last of the old area's frames, and takes
-\ the frame (lv_switched); none comes once the game's over. A minute of the
-\ clock goes in just before the pass it ends, as the original's interrupt
-\ would count it in its input's wait.
+\ the frame (lv_switched); none comes once the game's over. The keys held
+\ alone repeat no sooner than REPEAT_FIELDS after a pass that took a key
+\ gone down (lv_repeat), as a keyboard's auto-repeat: a key going down
+\ since the last pass, or a minute's end, brings one as soon as it's due,
+\ so a tap is one pass, and a key held passes every PASS_FIELDS after the
+\ first repeat (the pace, decision 48). A minute of the clock goes in just
+\ before the pass it ends, as the original's interrupt would count it in
+\ its input's wait.
 .lv_pass
 {
     LDA lv_now : CMP lv_until : LDA lv_now+1 : SBC lv_until+1 : BPL due
@@ -663,6 +676,17 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_over : BEQ alive
     RTS
 .alive
+    \ (keys_made read, not taken: a key the vertical sync reads after this
+    \ waits for the next loop. A minute's end brings its pass whatever is
+    \ held, as the original's input takes it without waiting for a key.)
+    LDA lv_now : CMP lv_repeat : LDA lv_now+1 : SBC lv_repeat+1 : BPL repeats
+    LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BPL repeats
+    LDX #KEYS_BYTES - 1
+.made
+    LDA keys_made,X : BNE repeats
+    DEX : BPL made
+    RTS
+.repeats
     LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BMI timed
     LDA lv_minute : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
     LDA lv_minute+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
@@ -671,9 +695,10 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     \ (with the interrupt held off, so a key the vertical sync reads between
     \ the two isn't taken as held now and as gone down by the next pass)
     PHP : SEI
+    STZ lv_made
     LDX #KEYS_BYTES - 1
 .key
-    JSR key_take : ORA keys,X : STA lv_lkeys,X
+    JSR key_take : TSB lv_made : ORA keys,X : STA lv_lkeys,X
     DEX : BPL key
     PLP
     \ the camera before
@@ -711,6 +736,10 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     BMI waits
     STX lv_until : STY lv_until+1
 .waits
+    LDA lv_made : BEQ held                      ; (a key gone down: the keys held repeat from REPEAT_FIELDS on)
+    LDA lv_now : CLC : ADC #REPEAT_FIELDS : STA lv_repeat
+    LDA lv_now+1 : ADC #0 : STA lv_repeat+1
+.held
     LDA lv_loaded : BNE away
     JSR logic_go_shown                          ; (with an area's change, once it's entered)
     PAGE_IN BANK_DATA
@@ -1244,9 +1273,18 @@ IF LIVE_LOGIC
 .timed
     \ from the last pass's end if this runs straight on from it (its last
     \ frame not yet shown: the pass came in the frame its time ran out),
-    \ else now
+    \ but no earlier than PASS_FIELDS - 1 fields before now: a frame slower
+    \ than the pace takes a pass a frame (one pass a loop), each frame shows
+    \ its pass most of the way, and the passes after don't make the time up;
+    \ else now. (Its first frame is never its last, so an area's change
+    \ still comes before the logic's camera is shown: lv_pass's lv_switch.)
     LDA an_on : BEQ fresh
-    LDA an_end : STA an_t0 : LDA an_end+1 : STA an_t0+1
+    LDA lv_now : SEC : SBC #PASS_FIELDS - 1 : TAX
+    LDA lv_now+1 : SBC #0 : TAY                 ; (now less PASS_FIELDS - 1)
+    TXA : CMP an_end : TYA : SBC an_end+1 : BPL behind
+    LDX an_end : LDY an_end+1
+.behind
+    STX an_t0 : STY an_t0+1
     BRA on
 .fresh
     LDA lv_now : STA an_t0 : LDA lv_now+1 : STA an_t0+1

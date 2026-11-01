@@ -20,7 +20,31 @@ Each variable is one of:
 - "const": a table or setting the pass only reads; compared, never synced.
 
 Addresses are the original's (docs/research/zx-logic.md).
+
+The port's start and pace (decision 48) are here too, for Matt to change
+in this one place: the 6502's data takes them (tools/mklogicdata.py), so
+the 6502 logic and the live disc start from the port's start, as the
+traces of their checks do (tools/logictrace.py, tools/mklive.py --trace).
+The check against the original (make logic) keeps the original's start.
 """
+from .arith import mul_a_hl
+
+# The port's start: the step's and the turn's sizes the game starts with,
+# as indices into the original's StepTable and TurnTable (in world units
+# times the area's scale, and in 5-degree units: docs/research/zx-logic.md),
+# in place of the database's own (its header's bytes $C2 and $C3), so that
+# a tap of a movement key moves a little. f0-f3 change them in play
+# (decision 10).
+START_STEP_INDEX = 4
+START_TURN_INDEX = 0
+# The live disc's pace (src/live.6502, docs/research/live.md, "The pace"):
+# a pass's frames take PASS_FIELDS fields, so a held key's passes come that
+# often; a key going down gives a pass at once, and the keys held repeat
+# REPEAT_FIELDS fields after it, so a tap shorter than that is one pass (the
+# Master's own keyboard waits as long before it repeats: live.md's
+# measurements of 2026-11-01).
+PASS_FIELDS = 5
+REPEAT_FIELDS = 15
 
 # (name, address, size, kind, what): size 1 is a byte, 2 a little-endian
 # word, and a tuple ("bytes", n) n bytes, read as a bytes object.
@@ -137,6 +161,44 @@ DATABASE = 0xCF3E
 
 def database(mem):
     return DATABASE, DATABASE + (mem[DATABASE + 1] | mem[DATABASE + 2] << 8)
+
+
+# The database header's first step and turn, which a new game takes into
+# StepIndex and TurnIndex ($9C36).
+DB_STEP_INDEX = 0xC2
+DB_TURN_INDEX = 0xC3
+# The sizes' variables in the original's block, two runs of bytes: StepUnits,
+# Step and StepIndex; Turn and TurnIndex. As (address, length).
+_ADDR = {name: addr for name, addr, *_ in VARS}
+SIZES = tuple((_ADDR[a], _ADDR[b] + 1 - _ADDR[a]) for a, b in (("StepUnits", "StepIndex"), ("Turn", "TurnIndex")))
+
+
+def port_start(mem):
+    """The in-play snapshot's memory (the original's start) as the port's:
+    the database's first step and turn START_STEP_INDEX and
+    START_TURN_INDEX, and the variables set from them as a new game sets
+    them ($9C36, then the area's load): StepIndex and TurnIndex, Step and
+    Turn from their tables, and StepUnits Step times AreaScale."""
+    s = State(mem)
+    assert START_STEP_INDEX < s.StepTable[0] and START_TURN_INDEX < s.TurnTable[0], \
+        "the port's start isn't in the original's tables"
+    s.mem[DATABASE + DB_STEP_INDEX] = START_STEP_INDEX
+    s.mem[DATABASE + DB_TURN_INDEX] = START_TURN_INDEX
+    s.StepIndex = START_STEP_INDEX
+    s.Step = s.StepTable[1 + START_STEP_INDEX]
+    s.StepUnits = mul_a_hl(s.AreaScale, s.Step)
+    s.TurnIndex = START_TURN_INDEX
+    s.Turn = s.TurnTable[1 + START_TURN_INDEX]
+    return bytes(s.mem)
+
+
+def original_sizes(mem):
+    """The original's start sizes, from its in-play memory, as pokes
+    [(address, bytes)]: a trace's run puts them in first, so that it runs
+    from the original's start, as make logic runs the scenarios (which were
+    written for it, and the fuzz walks found there), while the disc starts
+    from the port's (port_start)."""
+    return [(a, list(mem[a:a + n])) for a, n in SIZES]
 
 
 def _prop(addr, size):

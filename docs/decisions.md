@@ -573,3 +573,40 @@ second stay on the screen beside "tech demo", with the credit to Incentive
 above the view (decision 6); the cycle figures and key lines are gone. The
 packed picture is loaded once into the transform's cache before it's
 needed, and the panel's data takes the MOS font's place.
+
+## 48. The pace, and the sizes the game starts with (2026-11-01, autonomous, proposed for Matt; amends 4 and 36)
+
+Matt, on the live disc: "it seems impossible to steer. tapping left seems
+to always turn 3 steps". Driller starts with a turn of 15° and a step of
+250 world units, and decision 36's pass every 44 fields made a tap three
+5° frames and a held key a move about once a second.
+
+- **The game starts with the smallest turn, 5°, and a step of 25 world
+  units**: the database's first turn and step (its header's bytes `$C2`
+  and `$C3`, which a new game takes) and the variables set from them are
+  changed at build time (`tools/logic/state.py`'s `port_start`), so a tap
+  turns or steps the least that's useful. f0-f3 change them in play, as
+  before (decision 10).
+- **A key going down gives a pass at once; the keys held alone repeat
+  15 fields after it (`REPEAT_FIELDS`), then a pass every 5 fields
+  (`PASS_FIELDS`)**, as a keyboard's auto-repeat: the Master's own waits
+  as long before it repeats. So a tap shorter than that is one pass, and
+  a held turn or walk goes on smoothly: each pass's frames shown over its
+  5 fields as decision 36 has them; where frames are slower than that, a
+  pass a frame, each shown most of the way. A minute's end still brings
+  its pass at once.
+- **Why these**: a held turn at the start's view went 49.5° a second at
+  5 fields a pass, the frames keeping up, and more slowly at 4, where they
+  didn't. 25 units at that pace is 250 a second (242 measured where the
+  frames keep up), against the original's 250 a redraw (0.66 s at the
+  median, `docs/research/zx-driller.md`); where frames are slower, a step
+  a frame (about 170 a second from the start's view). 10 would crawl; 50
+  would outrun the original where frames are cheap. (`docs/research/live.md`,
+  "The pace", has the measurements of 2026-11-01.)
+
+The logic is Driller's pass for pass; only when passes come and the sizes
+at the start change. `make logic` holds the transcription to the original
+from the original's start; `make logic6502` and `make live` start from the
+port's, each scenario first putting the original's sizes back, and
+`tests/logic/pace.txt` holds turns and walks at the port's sizes. The four
+constants are together in `tools/logic/state.py`, for Matt to change.

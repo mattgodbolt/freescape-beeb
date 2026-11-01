@@ -200,7 +200,10 @@ def trace(snap, out_path, paths):
     """What the live disc's logic must do, pass by pass, for
     tools/livecheck.mjs: tools/logic/ (decision 18's fix on) run on each
     scenario as tools/logictrace.py runs it, and a tour of every entrance
-    by the FCL's GOTO, each from the in-play snapshot. Each step as
+    by the FCL's GOTO, each from the in-play snapshot with the port's start
+    (decision 48: tools/logic/state.py's port_start), as the disc boots,
+    each scenario after the pokes that put the original's sizes back, as
+    logictrace.py's runs start (from_original). Each step as
     logictrace.py's, and for a pass: "walks", each move's walk (where it
     began and where it stopped, before the margin's push, and InJet, as
     hook_walked sees them), "loaded", whether an area loaded, and "soon"
@@ -216,7 +219,7 @@ def trace(snap, out_path, paths):
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
     from logic.passes import run_pass
-    from logic.state import VARS, State, database
+    from logic.state import VARS, State, database, port_start
     lmove.FIX_CORNER = True     # decision 18: the port's logic
     seen = {"walks": [], "loaded": False, "first": False}
     real_move, real_keep, real_load = lmove.move, lmove.keep_clear, larea.load_area
@@ -236,7 +239,8 @@ def trace(snap, out_path, paths):
         return real_load(s)
     lmove.move, lmove.keep_clear, larea.load_area = move, keep_clear, load_area
 
-    mem = Original(snap).memory()
+    snap_mem = Original(snap).memory()
+    mem = port_start(snap_mem)          # decision 48: as the disc boots
     where = logictrace.regions(mem)
 
     def then(s):
@@ -306,10 +310,11 @@ def trace(snap, out_path, paths):
 
     runs = []
     for p in paths:
-        runs.append({"name": Path(p).stem, "steps": run(lscen.load(p))})
-    # The keys the scenarios above don't press, in the disc's own run: the
-    # crosshair hidden and shown (B), moved across and up and down in
-    # shooting mode (SPACE), the turn's and the step's sizes, turning round.
+        runs.append({"name": Path(p).stem, "steps": run(logictrace.from_original(lscen.load(p), snap_mem, p))})
+    # The keys the scenarios above don't press, in the disc's own run, from
+    # the port's start: the crosshair hidden and shown (B), moved across and
+    # up and down in shooting mode (SPACE), the turn's and the step's sizes,
+    # turning round.
     runs.append({"name": "keys", "steps": run(lscen.parse(KEYS_RUN, "keys"))})
     # The tour: every entrance, by the FCL's GOTO, in the database's order,
     # a couple of frames each.
