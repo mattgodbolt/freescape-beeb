@@ -53,6 +53,13 @@ ENDSECTION
 \ (sort_forget).
 SECTION ObjMemo
 .so_memo    SKIP ((N_OBJ * N_OBJ + 255) DIV 256) * 256   ; (whole pages: so_new clears them)
+\ The last sort's draw list and its order (so_save): a list the same as it,
+\ slot for slot, under the same generation has every compare the same, so
+\ the same order.
+.so_ln      SKIP 1                  ; its length, or &FF for none
+.so_lgen    SKIP 1                  ; its generation
+.so_lobj    SKIP N_OBJ              ; its slots
+.so_lord    SKIP N_OBJ              ; its order
 ENDSECTION
 SECTION ObjWork
 .so_cells   SKIP 3                  ; the cells the memory is for
@@ -77,6 +84,7 @@ SECTION ObjCode
 .so_clear
 {
     ZA_AUTO2 at
+    LDA #&FF : STA so_ln                ; (no last order: its generation comes again)
     LDA #LO(so_memo) : STA at
     LDA #HI(so_memo) : STA at+1
     LDX #HI(N_OBJ * N_OBJ + 255)
@@ -141,9 +149,11 @@ MACRO SK_COMPARE lo, hi, side
 ENDMACRO
 
 \ sort_objects: the original's sort of the draw list into dl_ord, each
-\ pair's verdict from the memory when it has it (so_memo). Each entry's row
-\ of the memory (by its slot) is found once a frame (dl_rl, dl_rh), and a
-\ pass keeps its place in X.
+\ pair's verdict from the memory when it has it (so_memo). A draw list the
+\ same as the last sort's, under the same generation, takes the last sort's
+\ order, since every compare is the same. Each entry's row of the memory
+\ (by its slot) is found once a frame (dl_rl, dl_rh), and a pass keeps its
+\ place in X.
 .sort_objects
 {
     ZA_ENTRY
@@ -152,13 +162,6 @@ ENDMACRO
     LDX dl_n : BNE some
     RTS
 .some
-    DEX
-.order
-    TXA : STA dl_ord,X
-    LDY dl_obj,X
-    LDA so_row_lo,Y : STA dl_rl,X
-    LDA so_row_hi,Y : STA dl_rh,X
-    DEX : BPL order
     \ a ceiling cell moved past a box's L or H, which some slot's side then
     \ changes on: a new generation (any slot's: the memory keeps them all)
     LDA so_valid : BEQ moved
@@ -200,9 +203,29 @@ ENDMACRO
     LDA cell_e+2 : STA so_cells+2
     JSR so_new
 .same
+    \ the last sort's list under its generation: its order
+    LDA so_gen : CMP so_lgen : BNE fresh
+    LDX dl_n : CPX so_ln : BNE fresh
+    DEX
+.same_list
+    LDA dl_obj,X : CMP so_lobj,X : BNE fresh
+    DEX : BPL same_list
+    LDX dl_n : DEX
+.again
+    LDA so_lord,X : STA dl_ord,X
+    DEX : BPL again
+    RTS
+.fresh
+    LDX dl_n : DEX
+.order
+    TXA : STA dl_ord,X
+    LDY dl_obj,X
+    LDA so_row_lo,Y : STA dl_rl,X
+    LDA so_row_hi,Y : STA dl_rh,X
+    DEX : BPL order
     STZ keyed
     LDX dl_n : DEX : BNE pairs
-    RTS                                 ; (one entry)
+    JMP so_save                         ; (one entry)
 .pairs
     STX last                            ; the pairs: 0 .. last - 1
     STX passes                          ; at most this many passes
@@ -225,7 +248,7 @@ ENDMACRO
     LDA changed : BEQ sorted
     DEC passes : BNE pass
 .sorted
-    RTS
+    JMP so_save
 .swap
     \ b, then a
     LDA dl_ord,X : PHA
@@ -266,6 +289,19 @@ ENDMACRO
     EQUB HI(ob_hx), HI(ob_hy), HI(ob_hz)
 }
 ASSERT N_OBJ < 128                      ; (the cells' check counts slots down to 0)
+
+\ so_save: the draw list and its order kept for the next sort.
+.so_save
+{
+    LDX dl_n : STX so_ln
+    LDA so_gen : STA so_lgen
+    DEX
+.save
+    LDA dl_obj,X : STA so_lobj,X
+    LDA dl_ord,X : STA so_lord,X
+    DEX : BPL save
+    RTS
+}
 
 \ sort_keys: each draw-list entry's keys: its header box's cells and its
 \ side of the camera on each axis.

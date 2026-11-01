@@ -215,7 +215,7 @@ const sortAt = has("of_sort") ? S("of_sort") : -1;
 // The calls a frame makes of the arithmetic's routines, for the cost model
 // (docs/research/objects.md): each counted as its first instruction runs.
 const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point", "clip_cut", "project",
-                 "project_z", "project_y", "band_test", "vertex_shared", "poly_face", "draw_face3d",
+                 "project_z", "project_y", "band_test", "vertex_shared", "vertex_up", "poly_face", "draw_face3d",
                  "cone_face", "edge_line", "cone_pass", "cone_cut", "smul16", "cone_mul",
                  "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
@@ -386,10 +386,11 @@ for (const view of views) {
         counts.out += on;
         if (JSON.stringify(out) !== JSON.stringify(view.out))
             fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
-        // the work no output need show: the cone's lines, and the polygon
-        // objects' vertices projected
+        // the work no output need show: the cone's lines, and the vertices
+        // projected, each by one of the projection's entries (by way of
+        // vertex_shared, vertex_up or vertex_shared.full)
         const lines = made.edge_line || 0;
-        const projected = made.vertex_shared || 0;
+        const projected = (made.project || 0) + (made.project_z || 0) + (made.project_y || 0);
         if (lines !== view.work.lines) fail(`${name}: the cone made ${lines} lines, want ${view.work.lines}`);
         if (projected !== view.work.projected)
             fail(`${name}: ${projected} vertices projected, want ${view.work.projected}`);

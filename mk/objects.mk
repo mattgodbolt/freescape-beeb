@@ -163,10 +163,10 @@ SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
 ENDSECTION
 SECTION ObjOut, org = &0400, guard = &0A00, virtual = TRUE
 ENDSECTION
-SECTION ObjMemo, org = &7000, guard = &7600, virtual = TRUE
+SECTION ObjMemo, org = &7000, guard = &7680, virtual = TRUE
 ENDSECTION
 \ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
-SECTION ObjMore, org = &7600, guard = &8000, filename = "OMORE", cmos = TRUE
+SECTION ObjMore, org = &7680, guard = &8000, filename = "OMORE", cmos = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
