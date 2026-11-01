@@ -88,13 +88,14 @@ includes.)
 
 (Add what bites, as it bites.)
 
-- **Agents in worktrees (under `.claude/worktrees/`): never name a path
-  under `.claude/` in a shell command.** Claude Code guards that directory,
-  so the command stops for Matt's permission, often on their phone
-  overnight. Run from the worktree with relative paths; keep known-good
-  versions with git (commit, stash, `git show`), not `cp`; one plain
-  command a call (`make`, `node tools/...`, `.venv/bin/python -I ...`), no
-  `;`/`&&` chains, redirects or `tail`.
+- **Agents in worktrees (under `.claude/worktrees/`): change files only
+  with the Edit and Write tools, never from the shell** (`sed -i`, `cp`,
+  `mv`, `tee`, `>` redirects), and never name a path under `.claude/` in a
+  shell command. Auto mode asks Matt before any shell write there, often
+  on their phone overnight. Run builds and checks as one plain command a
+  call (`make`, `node tools/...` with the tool's own output options,
+  `.venv/bin/python -I ...`) with relative paths; keep known-good versions
+  with git (commit, `git checkout -- path`), not copies.
 
 - A local label inside `{}` silently shadows a global of the same name
   (`.keys` hid `keys`).
