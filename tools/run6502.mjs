@@ -9,10 +9,13 @@
 //   const out = m.read(m.sym("output"), 16);
 //
 // Addresses take an optional space: "main" (the default), "shadow" (the
-// Master's &3000-&7FFF behind ACCCON's X), "hazel" (&C000-&DFFF), or a
-// sideways bank number. The space is where the harness puts the bytes;
+// Master's &3000-&7FFF behind ACCCON's X), "hazel" (&C000-&DFFF), "andy"
+// (the Master's &8000-&8FFF over the paged bank's, with ROMSEL's bit 7), or
+// a sideways bank number. The space is where the harness puts the bytes;
 // what the CPU sees depends on ACCCON and ROMSEL, which the code under test
-// sets up itself.
+// sets up itself. paged(a) says which of ANDY or a bank the CPU sees at a
+// sideways address now ("andy", or the bank's number), and "main" for
+// anything else.
 //
 // call() runs a stub (SEI, JSR entry, JMP to itself) at STUB with S = &FF,
 // and counts jsbeeb's cycles from the JSR to each mark in turn and to the
@@ -27,6 +30,7 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 const root = path.resolve(here, "..");
 
 export const STUB = 0x0140;
+const ROMSEL_ANDY = 0x80; // (src/defs.6502's)
 
 export async function headless({ model = "Master", symbols } = {}) {
     const jsbeeb = path.join(root, "node_modules/jsbeeb/src/test-machine.js");
@@ -55,6 +59,11 @@ export async function headless({ model = "Master", symbols } = {}) {
             if (a < 0xc000 || a >= 0xe000) throw new Error(`&${a.toString(16)} isn't HAZEL`);
             return a - 0x3000;
         }
+        if (space === "andy") {
+            // (jsbeeb keeps ANDY at its own addresses)
+            if (a < 0x8000 || a >= 0x9000) throw new Error(`&${a.toString(16)} isn't ANDY`);
+            return a;
+        }
         if (typeof space === "number") {
             if (a < 0x8000 || a >= 0xc000) throw new Error(`&${a.toString(16)} isn't in a sideways bank`);
             return cpu.romOffset + space * 16384 + (a - 0x8000);
@@ -72,6 +81,11 @@ export async function headless({ model = "Master", symbols } = {}) {
             return syms[name];
         },
         where,
+        paged(a) {
+            if (a < 0x8000 || a >= 0xc000) return "main";
+            if (cpu.romsel & ROMSEL_ANDY && a < 0x9000) return "andy";
+            return cpu.romsel & 15;
+        },
         load(file, at, space) {
             const data = fs.readFileSync(file);
             ram.set(data, where(at, space));

@@ -8,8 +8,9 @@
 //                              [--view TEXT] [--verbose] [--json OUT]
 //                              [--profile | --profile-walks]
 //
-// BUILD holds the check build (OCODE, OAREA, OCONST, OMATHS, OTABLES, ACONV,
-// symbols.json) and, unless --cases names them, cases.json (mk/objects.mk);
+// BUILD holds the check build (OCODE, into the front end's bank, OANDY, into
+// ANDY, OMORE, OCHECK, OAREA, OCONST, OMATHS, OTABLES, ACONV, symbols.json)
+// and, unless --cases names them, cases.json (mk/objects.mk);
 // --db is the logic's database bank (LOGIC), which area_enter builds each
 // area's working copy from (tools/areacheck.mjs checks that). It checks:
 //   - stage 1: every matrix of cases.json's (matrix_build);
@@ -23,7 +24,9 @@
 //     - the output, the faces nearest first, as the rasteriser reads them;
 //     - the work no output need show (a clip's step later cut away): the
 //       lines the cone made, and the polygon objects' vertices projected;
-//   - that nothing outside the pipeline's own memory was written.
+//   - that nothing outside the pipeline's own memory was written, and
+//     nothing in sideways RAM run but its own code, the bank's with the
+//     bank paged and ANDY's with ANDY.
 // A build that takes what's hidden from the logic's flags (OBJ_LOGIC) gets
 // them in ix_flags as the logic would have them at the area's start (from
 // --areas): each hidden object's invisible or destroyed, each shown one's
@@ -58,8 +61,15 @@ const dbFile = opt("--db") ?? "build/logic6502/LOGIC";
 
 const symFile = `${dir}/symbols.json`;
 const sections = {};
+const sizes = {};
+const andyNames = new Set(); // ObjAndy's labels, which share their addresses with the bank's
 for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
-    for (const s of a.sections) if (s.name) sections[s.name] = s.attributes;
+    for (const s of a.sections) {
+        if (!s.name) continue;
+        sections[s.name] = s.attributes;
+        sizes[s.name] = s.size;
+        if (s.name === "ObjAndy") for (const k of Object.keys(s.labels ?? {})) andyNames.add(k);
+    }
 const cases = JSON.parse(fs.readFileSync(opt("--cases") ?? `${dir}/cases.json`, "utf8"));
 const entranceOnly = args.includes("--entrance");
 const views = cases.views.filter(
@@ -70,9 +80,20 @@ const m = await headless({ symbols: symFile });
 const S = (name) => m.sym(name);
 const has = (name) => name in m.syms;
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
-for (const [file, section] of [["OCODE", "ObjCode"], ["OCONST", "ObjConst"], ["OAREA", "AreaCode"],
-                               ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"], ["OMORE", "ObjMore"]])
-    m.load(`${dir}/${file}`, sections[section].org, space(sections[section].org));
+// The front end's code is where the live disc has it: ObjCode in its bank,
+// ObjAndy in ANDY over that bank's first 4K (decision 52), ObjMore in main
+// RAM.
+const OBJ_BANK = S("OBJ_BANK");
+const codeSpace = { ObjCode: OBJ_BANK, ObjAndy: "andy" };
+for (const [file, section] of [["OCODE", "ObjCode"], ["OANDY", "ObjAndy"], ["OCONST", "ObjConst"],
+                               ["OAREA", "AreaCode"], ["OMATHS", "ObjMaths"], ["OTABLES", "ObjTables"],
+                               ["OMORE", "ObjMore"], ["OCHECK", "ObjCheck"]])
+    if (sections[section])
+        m.load(`${dir}/${file}`, sections[section].org, codeSpace[section] ?? space(sections[section].org));
+// An instruction's place, as a key: ANDY's addresses apart from the bank's.
+const ANDY_KEY = 0x10000;
+const keyOf = (pc) => (m.paged(pc) === "andy" ? pc + ANDY_KEY : pc);
+const K = (name) => (andyNames.has(name) ? S(name) + ANDY_KEY : S(name));
 m.load(`${dir}/ACONV`, sections.AreaConv.org, has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
 const logic = has("OBJ_LOGIC");
@@ -97,7 +118,8 @@ const fail = (what) => {
 };
 
 // --- Where the pipeline may write: its zero page, the stack, its own
-// sections, romsel and its copy.
+// sections (its code patches itself: the bank's with the bank paged, and
+// ANDY's with ANDY), romsel and its copy.
 const allowed = [
     [0x10, 0x90],
     [0x100, 0x200],
@@ -105,16 +127,24 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]);
-for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjCode", "ObjMemo"]) {
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjMore", "ObjCheck"]) {
     const a = sections[name];
     allowed.push([a.org, a.guard]);
 }
+const code = Object.entries(codeSpace).filter(([name]) => sections[name])
+    .map(([name, p]) => ({ lo: sections[name].org, hi: sections[name].org + sizes[name], guard: sections[name].guard, p }));
 const badWrites = [];
 m.tm.processor.debugWrite.add((addr) => {
-    if (!allowed.some(([lo, hi]) => addr >= lo && addr < hi)) {
+    if (!allowed.some(([lo, hi]) => addr >= lo && addr < hi) &&
+        !code.some((c) => addr >= c.lo && addr < c.guard && m.paged(addr) === c.p)) {
         if (badWrites.length < 10) badWrites.push(addr);
     }
 });
+// ... and run nothing in sideways RAM but its own code: the bank's, with
+// the bank paged, and ANDY's, with ANDY (what ANDY's code calls in the bank
+// must be past its first 4K, which ANDY hides).
+const strayRuns = [];
+const ranOwn = (pc) => code.some((c) => pc >= c.lo && pc < c.hi && m.paged(pc) === c.p);
 
 // --- The stages, for the cycle count: each instruction's cycles go to the
 // innermost of these routines being run (entered and not yet returned
@@ -142,7 +172,7 @@ const STAGES = [
     ["emit_faces", "emit"],
 ];
 const entries = new Map();
-for (const [label, stage] of STAGES) if (has(label)) entries.set(S(label), stage);
+for (const [label, stage] of STAGES) if (has(label)) entries.set(K(label), stage);
 const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
 
 // --profile: every instruction's cycles to the routine it's in (the last
@@ -158,9 +188,10 @@ if (profile) {
     const all = JSON.parse(fs.readFileSync(symFile, "utf8"));
     for (const a of all.assemblies)
         for (const s of a.sections)
-            if ((s.name === "ObjCode" || s.name === "ObjMore") && s.labels)
+            if ((s.name === "ObjCode" || s.name === "ObjAndy" || s.name === "ObjMore") && s.labels)
                 for (const [k, v] of Object.entries(s.labels))
-                    if (!k.includes("@") && (fine || !k.includes("."))) routines.push([v.value, k]);
+                    if (!k.includes("@") && (fine || !k.includes(".")))
+                        routines.push([v.value + (s.name === "ObjAndy" ? ANDY_KEY : 0), k]);
     routines.sort((a, b) => a[0] - b[0]);
 }
 const routineOf = (pc) => {
@@ -177,14 +208,17 @@ const routineOf = (pc) => {
 
 let tally = null; // stage -> cycles, while counting
 const stack = [];
-let lastPc = -1;
+let lastPc = -1; // (keyOf's)
 let lastCycles = 0;
 let current = "frame";
-const watches = new Map(); // address -> callback, run as the instruction is reached
-m.tm.processor.debugInstruction.add((pc) => {
+const watches = new Map(); // keyOf's address -> callback, run as the instruction is reached
+m.tm.processor.debugInstruction.add((at) => {
     if (!tally) return false;
     const cpu = m.tm.processor;
     const now = m.tm.elapsedCycles;
+    const pc = keyOf(at);
+    if (at >= 0x8000 && at < 0xc000 && !ranOwn(at) && strayRuns.length < 10)
+        strayRuns.push(`&${at.toString(16)} (${m.paged(at) === "andy" ? "ANDY" : `bank ${m.paged(at)}`})`);
     if (lastPc >= 0) {
         tally[current] = (tally[current] || 0) + (now - lastCycles);
         if (inFloor) floorTally[current] = (floorTally[current] || 0) + (now - lastCycles);
@@ -212,8 +246,8 @@ m.tm.processor.debugInstruction.add((pc) => {
 let inFloor = false;
 let floorTally = {};
 let floorSlot = null;
-const candidateAt = has("of_candidate") ? S("of_candidate") : -1;
-const sortAt = has("of_sort") ? S("of_sort") : -1;
+const candidateAt = has("of_candidate") ? K("of_candidate") : -1;
+const sortAt = has("of_sort") ? K("of_sort") : -1;
 
 // The calls a frame makes of the arithmetic's routines, for the cost model
 // (docs/research/objects.md): each counted as its first instruction runs.
@@ -223,7 +257,7 @@ const CALLEES = ["rdiv", "umul32", "frac16", "lerp", "near_point", "guard_point"
                  "cone_mul",
                  "umul16", "fill_point", "fill_edge", "transform_fill"];
 const callees = new Map();
-for (const c of CALLEES) if (has(c)) callees.set(S(c), c);
+for (const c of CALLEES) if (has(c)) callees.set(K(c), c);
 let calls = {};
 
 async function counted(entry) {
@@ -298,7 +332,7 @@ for (const view of views) {
     m.poke(S("cam_roll"), roll);
     const seen = [];
     if (full) {
-        watches.set(S("of_transformed"), () => {
+        watches.set(K("of_transformed"), () => {
             const c = m.peek(S("of_cand"));
             const slot = arr("cd_obj", c);
             const vmask = arr("cd_vmask", c);
@@ -311,16 +345,18 @@ for (const view of views) {
             seen.push({ slot, verts, off: null });
         });
         // the vertex pass: which of a polygon's vertices it found it can't project
-        watches.set(S("draw_object.passed"), () => {
+        watches.set(K("draw_object.passed"), () => {
             seen[seen.length - 1].off = m.peek(S("vp_off"));
         });
     }
     badWrites.length = 0;
+    strayRuns.length = 0;
     floorSlot = view.floor ?? null;
     profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name));
     const { total, stages, calls: made, floor } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
+    if (strayRuns.length) fail(`${name}: ran outside its code at ${strayRuns.join(" ")}`);
 
     // stage 1 again, as the frame built it
     const mat = m.read(S("mat"), 9).map(s8);

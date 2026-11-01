@@ -50,7 +50,6 @@ INCLUDE "zx02.6502"
 osasci      = &FFE3
 osword      = &FFF1
 ROMSEL_COPY = &F4               ; the OS's copy of romsel
-ROMSEL_ANDY = &80               ; romsel's bit 7: ANDY over the bank's &8000-&8FFF
 MODE7_SCREEN = &7C00            ; the screen the boot shows, while this loads
 
 \ The disc: drive 0's, as SHIFT-BREAK boots it, ten 256-byte sectors a

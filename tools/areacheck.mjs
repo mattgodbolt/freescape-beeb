@@ -68,15 +68,20 @@ for (const [ours, theirs] of [["AREA_DB", "LOGIC_DB"], ["AREA_DB_BANK", "LOGIC_B
 
 const space = (a) => (a >= 0xc000 && a < 0xe000 ? "hazel" : "main");
 const load = (file, section, where) => {
+    if (!sections[section]) return;
     const org = sections[section].org;
     m.load(`${dir}/${file}`, org, where ?? space(org));
 };
-load("OCODE", "ObjCode");
+// (the front end's code where the live disc has it: its bank, ANDY over
+// that bank's first 4K, and main RAM)
+load("OCODE", "ObjCode", S("OBJ_BANK"));
+load("OANDY", "ObjAndy", "andy");
 load("OCONST", "ObjConst");
 load("OAREA", "AreaCode");
 load("OMATHS", "ObjMaths");
 load("OTABLES", "ObjTables");
 load("OMORE", "ObjMore");
+load("OCHECK", "ObjCheck");
 load("ACONV", "AreaConv", has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
 

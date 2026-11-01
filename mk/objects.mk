@@ -16,10 +16,11 @@
 #                  build/objects-logic/), the views there the entrances and
 #                  their walks; one of make check's
 #
-# The check build puts the code, the tables and the working memory in main
-# RAM and HAZEL, the logic's database bank and the conversion's in sideways
-# RAM, as the engine's build places the same sections where its memory map
-# says.
+# The check build puts the front end's code where the live disc does (its
+# bank and main RAM), the tables and the
+# working memory in main RAM and HAZEL, the logic's database bank and the
+# conversion's in sideways RAM, as the engine's build places the same
+# sections where its memory map says.
 
 AREAS_GEN   = build/gen/areas.6502
 AREAS_JSON  = build/gen/areas.json
@@ -51,26 +52,54 @@ $(AREAS_GEN) $(AREAS_JSON) &: tools/mkareas.py tools/freescape.py $(DATA_JSON) $
 
 define OBJECTS_CHECK_6502
 \ The object pipeline's check build (mk/objects.mk, tools/objectcheck.mjs,
-\ tools/areacheck.mjs). The code, the working copy and the work in main
-\ RAM, the output in the OS's pages (nothing of the OS runs once the
-\ harness's stub has turned interrupts off); the maths' tables, the
-\ transform's cache and f64 table in HAZEL, which the check's entries page
-\ in; the logic's database bank (the harness loads build/logic6502's LOGIC)
-\ and the conversion's in sideways RAM. ObjCode holds the maths' code (the
-\ harness lets the pipeline write only its own sections) as well as what
-\ the live disc puts in its bank, so it has room for both to be full
-\ (src/defs.6502's OBJ_CODE_ORG to &C000, ASSERTed below), and ObjMore for
-\ the live disc's less the maths'.
+\ tools/areacheck.mjs). The front end's code where the live disc has it:
+\ ObjCode in its sideways bank (src/defs.6502's OBJ_BANK, from
+\ OBJ_CODE_ORG), and ObjMore in main RAM from a page, the maths' code
+\ first, then the same never-called
+\ stub as the live disc's (live_shared), so that every byte of the front
+\ end's code is where the free disc has it (the logic's disc's differs by
+\ OBJ_LOGIC); the check's entries in ObjCheck. The working copy and the
+\ work in main RAM, the output in the OS's pages (nothing of the OS runs
+\ once the harness's stub has turned interrupts off); the maths' tables,
+\ the transform's cache and f64 table in HAZEL, which the check's entries
+\ page in, as they page the pipeline's bank; the logic's database bank
+\ (the harness loads build/logic6502's LOGIC) and the conversion's in
+\ sideways RAM.
 INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
 AREA_DB_BANK   = 4              ; src/logic/vars.6502's LOGIC_BANK (tools/areacheck.mjs checks)
 AREA_CONV_BANK = 5
+ASSERT OBJ_BANK <> AREA_DB_BANK AND OBJ_BANK <> AREA_CONV_BANK
 
-SECTION ObjCode, org = &0E00, guard = CHECK_CODE_GUARD, filename = "OCODE", cmos = TRUE
+SECTION ObjCode, org = OBJ_CODE_ORG, guard = &C000, filename = "OCODE", cmos = TRUE
+ENDSECTION
+SECTION ObjMore, org = &0E00, guard = &5700, filename = "OMORE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
-\ The check's entry points, each called from the harness's stub.
+\ check_shared: never called (src/live.6502's live_shared, the same code):
+\ it reaches the projection's shared-coordinate entries, as a caller
+\ would, so that baron places their zero page.
+.check_shared
+    ZA_ENTRY
+    JSR shared_in : JSR project
+    JSR shared_in : JSR project_z
+    JSR shared_in : JSR project_y
+    RTS
+.shared_in
+    ZA_DISCARD proj_v
+    FOR i = 0..8
+        STZ proj_v + i
+    NEXT
+    RTS
+ENDSECTION
+\ The check's entry points, each called from the harness's stub: the
+\ pipeline's bank paged (and its copy at &F4, as the live disc's PAGE_IN
+\ keeps it), and HAZEL for the frame's.
+SECTION ObjCheck, org = &5700, guard = &5900, filename = "OCHECK", cmos = TRUE
+MACRO OBJ_IN
+    LDA #OBJ_BANK : STA ROMSEL_COPY : STA romsel
+ENDMACRO
 MACRO HAZEL_IN
     LDA acccon : PHA
     ORA #ACCCON_Y : STA acccon
@@ -80,16 +109,20 @@ MACRO HAZEL_OUT
 ENDMACRO
 .check_init
     ZA_ENTRY
+    OBJ_IN
     JMP area_init
 .check_enter
     ZA_ENTRY
+    OBJ_IN
     LDA check_area
     JMP area_enter
 .check_matrix
     ZA_ENTRY
+    OBJ_IN
     JMP matrix_build
 .check_pass
     ZA_ENTRY
+    OBJ_IN
     HAZEL_IN
     JSR matrix_update
     JSR transform_setup
@@ -99,6 +132,7 @@ ENDMACRO
     RTS
 .check_frame
     ZA_ENTRY
+    OBJ_IN
     HAZEL_IN
     JSR objects_frame
     HAZEL_OUT
@@ -107,6 +141,7 @@ ENDMACRO
 \ cut_args (the harness's), r after them.
 .check_cut
     ZA_ENTRY
+    OBJ_IN
     HAZEL_IN
     LDA cut_args : STA clip_cut.fp
     LDA cut_args+1 : STA clip_cut.fp+1
@@ -123,30 +158,11 @@ ENDMACRO
     RTS
 .cut_args
     SKIP 10
-\ check_shared: never called by the check; it reaches the projection's
-\ shared-coordinate entries, as a caller would, after project.
-.check_shared
-    ZA_ENTRY
-    HAZEL_IN
-    JSR shared_in : JSR project
-    JSR shared_in : JSR project_z
-    JSR shared_in : JSR project_y
-    HAZEL_OUT
-    RTS
-.shared_in
-    ZA_DISCARD proj_v
-    STZ proj_v : STZ proj_v+1 : STZ proj_v+2 : STZ proj_v+3 : STZ proj_v+4
-    STZ proj_v+5 : STZ proj_v+6 : STZ proj_v+7 : STZ proj_v+8
-    RTS
 .check_area
     EQUB 0
-.check_entries_end
 ENDSECTION
-\ (the rest of ObjCode, the pipeline's, as much as the live disc's bank holds)
-CHECK_CODE_GUARD = &5900
-ASSERT CHECK_CODE_GUARD - check_entries_end >= &C000 - OBJ_CODE_ORG
 \ area_init and area_enter page the banks, so their code is never in one.
-SECTION AreaCode, org = CHECK_CODE_GUARD, guard = &5980, filename = "OAREA", cmos = TRUE
+SECTION AreaCode, org = &5900, guard = &5980, filename = "OAREA", cmos = TRUE
 ENDSECTION
 \ (the OS's pages above ObjOut: nothing of the OS runs while the check calls)
 SECTION ObjConst, org = &0A00, guard = &0E00, filename = "OCONST"
@@ -165,9 +181,6 @@ ENDSECTION
 SECTION ObjOut, org = &0400, guard = &0A00, virtual = TRUE
 ENDSECTION
 SECTION ObjMemo, org = &7000, guard = &7680, virtual = TRUE
-ENDSECTION
-\ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
-SECTION ObjMore, org = &7680, guard = &8000, filename = "OMORE", cmos = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
@@ -194,7 +207,7 @@ $(OBJ_DIR)/check.6502: mk/objects.mk
 	@mkdir -p $(@D)
 	printf '%s\n' "$$OBJECTS_CHECK_6502" > $@
 
-$(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
+$(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/OCHECK $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
                                              src/maths.6502 src/project.6502 $(MATHS_GEN)
 	$(ASM) --warn 2 -p $(OBJ_DIR) --symbols $(OBJ_DIR)/symbols.json $<
 

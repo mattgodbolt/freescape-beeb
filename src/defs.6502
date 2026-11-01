@@ -12,6 +12,7 @@ crtc_data   = &FE01
 ula_ctrl    = &FE20         ; the video ULA's control register
 ula_pal     = &FE21         ; the video ULA's palette
 romsel      = &FE30         ; the sideways bank at &8000
+ROMSEL_ANDY = &80           ; ... bit 7: ANDY, the Master's 4K, over the bank's &8000-&8FFF
 acccon      = &FE34         ; the Master's access control
 ACCCON_D    = 1             ; ... D: the CRTC shows shadow RAM
 ACCCON_E    = 2             ; ... E: the VDU's code sees shadow RAM
@@ -62,9 +63,11 @@ VIEW_COL0   = (SCREEN_COLS - VIEW_BYTES) DIV 2
 VIEW_ADDR   = SCREEN + VIEW_ROW0 * SCREEN_ROW + VIEW_COL0 * 8
 ASSERT VIEW_ROW0 + VIEW_H DIV 8 <= SCREEN_ROWS
 
-\ Where the object pipeline's code starts in its sideways bank on the live
-\ disc (src/live.6502, which says why it isn't &8000); mk/objects.mk's
-\ check build keeps room for that bank full.
+\ The object pipeline's sideways bank, and where its code starts there
+\ (src/live.6502, which says why it isn't &8000), on the live disc and in
+\ mk/objects.mk's check build alike; its rarely run code is in ANDY, over
+\ that bank's first 4K (decision 52, src/transform.6502's ANDY_CALL).
+OBJ_BANK     = 7
 OBJ_CODE_ORG = &8080
 
 \ Sixteenths of a pixel: the view coordinates (docs/engine.md, section 9).

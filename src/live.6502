@@ -125,7 +125,7 @@ ENDIF
 BANK_DB     = 4                 ; src/logic/vars.6502's LOGIC_BANK
 BANK_DATA   = 5                 ; ... and its LOGIC_CODE_BANK
 BANK_RASTER = 6
-BANK_OBJ    = 7
+BANK_OBJ    = OBJ_BANK          ; (src/defs.6502's: the check build's too)
 BANK_GLUE   = BANK_DB           ; (LiveGlue's)
 AREA_DB_BANK   = BANK_DB        ; (src/area.6502's)
 AREA_CONV_BANK = BANK_DATA
