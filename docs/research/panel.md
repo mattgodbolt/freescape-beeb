@@ -150,7 +150,8 @@ differ: below), and names the vehicle under them in its font.
   free camera, its entrance); each cell is drawn wholly inside one field's
   window, before `FLIP_LINE`, within `PANEL_CELL_US`; settled means the
   panel drawn too. The scenarios include `tests/logic/fcl.txt` (the score,
-  energy and shield to their limits, the jet), and the free disc's check
+  energy and shield to their limits, the jet), `jet.txt` and the clock's
+  `ticks.txt` and `minutes.txt`, and the free disc's check
   sets the jet and a seven-digit score and steps, so their pictures and
   digits are drawn and rendered.
 - **`make panel`** (`tools/panelcheck.mjs`): `panel_values` on the live

@@ -154,8 +154,11 @@ ZA_AUTO 4, r_pvb
 \ not): its x on the line in 8.8 fixed point with 255 added, so its pixel
 \ boundary is the high byte (ch_p) and ch_xl the low; its gradient a line
 \ (ch_gl, ch_gh, two's complement); its end vertex and the line its edge
-\ ends before. Once a face's line shows which chain is left, that one is
-\ chain 0 (decide), so the span is [ch_p, ch_p+1).
+\ ends before. The span is [ch_p, ch_p+1): a line that finds chain 1 left
+\ of chain 0 swaps them (swap_chains), each line taking the model's [min,
+\ max) of its two boundaries. The first line where the chains part shows
+\ which is left, but where a face is under a pixel wide their DDAs can
+\ cross after, each rounding toward its own top vertex.
 ZA_AUTO 2, ch_p
 r_a = ch_p
 r_b = ch_p + 1
@@ -314,12 +317,17 @@ IF RASTER_PAINTER
     LDA #LO(paint3) : STA mode3+1 : LDA #HI(paint3) : STA mode3+2
     RTS
 
-\ The span [r_a, r_b) of line r_y painted in phase k's pattern: its whole
-\ bytes through the row's run, and the byte at an odd end read, its other
-\ pixel kept, and written back; then copy k's step.
+\ The span [r_a, r_b) of line r_y painted in phase k's pattern (the chains
+\ swapped first if they've crossed): its whole bytes through the row's run,
+\ and the byte at an odd end read, its other pixel kept, and written back;
+\ then copy k's step.
 MACRO PAINT k, next
 {
-    LDA r_a : CMP r_b : BCS out
+    LDA r_a : CMP r_b : BCC some
+    BEQ out
+    JSR swap_chains
+    LDA r_a
+.some
     STA r_lo
     LSR A : BCC l_even
     \ The left end's byte: its right pixel the face's.
@@ -422,20 +430,13 @@ ENDIF
     LDX r_y : JSR row_setup
     LDX #0 : JSR chain_next
     LDX #1 : JSR chain_next
-    \ Which chain is left isn't known until a line's span has some width.
-    LDA #CHK_TEST : JSR patch_checks
     JMP segment
 }
 
-\ decide: the first line where the chains part shows which is left: chain 0
-\ if ch_p < ch_p+1, else the chains swap, every part of them. Either way the
-\ copies stop asking.
-.decide
-{
-    BCS swap
-    LDA #CHK_SKIP
-    JMP patch_checks
-.swap
+\ swap_chains: chain 1 is left of chain 0 on this line (ch_p+1 < ch_p), so
+\ the chains swap, every part of them, and the next face's chain 0 walks
+\ the way this one's does now. Keeps X.
+.swap_chains
     FOR v = {ch_p, ch_xl, ch_gl, ch_gh, ch_i, ch_end, ch_dir}
         LDA v : LDY v + 1 : STA v + 1 : STY v
     NEXT
@@ -443,11 +444,6 @@ ENDIF
     LDA sa0 + 1 : LDY sb0 + 1
     STY sa0 + 1 : STY sa1 + 1 : STY sa2 + 1 : STY sa3 + 1
     STA sb0 + 1 : STA sb1 + 1 : STA sb2 + 1 : STA sb3 + 1
-    LDA #CHK_SKIP
-}
-\ patch_checks: the copies' tests of which chain is left, A one of CHK_*.
-.patch_checks
-    STA chk0 + 1 : STA chk1 + 1 : STA chk2 + 1 : STA chk3 + 1
     RTS
 
 \ The end of a segment: the face's end, or the chain or chains whose edge
@@ -476,17 +472,11 @@ ENDIF
     EQUW entry0, entry1, entry2, entry3
 
 \ ---------------------------------------------------------------------------
-\ The line loop, a copy for each value of line AND 3: until the face's left
-\ chain is known, a test of it (through a BRA patched past it once it is);
-\ the span [ch_p, ch_p+1) into the line's gaps; both chains stepped to the
-\ next line (each through a BRA patched to its edge's stepping: its x plus
-\ its gradient, or nothing for a vertical edge); the next line.
-
-MACRO CHECK
-    LDA ch_p : CMP ch_p+1 : BEQ undecided
-    JSR decide
-.undecided
-ENDMACRO
+\ The line loop, a copy for each value of line AND 3: the span [ch_p,
+\ ch_p+1) into the line's gaps (the chains swapped first if they've
+\ crossed: INSERT, PAINT); both chains stepped to the next line (each
+\ through a BRA patched to its edge's stepping: its x plus its gradient,
+\ or nothing for a vertical edge); the next line.
 
 MACRO STEPG c
     CLC
@@ -549,10 +539,11 @@ ENDMACRO
 
 \ The span [r_a, r_b) of line r_y, which is in X, into its gaps (pool k),
 \ writing what shows; each way out goes to next, but a fresh line's, which
-\ goes on to the stretch's next copy (stretch) when it can. Only a span
-\ that starts inside a gap and ends inside it too (split), or one on a line
-\ no face has touched (fresh), can be empty (r_a >= r_b), so only those
-\ test it.
+\ goes on to the stretch's next copy (stretch) when it can. A line that
+\ isn't full finds chain 1 left of chain 0 (r_b < r_a) where the chains
+\ have crossed, and swaps them first (swap_chains). Then only a span that
+\ starts inside a gap and ends inside it too (split), or one on a line no
+\ face has touched (fresh), can be empty (r_a = r_b), so only those test it.
 ASSERT UNTOUCHED >= 128 AND POOL_FIELD <= 128   ; a node is a positive byte
 MACRO INSERT k, next, stretch
 {
@@ -565,6 +556,8 @@ MACRO INSERT k, next, stretch
     PVB = r_pvb + k
     LDA head,X : BEQ out                ; the line is full
     BMI fresh_far                       ; no face here yet (UNTOUCHED)
+    LDY r_b : CPY r_a : BCC crossed
+.in_order
     STZ r_prev
 .walk
     \ Past the gaps that end at or before the span starts.
@@ -574,6 +567,9 @@ MACRO INSERT k, next, stretch
     LDA GN,X : BNE walk
 .out
     JMP next
+.crossed
+    JSR swap_chains
+    LDA head,X : BRA in_order
 .fresh_far
     JMP fresh
 .found
@@ -666,9 +662,13 @@ MACRO INSERT k, next, stretch
     JMP next
 .fresh
     \ The line's first face (X is still the line): one gap [0, VIEW_W) with
-    \ no neighbours, unless the span is empty.
+    \ no neighbours, unless the span is empty; the chains swapped first if
+    \ they've crossed.
     LDA r_a : CMP r_b : BCC fresh_some
+    BNE fresh_crossed
     JMP next
+.fresh_crossed
+    JSR swap_chains
 .fresh_some
     LDA r_a : BNE fresh_cut
     LDA r_b : CMP #VIEW_W : BNE fresh_right
@@ -839,10 +839,6 @@ ENDMACRO
 \ each line leaving X = r_y for the next copy.
 .entry0 LDX r_y
 .loop0
-.chk0   BRA chk_test0                 ; patched: CHK_TEST or CHK_SKIP
-        ZA_CANJUMP chk_test0, chk_end0
-.chk_test0 CHECK
-.chk_end0
         \ A line that starts a character row: its row's pointers.
         TXA : BIT #4 : BNE row0
         JSR row_setup
@@ -866,10 +862,6 @@ ENDMACRO
 
 .entry1 LDX r_y
 .loop1
-.chk1   BRA chk_test1                 ; patched: CHK_TEST or CHK_SKIP
-        ZA_CANJUMP chk_test1, chk_end1
-.chk_test1 CHECK
-.chk_end1
         IF RASTER_PAINTER
 .mode1    JMP ins1                    ; patched: ins1 or paint1
             ZA_CANJUMP ins1, paint1
@@ -889,10 +881,6 @@ ENDMACRO
 
 .entry2 LDX r_y
 .loop2
-.chk2   BRA chk_test2                 ; patched: CHK_TEST or CHK_SKIP
-        ZA_CANJUMP chk_test2, chk_end2
-.chk_test2 CHECK
-.chk_end2
         IF RASTER_PAINTER
 .mode2    JMP ins2                    ; patched: ins2 or paint2
             ZA_CANJUMP ins2, paint2
@@ -912,10 +900,6 @@ ENDMACRO
 
 .entry3 LDX r_y
 .loop3
-.chk3   BRA chk_test3                 ; patched: CHK_TEST or CHK_SKIP
-        ZA_CANJUMP chk_test3, chk_end3
-.chk_test3 CHECK
-.chk_end3
         IF RASTER_PAINTER
 .mode3    JMP ins3                    ; patched: ins3 or paint3
             ZA_CANJUMP ins3, paint3
@@ -941,11 +925,6 @@ ENDMACRO
 .st3    STRETCH 3, entry3
 
 \ The patched BRAs' offsets, the same in every copy and for both chains.
-CHK_TEST  = chk_test0 - (chk0 + 2)
-CHK_SKIP  = chk_end0 - (chk0 + 2)
-ASSERT chk_test1 - (chk1 + 2) = CHK_TEST AND chk_end1 - (chk1 + 2) = CHK_SKIP
-ASSERT chk_test2 - (chk2 + 2) = CHK_TEST AND chk_end2 - (chk2 + 2) = CHK_SKIP
-ASSERT chk_test3 - (chk3 + 2) = CHK_TEST AND chk_end3 - (chk3 + 2) = CHK_SKIP
 STEP_G    = sag_0 - (sa0 + 2)
 STEP_NONE = sa_end0 - (sa0 + 2)
 ASSERT STEP_NONE < 128

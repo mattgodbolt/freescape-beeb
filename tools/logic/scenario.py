@@ -5,6 +5,9 @@ in-play snapshot (make zx: area 1, entrance 19, on the probe).
     O                 a pass with O held
     Q O x3            three passes with Q and O held
     tick              a pass in which a minute of the clock ends, no keys
+                      (never straight after a pass that leaves the input a
+                      minute to take, as minute 9's does: the original's
+                      input takes that one before the clock can end another)
     goto 2 4          FCL GOTO area 2, entrance 4 (the original's $9D1C)
     fcl 15            FCL bytes, hex, run by $B320 (15: SWAPJET)
     shot 85 0A        FCL bytes run as a shot's (ShotFlag set)

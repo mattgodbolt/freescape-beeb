@@ -203,11 +203,13 @@ def trace(snap, out_path, paths):
     by the FCL's GOTO, each from the in-play snapshot. Each step as
     logictrace.py's, and for a pass: "walks", each move's walk (where it
     began and where it stopped, before the margin's push, and InJet, as
-    hook_walked sees them), and "loaded", whether an area loaded; for any
-    step, "then": what the disc's renderer changes before the next pass
-    (the screen's colours, $A77A, once an area has loaded: lv_switched).
-    A step the original would hang in ends its run: the disc would hang
-    too."""
+    hook_walked sees them), "loaded", whether an area loaded, and "soon"
+    if it leaves the input a minute to take, so that the next pass comes at
+    once, whatever is held (a pass of no keys is put in after it when the
+    next step isn't a pass of keys); for any step, "then": what the disc's
+    renderer changes before the next pass (the screen's colours, $A77A,
+    once an area has loaded: lv_switched). A step the original would hang
+    in ends its run: the disc would hang too."""
     sys.path.insert(0, str(ROOT / "tools"))
     import logictrace
     from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen
@@ -243,12 +245,21 @@ def trace(snap, out_path, paths):
             lfcl.screen_update(s, Hooks())
         return logictrace.changes(before, s.mem, where)
 
+    def pending(s):
+        """A minute the input takes at once, so the next pass comes without
+        waiting for a key ($9990 waits only with none to take): the events
+        can put MinuteCount back under the input (the global conditions at
+        minute 9)."""
+        return not s.GameOver and s.MinuteSeen != s.MinuteCount
+
     def run(steps):
         s = State(mem)
         out = []
-        for st in steps:
-            if st.kind == "expect":
-                continue
+        steps = [st for st in steps if st.kind != "expect"]
+        i = 0
+        while i < len(steps):
+            st = steps[i]
+            i += 1
             before = bytes(s.mem)
             rec = {"line": st.line}
             seen["walks"], seen["loaded"] = [], False
@@ -256,8 +267,8 @@ def trace(snap, out_path, paths):
                 rec["frames"] = st.n
             elif st.kind == "poke":
                 rec["poke"] = [st.addr, [v & 0xFF for v in st.values]]
-                for i, v in enumerate(st.values):
-                    s.mem[st.addr + i] = v & 0xFF
+                for k, v in enumerate(st.values):
+                    s.mem[st.addr + k] = v & 0xFF
             elif st.kind == "fcl":
                 rec["fcl"] = list(st.code)
                 s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
@@ -279,6 +290,18 @@ def trace(snap, out_path, paths):
             out.append(rec)
             if rec.get("result") == 2 or (rec.get("result") == 1 and s.GameOver):
                 break               # the game is over: the original goes to its end
+            if pending(s):
+                # The next pass comes at once, on the keys held then: the
+                # next step's, if it's a pass of keys (the scenario has
+                # them held as it comes), else none, a pass of its own
+                # before the step.
+                if "keys" not in rec:
+                    raise SystemExit(f"{st.line}: a minute left to take after a poke or a script, "
+                                     "which the live check doesn't drive")
+                rec["soon"] = True
+                nxt = steps[i] if i < len(steps) else None
+                if not (nxt and nxt.kind == "pass" and not nxt.tick):
+                    steps.insert(i, lscen.Step("pass", f"{st.line} (the minute)", keys=(), tick=False))
         return out
 
     runs = []

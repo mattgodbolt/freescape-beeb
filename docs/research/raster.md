@@ -41,6 +41,11 @@ instruction-level profile, unless it says otherwise.
   boundaries there. A vertical edge's boundary is the exact one,
   `(x + 7) >> 4`; a sloping edge's is a DDA's (below), which the exact
   boundary `ceil((x - 8) / 16)` (`edge_crossings_exact`) is the measure of.
+  A line's span is the `[min, max)` of the boundaries there
+  (`face_spans`), whichever chain is left on it: where a face is under a
+  pixel wide its two chains' DDAs can cross, each rounding toward its own
+  top vertex, so the chain left of the other on one line may be right of
+  it on the next.
 - **Faster rather than exact** (decisions 11-12: Matt would "much rather
   we have a faster version than a pixel correct one"). Measured 2026-10-31
   by comparing `edge_crossings` with `edge_crossings_exact` on every edge:
@@ -295,6 +300,8 @@ to them after it (RMS error 5-6% each):
 | Round 3: faces whose lines are all full skipped before their edges; the offset's own products; rows, smaller things | 109,526 | 189,141 | 319,467 | 28.1 | 59.1 | 228.9 | 2.0 | 527.4 |
 | The same, measured again (track S, before round 4) | 109,505 | 189,119 | 319,505 | 27.5 | 58.7 | 229.7 | 1.9 | 526.4 |
 | Round 4: the stretch (fresh lines under vertical chains) | 110,063 | 183,795 | 319,901 | 31.2 | 52.3 | 240.3 | 1.3 | 506.2 |
+| The same, measured again (track Z, 2026-11-01) | 110,161 | 183,995 | 319,720 | 32.2 | 52.8 | 239.8 | 1.3 | 506.1 |
+| The chains' order on every line not full (below) | 109,641 | 183,419 | 321,877 | 31.0 | 55.6 | 241.8 | 1.2 | 478.9 |
 
 Every view writes all 5,408 bytes, so the fit can't tell bytes from lines
 (d is near 0 and a takes the bytes); the profile's bytes are 5.3 cycles
@@ -353,6 +360,27 @@ about 11 cycles against the 3 of the jump it replaces. Keeping a flag for
 "both vertical" where the steps are patched cost more, at every edge, than
 it saved. The median view moves by little either way: the median above is
 a different view's.
+
+### The chains crossing (track Z, 2026-11-01)
+
+The live disc's check, with the jet's scenario, found a frame one byte off
+the model's (journal, 2026-11-01): a sliver less than a pixel wide over
+the right edge of the face behind it, whose chains' DDAs part one way and
+then, lower down, cross, each rounding toward its own top vertex. The
+6502 took the order the chains first parted in for the whole face (the
+line loop's `CHECK`, patched out once it had decided) and drew nothing
+where they had crossed, where the model's `[min, max)` draws a pixel. Had
+they first parted the wrong way round, the face would have lost every
+line but those. The model is right (its `face_spans`, and the fill rule
+above); the 6502 now swaps the chains wherever a line finds them crossed:
+a line with gaps and a face already tests (`LDY r_b : CPY r_a`) before
+walking its gaps, a fresh line's empty test does it at no cost, and the
+painter's `PAINT` likewise (`swap_chains`). The patched `BRA` that every
+line paid goes. `make raster`'s scenes `crossing-chains` (after parting),
+`crossing-chains-first` (first parting the way most of their lines don't)
+and `crossing-chains-shared` (over the edge behind, as the frame) fail
+the old code on both builds. Over the 65 views (the table above): all of
+them 7,761,617 cycles from 7,770,109.
 
 ### Measured and not built
 

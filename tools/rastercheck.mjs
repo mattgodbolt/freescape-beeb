@@ -111,11 +111,11 @@ const BUCKETS = [
     ...(PAINTER ? [0, 1, 2, 3].map((k) => ["paint", `paint${k}`]) : []),
     ["face", "raster_face"],
     ["face", "seg_end"],
-    // the line loop's copies: which chain is left, the insertion, the
-    // chains' steps, the next line
+    // the line loop's copies: the line's start, the insertion (with the
+    // chains' order), the chains' steps, the next line
     ...[0, 1, 2, 3].flatMap((k) => [
         ["span", `loop${k}`],
-        ["insert", `chk_end${k}`],
+        ["insert", `ins${k}`],
         ["step", `step${k}`],
         ["next", `next${k}`],
     ]),
