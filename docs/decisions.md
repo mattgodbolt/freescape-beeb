@@ -60,6 +60,11 @@ Model B edition is for later, if the Master's numbers leave room.
 Why: MODE 2's 16K screen double-buffered doesn't fit a B beside the
 engine, and Matt plays on a real Master.
 
+Matt, later the same day: "I prefer not looking at coprocessor right now,
+concentrating on what a stock Master could do." So the engine targets a
+stock Master 128: no second processor, and no co-processor edition for
+now.
+
 ## 6. Rights (2026-10-31)
 
 The build reads Driller from fetched copies (`make fetch`, into
