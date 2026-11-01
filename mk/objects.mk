@@ -41,7 +41,7 @@ INCLUDE "../../src/defs.6502"
 INCLUDE "../maths/consts.6502"
 ZA_POOL &10..&8F
 
-SECTION ObjCode, org = &0E00, guard = &5000, filename = "OCODE", cmos = TRUE
+SECTION ObjCode, org = &0E00, guard = &4F00, filename = "OCODE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
 \ The check's entry points, each called from the harness's stub.
@@ -77,8 +77,26 @@ ENDMACRO
     JSR objects_frame
     HAZEL_OUT
     RTS
+\ check_shared: never called by the check; it reaches the projection's
+\ shared-coordinate entries, as a caller would, after project.
+.check_shared
+    ZA_ENTRY
+    HAZEL_IN
+    JSR shared_in : JSR project
+    JSR shared_in : JSR project_z
+    JSR shared_in : JSR project_y
+    HAZEL_OUT
+    RTS
+.shared_in
+    ZA_DISCARD proj_v
+    STZ proj_v : STZ proj_v+1 : STZ proj_v+2 : STZ proj_v+3 : STZ proj_v+4
+    STZ proj_v+5 : STZ proj_v+6 : STZ proj_v+7 : STZ proj_v+8
+    RTS
 .check_area
     EQUB 0
+ENDSECTION
+\ area_enter pages the records' banks, so its code is never in one.
+SECTION AreaCode, org = &4F00, guard = &5000, filename = "OAREA", cmos = TRUE
 ENDSECTION
 SECTION ObjConst, org = &5000, guard = &5C00, filename = "OCONST"
 ENDSECTION
@@ -86,12 +104,12 @@ SECTION ObjArea, org = &5C00, guard = &6600, virtual = TRUE
 ENDSECTION
 SECTION ObjWork, org = &6600, guard = &7400, virtual = TRUE
 ENDSECTION
-SECTION ObjMaths, org = &C000, guard = &CD00, filename = "OMATHS"
+SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
 ENDSECTION
-SECTION ObjCache, org = &CD00, guard = &D600, virtual = TRUE
+SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
-SECTION ObjOut, org = &D600, guard = &DC00, virtual = TRUE
+SECTION ObjOut, org = &7400, guard = &7C00, virtual = TRUE
 ENDSECTION
 
 INCLUDE "../gen/areas.6502"
@@ -108,7 +126,7 @@ $(OBJ_DIR)/check.6502: mk/objects.mk
 	@mkdir -p $(@D)
 	printf '%s\n' "$$OBJECTS_CHECK_6502" > $@
 
-$(OBJ_DIR)/OCODE $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
+$(OBJ_DIR)/OCODE $(OBJ_DIR)/OAREA $(OBJ_DIR)/symbols.json &: $(OBJ_DIR)/check.6502 $(OBJ_SRC) $(AREAS_GEN) \
                                              src/maths.6502 src/project.6502 $(MATHS_GEN)
 	$(ASM) --warn 2 -p $(OBJ_DIR) --symbols $(OBJ_DIR)/symbols.json $<
 

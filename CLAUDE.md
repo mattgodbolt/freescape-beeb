@@ -118,6 +118,8 @@ includes.)
 - A soft BREAK on jsbeeb's MOS 3.20 puts IRQ1V back and returns to BASIC.
 - Code in a sideways bank can't page another bank in under itself: calls
   between banks go through main RAM (`src/logic/call.6502`).
+- Every sideways bank has the same addresses: a harness hook on a routine
+  in one must check the bank paged (`cpu.romsel & 15`).
 - `mk/*.mk` are included in sorted order, and a rule's prerequisites
   expand as the rule is read: a variable from a file that sorts later is
   empty there. Give it a `?=` default (`mk/logic.mk` does for `ZXSNAP`).

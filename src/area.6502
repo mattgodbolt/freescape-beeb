@@ -18,7 +18,9 @@
 \                put back after. Not while the object pipeline is running.
 \
 \ The working copy is never in sideways RAM (the build that places it
-\ ASSERTs so), since the copy pages the record's bank in at &8000.
+\ ASSERTs so), since the copy pages the record's bank in at &8000; nor is
+\ this code, which is why it has its own section, AreaCode, which the build
+\ puts in main RAM.
 \
 \ The runtime state beside the copy: ob_state's bit 7 hides an object
 \ (the logic sets and clears it by slot; ob_id gives each slot's Driller
@@ -56,7 +58,7 @@ MACRO AREA_COPY counts, dest_lo, dest_hi
     LDX i : INX : CPX #AD_COUNT : BNE array
 ENDMACRO
 
-SECTION ObjCode
+SECTION AreaCode
 
 \ area_init: the globals' record into the working copy's first slots.
 .area_init

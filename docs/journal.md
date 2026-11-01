@@ -317,3 +317,53 @@ not taken (decision 26). Still about seven times the part's budget, at
 about 3.5K cycles a vertex, so a fresh track (M) took the front end on to
 restructure it: one pass over each object's vertices, trivial accept for
 faces wholly on screen, 16 bits downstream of the cached transform.
+
+## 2026-10-31: the projection rebuilt, painter's measured, the logic in 6502
+
+- **The projection** (`docs/research/projection.md`, decision 27): camera
+  walks rendered with the model showed that per-vertex jitter is what
+  shows, so the budget is "never backwards, within 4/16 of a pixel". A
+  9-bit reciprocal and two byte products meet it at a median 289 cycles a
+  vertex (most 404) against the first method's 508; with the entries for
+  shared coordinates, a median view's projection takes 10,217 cycles
+  (most 22,312) against 24,153. Polar forms in logs, after PORTAL, were
+  modelled and left open (decision 29).
+- **The painter's fill** was built and checked exact, and measured slower
+  at the median over Driller's views (135,039 cycles against the span
+  buffer's 125,406 on fresh frames): every painted face rewrites bytes the
+  floor or the sky already wrote. My estimate had left the background
+  out. The span buffer stays (decision 28).
+- **The player logic in 6502** (`docs/research/logic6502.md`) matches the
+  transcription over 6,555 passes in its scenarios and walks and 110,459
+  in a fuzz of 1,000 walks, with decision 18's fix. A pass takes a median
+  2,765 cycles; a step on the probe a median 10,917.
+- Merging the projection broke the object check's build (its tables
+  outgrew the check's HAZEL layout, and its new entries were unreachable
+  there); the full check caught both before anything was pushed.
+
+## 2026-10-31: the whole pipeline live on the BBC
+
+`build/live.ssd` (decision 30, `docs/research/live.md`) runs stages 1-10
+on the BBC every frame from a free camera, with nothing worked out off
+it. Measured that day by `make live` (`tools/livecheck.mjs`, jsbeeb's full
+video): 614 frames shown, over every entrance, walks and turns at five of
+them, and the demo, each the model's view of its camera byte for byte.
+Fields a frame, median / p90 / most:
+
+| frames | flip to flip | 1-7 objects | 8-10 fill | the rest |
+|---|---|---|---|---|
+| all (614) | 13.0 / 18.5 / 22.6 | 7.25 / 9.55 / 11.64 | 5.29 / 9.33 / 11.18 | 0.07 / 0.73 / 2.78 |
+| an entrance's first (70) | 10.2 / 16.0 / 21.0 | 6.12 / 8.34 / 9.38 | 3.23 / 5.67 / 9.15 | 0.82 / 2.28 / 2.78 |
+| still (359) | 11.5 / 17.4 / 20.5 | 6.37 / 8.56 / 9.17 | 4.54 / 9.16 / 11.18 | 0.06 / 0.52 / 1.88 |
+| a walk (65) | 14.0 / 18.5 / 19.8 | 7.76 / 8.64 / 9.11 | 6.05 / 9.68 / 10.08 | 0.10 / 0.56 / 0.95 |
+| a turn (110) | 16.8 / 21.6 / 22.6 | 9.52 / 11.25 / 11.64 | 6.49 / 9.94 / 10.84 | 0.07 / 0.56 / 1.01 |
+
+So about 3.9 frames a second at the median, against decision 2's two
+fields. The front end is the larger half everywhere, and a turn (the
+transform's cache refilled) costs it about three fields more than a still
+frame. The rest (the keys, the text, the figures, entering an area) is
+small but for an area's first frame, which waits for its name below the
+view. The BBC's own timing of each half, which it shows, agreed with the
+emulator's count within 8 cycles on all 1,228. Merging main's larger
+projection tables pushed the transform's cache out of HAZEL into main
+RAM's `&3000` (decision 31).
