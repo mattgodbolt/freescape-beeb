@@ -1,39 +1,41 @@
 \ ***************************************************************************
-\ FREESCAPE for the BBC Master - a candidate's faces: the near clip, the
-\ guard band, the projection and the 2D clip (docs/engine.md, stages 4-6;
+\ FREESCAPE for the BBC Master - a candidate's faces: the vertex pass, the
+\ projection, the 2D clip and the cone (docs/engine.md, stages 4-6;
 \ tools/model/clip.py, and render.py's draw_faces, which this follows step
 \ for step)
 \
-\ For each face the camera sees, in its object's face order:
+\ For a polygon object (vertex_pass, then each face the camera sees, in its
+\ object's face order):
 \
-\ - the near clip: if a vertex is nearer than ZNEAR, the face is clipped
-\   against that plane in 3D (Sutherland-Hodgman; a line as a segment),
-\   each new coordinate the model's round_div exactly (umul32, rdiv);
-\   nothing left means it isn't drawn;
-\ - the guard band (decision 17): a face with a vertex outside |X| <= 16 Z
-\   or |Y| <= 8 Z is clipped against those planes in 3D, by crossings;
-\ - each vertex projected (the maths' project), and its outcode against the
-\   view's rectangle found from the projection (the model's outcode2d); a
-\   face with every vertex beyond one edge isn't drawn;
-\ - a line widened to the quad a one-pixel line covers, a point to its
-\   pixel's square;
-\ - the 2D clip against the view's rectangle if a vertex was beyond an edge
-\   or the face was widened, by crossings; else repeated vertices dropped;
+\ - each vertex its seen faces use tested once against the band the
+\   projection takes (band_test, the model's projectable), and each vertex
+\   of a face with none outside it projected once (vertex_shared), in an
+\   order that puts vertices sharing x and z, or z, together for project_y
+\   and project_z, with its outcode against the view's rectangle;
+\ - a face with every vertex projected (poly_face): wholly beyond one edge
+\   it isn't drawn; with a vertex beyond any it's clipped in 2D; else its
+\   repeats are dropped;
+\ - any other face (cone_face, the model's cone_clip): every vertex in one
+\   of code3's half-spaces drops it; else the view's rectangle clipped by
+\   each of its edges' planes through the eye that cuts it, as a line on
+\   the screen (edge_normal, edge_line, cone_pass): no near plane;
 \ - drawn if three or more vertices are left, not all on one line.
+\
+\ A line's face or a point's (draw_segment): with an end the projection
+\ can't take, a point isn't drawn and a line is clipped in 3D to the near
+\ plane and the planes beyond the view's sides (seg_clip); then projected,
+\ widened to the quad a one-pixel line covers or a pixel's square, and
+\ clipped in 2D.
 \
 \ A crossing (the model's crossing_t and lerp) is one fraction t =
 \ floor(2^16 f_P / (f_P - f_Q)) from the edge's inside end P (frac16), and
 \ each coordinate P + (Q - P) t / 2^16 rounded half up (lerp).
 \
-\ A vertex the object's faces share is tested against the guard band and
-\ projected once (vflag's VF_* bits say which it has been). The clips' new
-\ vertices are vertices VMAX onwards of the same arrays, made afresh for
-\ each face. After the guard band every projection fits 16 bits, so the
-\ 2D polygons are 16-bit.
-\
-\ A drawn face's polygon goes into the output's vertices (out_vx*, out_vy*:
-\ view coordinates, 16-bit) and its record into tf_* in the order found;
-\ emit_faces (src/order.6502) puts the records in out_f* nearest first.
+\ The clips' new vertices are vertices VMAX onwards of the same arrays,
+\ made afresh for each face. A drawn face's polygon goes into the output's
+\ vertices (out_vx*, out_vy*: view coordinates, 16-bit) and its record into
+\ tf_* in the order found; emit_faces (src/order.6502) puts the records in
+\ out_f* nearest first.
 \
 \ Entry point:
 \   draw_object   the candidate of_cand (slot of_slot), its vertices

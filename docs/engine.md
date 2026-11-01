@@ -170,18 +170,30 @@ In order. Formats are the model's; the 6502 matches them exactly.
      `M · corner` and three rotated edge vectors by additions, as the
      original builds them. A pyramid's and a polygon's come from their
      own vertices the same way.
-4. **Near clip.** A face with any vertex nearer than `ZNEAR` is clipped
-   against that plane in 3D. There is no far plane.
+4. **Which faces project whole.** Each vertex of an object's seen faces is
+   tested once against the band the projection takes: in front of
+   `ZNEAR`, with X within `2^(n+3)` and Y within `2^(n+2)`, n the bit length
+   of Z (inside the guard band, decision 17; a byte or two's test). A face
+   with every vertex in the band is projected (stages 5 and 6). Any other
+   polygon goes through **the cone**: the view's rectangle clipped, in 2D,
+   by its edges' planes through the eye, each a line on the screen, exactly
+   the face's image with nothing cut away (`tools/model/clip.py`), so there
+   is no near plane for polygons, and no far plane. A line or a point with
+   an end outside the band is clipped in 3D to `ZNEAR` and the planes
+   `x = ±z`, `2y = ±z` first.
 5. **Project.** `x = XC + FX · X / Z` and `y = YC − FY · Y / Z`, in
    sixteenths of a pixel (section 9), by a 9-bit reciprocal of Z and two
    byte products (`src/project.6502`, `docs/research/projection.md`,
    decision 27): never stepping backwards as X or Z grows, within 4/16 of
    a pixel. Vertices sharing Z, or X and Z, take the cheaper `project_z`
    and `project_y`, with the same results. `ZNEAR` and the focal lengths
-   are `tools/model/maths.py`'s. Each projected vertex is kept for the
-   faces that share it.
-6. **2D clip** of each face against the view's rectangle, so every vertex
-   the rasteriser sees is a byte inside the view.
+   are `tools/model/maths.py`'s. Each vertex is projected once, before the
+   faces, in an order that puts vertices sharing X and Z (a box's vertical
+   edges, under a level camera) or Z together.
+6. **2D clip** of each projected face against the view's rectangle, unless
+   its outcodes say it's wholly inside (taken as it is) or wholly beyond
+   one edge (dropped), so every vertex the rasteriser sees is inside the
+   view.
 7. **Order.** The original's sort (ScummVM's `area.cpp` reproduces it) over
    the drawable objects, then taken nearest first (decision 3). The faces
    of one convex object don't overlap once its back faces are gone, so

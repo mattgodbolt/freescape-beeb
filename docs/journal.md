@@ -411,3 +411,58 @@ live`):
   203,826. `make live` still shows all 614 frames as the model's; an
   entrance's first frame now spends a median 0.90 fields outside the two
   halves (most 5.58), against 0.82 (2.78) when the area was copied.
+
+## 2026-10-31: the front end restructured (track M)
+
+Track M restructured stages 1-7 for speed, model and 6502 together, exact
+against each other on all 2,485 check views and on the live disc's 619
+frames. Cycles of `objects_frame` [measured, `make objects`'s
+`tools/objectcheck.mjs --entrance --json` on the 65 entrance views (each a
+turn) and their 260 walk steps], median / p90 / most, against the
+pipeline as the projection track left it (fb90ec2, the same check):
+
+| | step before | step after | turn before | turn after |
+|---|---|---|---|---|
+| object pass | 7,051 / 14,110 / 17,991 | 7,057 / 14,106 / 17,997 | 7,051 / 14,419 / 17,991 | 7,057 / 14,420 / 17,997 |
+| transform | 13,846 / 18,999 / 23,418 | 13,889 / 19,026 / 23,462 | 40,039 / 62,617 / 71,621 | 39,594 / 61,863 / 70,893 |
+| vertex pass (new) | | 18,398 / 30,657 / 42,513 | | 18,421 / 30,675 / 42,513 |
+| projection | 17,524 / 23,224 / 34,354 | 10,570 / 15,786 / 23,742 | 17,245 / 23,952 / 34,142 | 10,582 / 15,780 / 23,686 |
+| faces' own | 48,788 / 69,632 / 98,496 | 12,859 / 19,288 / 30,126 | 48,880 / 70,973 / 98,476 | 12,781 / 19,393 / 30,126 |
+| near clip + guard band | 49,392 / 103,854 / 157,854 | | 48,813 / 103,492 / 154,906 | |
+| the cone (new) | | 66,867 / 139,289 / 176,567 | | 66,799 / 139,665 / 181,587 |
+| 2D clip | 36,072 / 54,839 / 83,192 | 14,653 / 35,140 / 71,564 | 33,918 / 53,882 / 83,145 | 14,181 / 34,618 / 71,414 |
+| drawn test | 5,143 / 9,166 / 14,515 | 4,593 / 8,728 / 14,515 | 5,143 / 9,084 / 14,517 | 4,321 / 8,563 / 14,517 |
+| sort | 12,079 / 28,454 / 47,980 | 8,771 / 27,337 / 52,294 | 12,079 / 28,454 / 47,980 | 12,206 / 30,276 / 52,282 |
+| **total** | **205,851 / 276,842 / 331,324** | **184,419 / 247,910 / 305,945** | **236,918 / 309,672 / 372,760** | **216,847 / 287,068 / 356,276** |
+
+(The near clip and guard band row sums each view's two before taking the
+median. Matrix, output and glue are as before.) On the live disc (`make
+live`), stages 1-7 went from a median 7.25 fields a frame to 6.22, walks
+7.76 to 6.69, turns 9.52 to 8.58.
+
+- **Kept**: one pass over each object's vertices (a band test by bit
+  lengths, then each vertex of a face projected whole projected once, with
+  the shared entries taking about half: 23 full, 7 by Z and 16 by X and Z
+  in a median step's view); faces projected whole taken or dropped by
+  their outcodes, the 2D clip only for those crossing the edges; the sort's
+  compares remembered by pair of slots while the camera's cells hold.
+- **The cone** (proposed, amending decisions 15 and 17): faces the
+  projection can't take whole drawn as the view's rectangle clipped by
+  their edges' planes through the eye. Exact, and the original's pyramid
+  again, but at the median it costs about what the near clip and the guard
+  band did: about three such faces a view, each about four lines and five
+  crossings, and the crossings' division and the lines' products are the
+  frame's two largest routines. Its picture against the model before it:
+  755 of 3,515,200 pixels over the entrance views and walks, none in the
+  order; 5,130 of 26,877,760 over all check views, the order in 3; against
+  the ZX oracle 1,389,622 of 1,406,080 pixels agree, against 1,389,686.
+- **Measured and not built**: a 16-bit camera space with a block exponent
+  an object changes no pixel of the check views (V >> 6, world units,
+  changes 4,571); the transform's adds it would shorten aren't where the
+  cycles are yet.
+- **The area records** come from the logic's database at area entry
+  (merged from a helper's branch: the entry above).
+- The pipeline's code now fills its sideways bank on the live disc but for
+  a few dozen bytes: the old near clip's arithmetic, the guard band and the
+  slow fills went, and a line's quad and a point's square went to tables,
+  to make room.
