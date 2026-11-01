@@ -239,7 +239,9 @@ In order. Formats are the model's; the 6502 matches them exactly.
     the buffer just drawn, at once by `frame_end` or by T1's interrupt
     as the view's last line goes (section 1, as built).
 
-Then the panel and the logic, which are later layers.
+Round the frame, the logic (`docs/research/logic6502.md`) and the panel
+(`docs/research/panel.md`): Driller's instruments round the view, drawn
+into both buffers in the beam's window as the logic's variables change.
 
 ## 5. Checking
 
