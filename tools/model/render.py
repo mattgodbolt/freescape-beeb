@@ -190,14 +190,54 @@ def _cone_face(s, m, f, poly, cs, project, image, tally):
     return (out, near, bool(any_code)) if clip.drawable(out) else None
 
 
+# A candidate with every vertex of its shape in one of three half-spaces
+# through the eye, each beyond one of the view's sides (BOUNDS), can't be
+# seen, so it's passed over before any of its faces is tried (beyond_view).
+# The 6502 keeps each half-space's greatest value over an object's vertices
+# with the transform's cache, as the orientation alone sets it, and takes
+# the frame's camera off it (src/transform.6502's "The bounds"). Off, every
+# candidate's faces are tried, as before.
+OBJECT_CULL = True
+
+# The half-spaces, f(V) < 0 with f each of these, camera space: beyond the
+# planes x = -2z/3, x = 2z/3 and y = z/3 through the eye, outside the view's
+# sides at x = +-(XC / FX) z and its top at y = (YC / FY) z (asserted), so
+# that each misses the view's pyramid wherever the point is. (Below the
+# view's bottom, y = -z/3, measured: too few candidates for what it cost the
+# 6502 a turn.)
+BOUNDS = (
+    lambda x, y, z: 3 * x + 2 * z,      # left
+    lambda x, y, z: 2 * z - 3 * x,      # right
+    lambda x, y, z: z - 3 * y,          # top
+)
+BOUND_BITS = 22                         # (an object's greatest values fit 23 signed bits: the 6502's)
+
+
+def beyond_view(s, m, c):
+    """Whether every vertex of shape s is in one of BOUNDS' half-spaces
+    (OBJECT_CULL), so that none of its faces can be seen."""
+    from tools.model.view import FX, FY, XC, YC
+    assert 3 * XC < 2 * FX and 3 * YC < FY
+    for v in s.vertices:
+        mv = transform.mul(m, v)
+        assert all(abs(f(*mv)) < 1 << BOUND_BITS for f in BOUNDS)
+    vs = [transform.transform(m, v, c) for v in s.vertices]
+    return any(all(f(*v) < 0 for v in vs) for f in BOUNDS)
+
+
 def draw_faces(cand, m, c, tally, check=False):
     """A candidate's seen faces: those the projection can take whole
     projected, and clipped to the view in 2D if they cross its edges; the
     rest, through the cone (clip.py), the view's rectangle clipped to their
     edges' planes through the eye; lines and points clipped in 3D, then
     widened. Its drawn faces, and its own vertices it projected, as (world
-    vertex, view coordinates)."""
+    vertex, view coordinates). None of them when every vertex of its shape
+    is beyond one side of the view (OBJECT_CULL)."""
     s = cand.shape
+    if OBJECT_CULL and beyond_view(s, m, c):
+        # (not one of counts.KEYS: tools/objectcases.py's)
+        tally["passed_over"] = tally.get("passed_over", 0) + 1
+        return [], []
     used = sorted({i for f in cand.faces for i in f.loop})
     if s.corner is not None:
         every = transform.cuboid(m, s.corner, s.size, c)

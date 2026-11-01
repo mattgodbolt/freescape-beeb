@@ -313,7 +313,24 @@ SECTION ObjCode
 
 \ ---------------------------------------------------------------------------
 \ objects_frame: stages 1 to 7, the camera (cam_*) to the faces nearest
-\ first in out_* (src/clip.6502). Needs the maths' tables readable.
+\ first in out_* (src/clip.6502). Needs the maths' tables readable. A
+\ candidate whose cache isn't good is filled first, and one with a bound
+\ below M c's (src/transform.6502's "The bounds") is passed over: every
+\ vertex is beyond a side of the view.
+\
+\ BD_BEYOND p: on to of_next if candidate slot X's bound p is below M c's
+\ (signed 24-bit, each top byte kept with its sign bit flipped, so that
+\ their order is unsigned): mostly the top bytes decide, else the low two
+MACRO BD_BEYOND p
+    LDA bd_k2 + p * N_OBJ,X : CMP bd_mc + 3 * p + 2 : BCC beyond
+    BNE done
+    LDA bd_k0 + p * N_OBJ,X : CMP bd_mc + 3 * p
+    LDA bd_k1 + p * N_OBJ,X : SBC bd_mc + 3 * p + 1
+    BCS done                            ; (the top bytes alike: the low two's order)
+.beyond
+    JMP of_next
+.done
+ENDMACRO
 .objects_frame
     ZA_ENTRY
     JSR matrix_update
@@ -326,16 +343,27 @@ SECTION ObjCode
     JSR object_pass
     STZ tf_n : STZ out_vn : STZ dl_n : STZ out_over
     LDX #0
-    CPX cd_n : BEQ of_sort
+    CPX cd_n : BNE of_candidate
+    JMP of_sort
 .of_candidate
     STX of_cand
     LDA cd_obj,X : STA of_slot
-    LDA cd_vmask,X
+    TAX
+    LDA ob_stamp,X : CMP cache_gen : BEQ filled
+    JSR transform_fill
     LDX of_slot
+.filled
+    BD_BEYOND BD_L
+    BD_BEYOND BD_R
+    BD_BEYOND BD_T
+    ASSERT BD_N = 3
+    LDY of_cand : LDA cd_vmask,Y
     JSR transform_object
 .of_transformed                     ; (tools/objectcheck.mjs reads the vertices here)
     JSR draw_object
-    LDX of_cand : INX : CPX cd_n : BNE of_candidate
+.of_next
+    LDX of_cand : INX : CPX cd_n : BEQ of_sort
+    JMP of_candidate
 .of_sort
     JSR sort_objects
     JMP emit_faces

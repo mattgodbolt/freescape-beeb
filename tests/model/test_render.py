@@ -44,6 +44,37 @@ class Views(unittest.TestCase):
                     self.assertEqual(culled.bytes, whole.bytes)
                     self.assertEqual([f.poly for f in culled.faces], [f.poly for f in whole.faces])
 
+    def test_object_cull(self):
+        """The candidates passed over as beyond the view's sides
+        (render.OBJECT_CULL) draw no pixel, over the entrance views turned:
+        each view's bytes are the same without the cull; and some are."""
+        passed = 0
+        saved = render.OBJECT_CULL
+        try:
+            for a, _, c, v in self.views[::4]:
+                for yaw in range(0, 72, 9):
+                    for pitch, roll in ((0, 0), (64, 0), (9, 63)):
+                        cc = dataclasses.replace(c, yaw=yaw, pitch=pitch, roll=roll)
+                        render.OBJECT_CULL = True
+                        on = render.render(db(), a, cc)
+                        render.OBJECT_CULL = False
+                        off = render.render(db(), a, cc)
+                        self.assertEqual(on.bytes, off.bytes)
+                        passed += off.counts["faces_seen"] - on.counts["faces_seen"]
+        finally:
+            render.OBJECT_CULL = saved
+        self.assertGreater(passed, 0)
+
+    def test_bounds_miss_the_view(self):
+        """Each of render.BOUNDS is non-negative everywhere in the view's
+        pyramid: at its corners' rays, so on every ray between."""
+        from tools.model.view import FX, FY, XC, YC
+        for sx in (-XC, XC):
+            for sy in (-YC, YC):
+                ray = (sx * FY, sy * FX, FX * FY)      # (x, y, z) through the corner, z > 0
+                for f in render.BOUNDS:
+                    self.assertGreater(f(*ray), 0)
+
     def test_near_clip_used(self):
         self.assertTrue(any(f.near_clipped for _, _, _, v in self.views for f in v.faces))
         for _, _, _, v in self.views:

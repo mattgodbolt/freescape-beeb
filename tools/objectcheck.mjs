@@ -6,7 +6,7 @@
 //   node tools/objectcheck.mjs BUILD [--db build/logic6502/LOGIC] [--cases CASES.json]
 //                              [--areas build/gen/areas.json] [--entrance]
 //                              [--view TEXT] [--verbose] [--json OUT]
-//                              [--profile | --profile-walks]
+//                              [--profile | --profile-walks] [--floor] [--candidates]
 //
 // BUILD holds the check build (OCODE, into the front end's bank, OANDY, into
 // ANDY, OMORE, OCHECK, OAREA, OCONST, OMATHS, OTABLES, ACONV, symbols.json)
@@ -18,7 +18,9 @@
 //   - for each view, through objects_frame:
 //     - stage 2: the candidates, their seen faces and the vertices those use;
 //     - stage 3: each candidate's camera-space vertices, read as
-//       transform_object returns;
+//       transform_object returns, but those the model passes over as
+//       beyond the view's sides (render.beyond_view), which mustn't be
+//       transformed;
 //     - stages 4-6: each candidate's drawn faces, colour and polygon;
 //     - stage 7: the drawn objects' order;
 //     - the output, the faces nearest first, as the rasteriser reads them;
@@ -127,7 +129,7 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]);
-for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjMore", "ObjCheck"]) {
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjBound", "ObjMore", "ObjCheck"]) {
     const a = sections[name];
     allowed.push([a.org, a.guard]);
 }
@@ -155,6 +157,7 @@ const STAGES = [
     ["object_pass", "pass"],
     ["transform_setup", "transform"],
     ["transform_object", "transform"],
+    ["transform_fill", "transform"],
     ["near_clip", "near"],
     ["guard_clip", "guard"],
     ["project", "project"],
@@ -238,7 +241,12 @@ m.tm.processor.debugInstruction.add((at) => {
     const k = callees.get(pc);
     if (k) calls[k] = (calls[k] || 0) + 1;
     // each candidate's cycles, from its turn in objects_frame's loop to the
-    // next's: the floor's apart (decision 8a)
+    // next's: the floor's apart (decision 8a), and (--candidates) those that
+    // draw nothing
+    if (pc === candidateAt || pc === sortAt) {
+        if (cand) cands.push({ slot: cand.slot, cycles: now - cand.t, drew: m.peek(S("tf_n"), space(S("tf_n"))) > cand.faces });
+        cand = pc === candidateAt ? { t: now, slot: arr("cd_obj", cpu.x), faces: m.peek(S("tf_n"), space(S("tf_n"))) } : null;
+    }
     if (pc === candidateAt) inFloor = floorSlot !== null && arr("cd_obj", cpu.x) === floorSlot;
     else if (pc === sortAt) inFloor = false;
     return false;
@@ -246,6 +254,8 @@ m.tm.processor.debugInstruction.add((at) => {
 let inFloor = false;
 let floorTally = {};
 let floorSlot = null;
+let cand = null; // the candidate being drawn: its start and the faces drawn before it
+let cands = []; // each candidate's cycles, and whether it drew a face
 const candidateAt = has("of_candidate") ? K("of_candidate") : -1;
 const sortAt = has("of_sort") ? K("of_sort") : -1;
 
@@ -265,13 +275,15 @@ async function counted(entry) {
     calls = {};
     floorTally = {};
     inFloor = false;
+    cand = null;
+    cands = [];
     stack.length = 0;
     lastPc = -1;
     const r = await m.call(entry, { secs: 30 });
     if (lastPc >= 0) tally[current] = (tally[current] || 0) + (m.tm.elapsedCycles - lastCycles);
     const t = tally;
     tally = null;
-    return { total: r.total, stages: t, calls, floor: floorTally };
+    return { total: r.total, stages: t, calls, floor: floorTally, cands };
 }
 
 // --- Stage 1: the matrices.
@@ -307,7 +319,7 @@ console.log(`stage 6: ${(cases.crossings ?? []).length} crossings of the 2D clip
 const full = has("of_transformed");
 const results = [];
 let area = -1;
-const counts = { views: 0, cands: 0, verts: 0, faces: 0, out: 0 };
+const counts = { views: 0, cands: 0, verts: 0, faces: 0, out: 0, passed: 0 };
 for (const view of views) {
     if (view.area !== area) {
         m.poke(S("check_area"), view.area);
@@ -353,7 +365,7 @@ for (const view of views) {
     strayRuns.length = 0;
     floorSlot = view.floor ?? null;
     profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name));
-    const { total, stages, calls: made, floor } = await counted(S(full ? "check_frame" : "check_pass"));
+    const { total, stages, calls: made, floor, cands: drawing } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
     if (strayRuns.length) fail(`${name}: ran outside its code at ${strayRuns.join(" ")}`);
@@ -375,10 +387,19 @@ for (const view of views) {
     counts.views++;
     counts.cands += n;
     if (full) {
-        // stage 3: camera-space vertices
+        // stage 3: camera-space vertices, of every candidate but those passed
+        // over as beyond the view's sides, which aren't transformed
+        let t = 0;
         for (let i = 0; i < view.cands.length; i++) {
             const w = view.cands[i];
-            const g = seen[i];
+            if (w.culled) {
+                if (seen[t] && seen[t].slot === w.slot) {
+                    fail(`${name}: candidate ${i} transformed, beyond the view's sides`);
+                    t++;
+                }
+                continue;
+            }
+            const g = seen[t++];
             if (!g || g.slot !== w.slot) {
                 fail(`${name}: candidate ${i} not transformed`);
                 continue;
@@ -391,6 +412,8 @@ for (const view of views) {
                     fail(`${name}: slot ${w.slot} vertex ${j} ${g.verts[j]} want ${v}`);
             }
         }
+        if (t !== seen.length) fail(`${name}: ${seen.length} candidates transformed, want ${t}`);
+        counts.passed += view.cands.filter((w) => w.culled).length;
         // stages 4-6: each candidate's drawn faces, then 7 and the output
         const faceAt = (f, base) => {
             const nv = arr(`${base}_fn`, f);
@@ -437,7 +460,10 @@ for (const view of views) {
             fail(`${name}: ${projected} vertices projected, want ${view.work.projected}`);
     }
     if (verbose) console.log(name, total, JSON.stringify(stages));
-    results.push({ name, total, stages, calls: made, floor, entrance: /^a\d+-e\d+$/.test(name) });
+    const idle = drawing.filter((c) => !c.drew);
+    results.push({ name, total, stages, calls: made, floor, entrance: /^a\d+-e\d+$/.test(name),
+                   nothing: { n: idle.length, of: drawing.length, cycles: idle.reduce((a, c) => a + c.cycles, 0) },
+                   ...(args.includes("--candidates") ? { cands: drawing } : {}) });
 }
 
 // --- The cycles.
@@ -491,6 +517,15 @@ const report = (label, rows) => {
         console.log(`  calls a view, median / max:`);
         for (const c of CALLEES) line(` ${c}`, rows.map((r) => (r.calls && r.calls[c]) || 0));
     }
+    if (args.includes("--candidates") && rows[0].nothing) {
+        // the candidates that draw no face: how many, and their cycles (from
+        // their turn in objects_frame's loop to the next's)
+        const sum = (f) => rows.reduce((a, r) => a + f(r), 0);
+        console.log(`  candidates that draw nothing: ${sum((r) => r.nothing.n)} of ${sum((r) => r.nothing.of)}; ` +
+            `their cycles a view, median / p90 / max, and their share of all`);
+        line("nothing", rows.map((r) => r.nothing.cycles));
+        console.log(`  ${"share".padEnd(10)} ${(100 * sum((r) => r.nothing.cycles) / sum((r) => r.total)).toFixed(1)}%`);
+    }
     if (args.includes("--floor") && rows[0].floor) {
         console.log(`  the floor's share (decision 8a): median / max of its cycles, and of the stage's`);
         for (const st of STAGE_NAMES) {
@@ -508,8 +543,8 @@ report("entrance views, each a turn (the cache refilled)", results.filter((r) =>
 report("their walks, each a step (the cache kept)", results.filter((r) => /-w\d+$/.test(r.name)));
 report("all views", results);
 console.log(
-    `checked ${counts.views} views: ${counts.cands} candidates, ${counts.verts} vertices, ` +
-        `${counts.faces} faces, ${counts.out} output faces`,
+    `checked ${counts.views} views: ${counts.cands} candidates (${counts.passed} passed over as beyond the view), ` +
+        `${counts.verts} vertices, ${counts.faces} faces, ${counts.out} output faces`,
 );
 if (profile) {
     const total = [...profile.values()].reduce((a, b) => a + b, 0);

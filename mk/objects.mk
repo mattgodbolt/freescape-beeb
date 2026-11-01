@@ -184,6 +184,8 @@ SECTION ObjOut, org = &0400, guard = &0A00, virtual = TRUE
 ENDSECTION
 SECTION ObjMemo, org = &7000, guard = &7680, virtual = TRUE
 ENDSECTION
+SECTION ObjBound, org = &7680, guard = &8000, virtual = TRUE
+ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 

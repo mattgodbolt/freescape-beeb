@@ -111,7 +111,8 @@ ENDIF
 \ Main RAM's &3000 up to SCREEN: the front end's data, which only
 \   objects_frame and area_enter read and write: the transform's cache
 \   (ObjCache), the sort's memory (ObjMemo), the pipeline's tables
-\   (ObjConst) and the area's working copy (ObjArea); so live_loop clears
+\   (ObjConst), the area's working copy (ObjArea) and the objects' bounds
+\   (ObjBound, kept with the cache); so live_loop clears
 \   ACCCON's X before objects_frame (frame_begin sets X for the buffer
 \   drawn, after), and lv_enter_area before area_enter. The rest, to
 \   SCREEN, is the front end's room for more of the same. Until clear_work
@@ -172,6 +173,9 @@ ENDSECTION
 SECTION ObjConst, org = obj_memo_end, filename = "OCONST", guard = SCREEN
 ENDSECTION
 SECTION ObjArea, org = obj_const_end, guard = SCREEN, virtual = TRUE
+ENDSECTION
+\ (and the objects' bounds, kept with the cache: src/transform.6502)
+SECTION ObjBound, org = obj_area_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
 
 \ The logic, in this build's map: its variables after area_enter's code,
@@ -1823,6 +1827,9 @@ ENDSECTION
 SECTION ObjAndy
 .obj_andy_end
 ENDSECTION
+SECTION ObjBound
+.obj_bound_end
+ENDSECTION
 SECTION AreaConv
 .area_conv_end
 ENDSECTION
@@ -1868,9 +1875,10 @@ ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
 ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
 ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 \ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
-\ memory, the pipeline's tables and the area's working copy.
+\ memory, the pipeline's tables, the area's working copy and the objects'
+\ bounds.
 ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
-ASSERT obj_const_end <= obj_area_end AND obj_area_end <= SCREEN
+ASSERT obj_const_end <= obj_area_end AND obj_area_end <= obj_bound_end AND obj_bound_end <= SCREEN
 \ Shadow RAM's &3000 on (with X set): the logic's lists by face.
 ASSERT logic_faces_end <= SCREEN AND LOGIC_FACES_ORG >= &3000
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER

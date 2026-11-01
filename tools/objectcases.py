@@ -11,9 +11,10 @@ directory, the camera, and from the model (tools/model/):
 - matrix: M (stage 1);
 - cands: the object pass's candidates in order (stage 2), each its slot,
   the mask of its seen faces (bit j for its shape's face j), the mask of
-  the vertices they use, those vertices in camera space (stage 3), and the
-  faces it draws, each a colour and a polygon in view coordinates
-  (stages 4-6);
+  the vertices they use, those vertices in camera space (stage 3), whether
+  it's passed over as beyond the view's sides (render.beyond_view, which
+  transforms none of them for its faces), and the faces it draws, each a
+  colour and a polygon in view coordinates (stages 4-6);
 - order: the drawn objects' slots, farthest first (stage 7);
 - out: the faces as the rasteriser takes them, nearest first;
 - work: the lines the cone made (each edge_line), and the vertices projected
@@ -111,6 +112,7 @@ def case(db, layout, a_index, area, camera, name):
             off = sum(1 << i for i in used if not clip.projectable(tuple(verts[str(i)])))
         rows.append({
             "slot": slots[cand.index], "mask": mask, "vmask": vmask, "verts": verts, "off": off,
+            "culled": render.OBJECT_CULL and render.beyond_view(s, m, c),
             "faces": [[f.colour, [list(p) for p in f.poly]] for f in faces],
         })
     # The area's floor object (decision 8a), for the cycles' accounting.

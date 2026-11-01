@@ -187,9 +187,30 @@ faces use).
   M: by quarter squares, `f64(u + 64 + m) − f64(u + 64 − m)` from a
   768-byte table of 64 (n² DIV 4), both indices bytes: three byte
   subtractions a product. The fills skip a zero cell or a zero entry (a
-  level camera's matrix has four). An orientation with an entry of ±65
-  (`mat_big`) would run the table's index off its end for a cell of 0 or
-  127, so its fills use the maths' `mul` instead.
+  level camera's matrix has four; since the eighth round a level camera's
+  point takes y as 4096 py and only the four entries of x and z), and a
+  generic object's vertex the one before it again (a pointed pyramid's apex,
+  three times over) takes that slot's vector. An orientation with an entry
+  of ±65 (`mat_big`) would run the table's index off its end for a cell of
+  0 or 127, so its fills use the maths' `mul` instead.
+- **The bounds** (since the eighth round; the model's `render.beyond_view`,
+  `OBJECT_CULL`): each of L = 3x + 2z, R = 2z − 3x and T = z − 3y is zero on
+  a plane through the eye beyond one of the view's sides (x = ∓2z/3 against
+  the view's ∓0.656z, y = z/3 against its 0.328z: asserted), so a candidate
+  with every vertex where one is negative can't be seen, and `objects_frame`
+  passes it over before its transform. A vertex's value is the function of
+  M v less its value of M c, so an object's greatest over its vertices of
+  M v's is kept with its cache (`bd_k*`, in `ObjBound`), which the
+  orientation alone sets: the fill makes it from each vector as it's made
+  (`fill_acc`), a box's from its corner plus each edge that raises it, by
+  the edge's axis (`bd_sel`, from M by `bound_sel`), any other object's as
+  the greatest of its vertices'. The frame's of M c (`bound_frame`) are made
+  once, in 32 bits and saturated to 24, and a candidate's test is three
+  compares, mostly of top bytes kept with their sign bits flipped so that
+  their order is unsigned. Every object's bounds fit 23 bits signed (the
+  model asserts, `BOUND_BITS`), so the 24-bit arithmetic is exact. The
+  bottom of the view (z + 3y) was measured and left out: it caught the
+  fewest candidates for its cost on a turn.
 
 **Does the cache pay?** Matt asked (via the coordinator) for the cached
 form against a straight per-frame transform. `make objects-nocache` builds
@@ -455,7 +476,8 @@ with the others kept, and 24 random angles (the strafes since the fourth
 round: before it, 2,485 cameras). The checker runs each through
 `objects_frame` headless
 and compares the matrix, the candidates and their masks, every candidate's
-camera-space vertices (read as `transform_object` returns), every
+camera-space vertices (read as `transform_object` returns; a candidate
+passed over as beyond the view's sides mustn't be transformed), every
 candidate's drawn faces, the order and the output, exactly; the work no
 output need show, because what it would change can be cut away later (the
 lines the cone makes, `edge_line`'s and `image_line`'s calls, but an
