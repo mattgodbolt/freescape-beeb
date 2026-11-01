@@ -130,9 +130,12 @@ const bucket = (a) => {
     }
     return b;
 };
-
 // Instruction counts at a few addresses: the runs entered, the shared bytes.
-const counted = { runs: S("put_run.jsr"), joins: S("put_bnd") };
+// The runs entered (every one goes through put_go), and the row runs' code:
+// a byte of the view written from outside it is a shared one.
+const counted = { runs: S("put_go") };
+const runsLo = S("rr_rows");
+const runsHi = runsLo + 256 * Math.ceil(VIEW_H / 8);
 
 await m.call(S("check_init"));
 const stub = await m.empty();
@@ -227,12 +230,13 @@ async function frame(s, shadow, fresh) {
         prevAddr = a;
         prevT = now;
         if (a === counted.runs) counts.runs++;
-        else if (a === counted.joins) counts.joins++;
         return false;
     });
     const onWrite = m.cpu.debugWrite.add((a) => {
-        if (viewAddrs.has(a)) counts.bytes++;
-        else if (!writable(a) && strays.length < 8) strays.push(a);
+        if (viewAddrs.has(a)) {
+            counts.bytes++;
+            if (prevAddr < runsLo || prevAddr >= runsHi) counts.joins++;
+        } else if (!writable(a) && strays.length < 8) strays.push(a);
         return false;
     });
     const { total } = await m.call(S("check_frame"));
@@ -266,6 +270,8 @@ async function frame(s, shadow, fresh) {
     const want_counts = countsOf(s);
     if (overflow !== want_counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${want_counts.overflow}`);
     if (fresh && counts.bytes !== want_counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${want_counts.bytes}`);
+    if (fresh && counts.joins !== want_counts.joins) problems.push(`${counts.joins} shared bytes written, the model's ${want_counts.joins}`);
+    if (fresh && counts.runs !== want_counts.runs) problems.push(`${counts.runs} runs entered, the model's ${want_counts.runs}`);
     return { cycles, prof, counts, problems };
 }
 

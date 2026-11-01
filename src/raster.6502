@@ -152,7 +152,7 @@ ZA_AUTO 2, ch_gl
 ZA_AUTO 2, ch_gh
 ZA_AUTO 2, ch_i
 ZA_AUTO 2, ch_end
-ZA_AUTO1 f_v0, f_vend, f_ktop, f_kbot, f_yend
+ZA_AUTO1 f_v0, f_vend, f_ktop, f_kbot, f_yend, f_pat
 
 SECTION RasterCode
 
@@ -356,13 +356,7 @@ ENDIF
     STA f_vend
     LDA rs_fv,X : STA f_v0
     CLC : ADC f_vend : STA f_vend       ; (mod 256: the chains wrap by compares)
-    \ This face's pattern bytes for each phase, and their halves.
-    LDA rs_fc,X : ASL A : ASL A : TAY
-    FOR k = 0..3
-        LDA rs_pat + k,Y : STA r_pv + k
-        AND #PIX_LEFT : STA r_pva + k
-        LDA r_pv + k : AND #PIX_RIGHT : STA r_pvb + k
-    NEXT
+    LDA rs_fc,X : ASL A : ASL A : STA f_pat
     \ Each vertex's line, the first whose centre is at or below it,
     \ (y + 7) >> 4; the top vertex, the first on the highest line (a chain
     \ from any vertex on that line skips the edges to the others, which
@@ -387,6 +381,23 @@ ENDIF
     CMP f_kbot : BCC lines
     RTS
 .lines
+    IF NOT(RASTER_PAINTER)
+        \ A face whose lines are all full already draws nothing: it goes
+        \ before its edges are set up. (Painted faces draw over full lines.)
+        TAX
+    .full
+        LDA head,X : BNE open
+        INX : CPX f_kbot : BCC full
+        RTS
+    .open
+    ENDIF
+    \ This face's pattern bytes for each phase, and their halves.
+    LDY f_pat
+    FOR k = 0..3
+        LDA rs_pat + k,Y : STA r_pv + k
+        AND #PIX_LEFT : STA r_pva + k
+        EOR r_pv + k : STA r_pvb + k   ; (the byte less its left half)
+    NEXT
     \ Chain 0 walks the way the last face's left chain did: faces of one
     \ winding then needn't swap.
     LDA ch_i : STA ch_i+1
@@ -946,20 +957,41 @@ ZA_AUTO1 m_v2
     LDA m_p : STA e_dx : LDA m_p+1 : STA e_dx+1
     JSR product
     LDA e_sh : CLC : ADC #4 : JSR shr24
-    BRA offset
+    JMP offset
 .up3 ASL m_p : ROL A : ROL m_p+2
 .up2 ASL m_p : ROL A : ROL m_p+2
 .up1 ASL m_p : ROL A : ROL m_p+2
-.by8 STA e_g : STA e_dx
-    LDA m_p+2 : STA e_g+1 : STA e_dx+1
-    \ The offset g t0 >> 4 = (g 16 t0) >> 8, which is product's g (256 +
-    \ 16 t0) >> 8, less g.
+.by8 STA e_g : TAX
+    LDA m_p+2 : STA e_g+1
+    \ The offset g t0 >> 4 = (g T) >> 8, T = 16 t0, by quarter squares as
+    \ product's: the low byte's product's high byte (its low byte only for
+    \ the borrow), and the high byte's whole product.
     LDA e_t0 : ASL A : ASL A : ASL A : ASL A
-    STA e_f : STA product.lo + 1 : STA product.hi + 1
-    JSR product
+    STA e_f : STA o_lo + 1 : STA o_hi + 1
+    TXA : SEC : SBC e_f : BCS o_pos
+    EOR #&FF : ADC #1                   ; |u - T| (C = 0)
+.o_pos
+    TAY
     SEC
-    LDA m_p+1 : SBC e_g : STA m_r
-    LDA m_p+2 : SBC e_g+1 : STA m_r+1
+.o_lo
+    LDA rq_lo,X : SBC rq_lo,Y
+.o_hi
+    LDA rq_hi,X : SBC rq_hi,Y : STA m_r
+    STZ m_r+1
+    LDX e_g+1 : BEQ offset
+    LDA e_f : STA o_lo2 + 1 : STA o_hi2 + 1
+    TXA : SEC : SBC e_f : BCS o_pos2
+    EOR #&FF : ADC #1
+.o_pos2
+    TAY
+    SEC
+.o_lo2
+    LDA rq_lo,X : SBC rq_lo,Y : STA m_v2
+.o_hi2
+    LDA rq_hi,X : SBC rq_hi,Y : TAX
+    CLC
+    LDA m_r : ADC m_v2 : STA m_r
+    TXA : ADC #0 : STA m_r+1
     BRA offset
 .dn3 LSR m_p+2 : ROR A
 .dn2 LSR m_p+2 : ROR A
@@ -980,13 +1012,10 @@ ZA_AUTO1 m_v2
     LDX e_c
     STA ch_p,X : ZA_INDEXEDBY 0..1
     LDA e_x : STA ch_xl,X : ZA_INDEXEDBY 0..1
-    \ An edge of one line needn't step.
-    LDA ch_end,X : ZA_INDEXEDBY 0..1
-    SEC : SBC r_y : CMP #2 : BCS steps
-    LDA #STEP_NONE
-    JMP patch_steps
-.steps
-    \ The gradient, with dx's sign
+    \ The gradient, with dx's sign. (An edge that crosses one line steps
+    \ once, harmlessly: its chain takes its next edge, or the face ends,
+    \ before anything reads the x again; and so a short edge, which has no
+    \ gradient, steps by whatever e_g holds.)
     LDA e_neg : BMI down
     LDA e_g : STA ch_gl,X : ZA_INDEXEDBY 0..1
     LDA e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
@@ -1278,14 +1307,14 @@ MACRO BGLINE k, next
         JSR row_setup
     .row
     ENDIF
-    LDA hsplit,X : STA bg_split
     TXA : ORA bg_buf : TAY              ; the line's record for this screen
     LDA head,X : BNE some
     \ Faces filled it.
     LDA #0 : STA bg_was,Y
     JMP stepped
 .some
-    BPL gaps
+    LDA hsplit,X : STA bg_split
+    LDA head,X : BPL gaps
     \ No face here: background alone, which the screen may hold already.
     LDA bg_split : INC A
     CMP bg_was,Y : BNE draw

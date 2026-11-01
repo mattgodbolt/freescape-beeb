@@ -94,61 +94,35 @@ FOR r = 0..<RR_ROWS
     EQUB HI(VIEW_ADDR + r * SCREEN_ROW)
 NEXT
 
-\ row_setup: the writer's pointers for line X's character row; the last
-\ row's plant is put back where it's kept.
-.row_setup
-{
-    TXA : LSR A : LSR A : LSR A
-    CMP r_row : BEQ row_same
-    TAY
-    LDA r_pcur
-    PHY : LDY r_row : STA rr_planted,Y : PLY
-}
-\ row_load: row Y's plant and pointers, as row r_row.
+\ row_load: row Y's plant and pointers, as row r_row (writer_begin).
 .row_load
     STY r_row
+    BRA row_loaded
+\ row_setup: the writer's pointers for line X's character row; the last
+\ row's plant is put back where it's kept. Keeps X.
+.row_setup
+    TXA : LSR A : LSR A : LSR A
+    CMP r_row : BEQ row_same
+    LDY r_row : STA r_row
+    LDA r_pcur : STA rr_planted,Y
+    LDY r_row
+.row_loaded
     LDA rr_planted,Y : STA r_pcur
     LDA row_scr,Y : STA r_bp0+1 : INC A : STA r_bp1+1
-    TYA : CLC : ADC #HI(rr_rows) : STA r_rr+1 : STA put_run.jsr+2 : STA put_go+2
+    TYA : ORA #HI(rr_rows) : STA r_rr+1 : STA put_go+2
 .row_same
     RTS
+ASSERT (HI(rr_rows) AND &0F) = 0 AND RR_ROWS <= 16
 
 \ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
-\ pattern byte A. Keeps X. It jumps into the row's run, whose planted RTS
-\ returns to put_run's caller. (A piece with no whole bytes enters at its
-\ plant, (lo + 1) DIV 2 = hi DIV 2, so it writes none.)
+\ pattern byte A, by put_go. Keeps X. (A piece with no whole bytes enters
+\ at its plant, (lo + 1) DIV 2 = hi DIV 2, so it writes none.)
 .put_run
-{
     STA r_v
-    LDY r_hi : LDA rr_pl,Y
-    CMP r_pcur : BNE replant
-.go
-    LDY r_lo : LDA rr_en,Y
-.enter
-    STA jsr+1
-    LDY r_y
-    LDA r_v
-.jsr
-    JMP rr_rows                         ; patched: the piece's row and entry
-    ZA_CANJUMP rr_rows
-    ZA_RETURN
-.replant
-    CMP #RR_END : BEQ to_end
-.move
-    \ The row's plant moves to where this piece ends.
-    LDY r_pcur : STA r_pcur
-    LDA #OP_STA_ABSY : STA (r_rr),Y
-    LDY r_pcur : LDA #OP_RTS : STA (r_rr),Y
-    BRA go
-.to_end
-    \ To the view's right edge: the run's own RTS ends it, unless the plant
-    \ is in its way.
-    LDY r_lo : LDA rr_en,Y
-    CMP r_pcur : BEQ blocked : BCS enter
-.blocked
-    LDA #RR_END
-    BRA move
-}
+    ENTER_ZP r_lo
+    PLANT_ZP r_hi
+    LDY r_y : LDA r_v
+    JMP put_go
 
 \ put_go: into the row's run (row_load patches the page, ENTER the slot),
 \ whose planted RTS returns to put_go's caller. Y the line, A the byte.
