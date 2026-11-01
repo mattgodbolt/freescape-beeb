@@ -224,10 +224,12 @@ ENDIF
         STA head + i * (VIEW_H DIV 8),X
     NEXT
     DEX : BPL heads
-    LDA #1
+    \ Each pool hands out nodes from 1; node 0 is a whole line, [0, VIEW_W)
+    \ with no next, which the background fills a line no face touched with.
     FOR k = 0..3
-        STA gtop + k
-        STZ pool_gn(k)                  ; node 0: no next (raster_background)
+        LDA #1 : STA gtop + k
+        STZ pool_gs(k) : STZ pool_gn(k)
+        LDA #VIEW_W : STA pool_ge(k)
     NEXT
     LDA #VIEW_H : STA nopen
     STZ rs_overflow
@@ -441,9 +443,9 @@ ENDIF
     STA f_yend
     LDA r_y : AND #3 : ASL A : TAX
     JMP (loop_phase,X)
-    ZA_CANJUMP loop0, loop1, loop2, loop3
+    ZA_CANJUMP entry0, entry1, entry2, entry3
 .loop_phase
-    EQUW loop0, loop1, loop2, loop3
+    EQUW entry0, entry1, entry2, entry3
 
 \ ---------------------------------------------------------------------------
 \ The line loop, a copy for each value of line AND 3: until the face's left
@@ -464,24 +466,80 @@ MACRO STEPG c
     LDA ch_p + c : ADC ch_gh + c : STA ch_p + c
 ENDMACRO
 
-\ The span [r_a, r_b) of line r_y into its gaps (pool k), writing what
-\ shows; each way out goes to next.
+\ The writer's runs entered inline (writer.6502's put_go and replant), for
+\ the hot paths: ENTER_* puts the piece's first whole byte's slot into
+\ put_go's jump, PLANT_* makes sure the row's plant is after its last
+\ (replant), and GO_V v writes the pattern byte v through them. Each takes
+\ its pixel boundary from a zero-page byte (_ZP) or from an array indexed
+\ by X (_X), and clobbers A and Y; ENTER comes first, as replant reads the
+\ entry. (A piece with no whole bytes enters at its plant and writes none,
+\ as put_run.)
+MACRO ENTER_ZP v
+    LDY v : LDA rr_en,Y : STA put_go + 1
+ENDMACRO
+MACRO ENTER_X arr
+    LDY arr,X : LDA rr_en,Y : STA put_go + 1
+ENDMACRO
+MACRO PLANT_ZP v
+    LDY v : LDA rr_pl,Y : CMP r_pcur : BEQ planted
+    JSR replant
+.planted
+ENDMACRO
+MACRO PLANT_X arr
+    LDY arr,X : LDA rr_pl,Y : CMP r_pcur : BEQ planted
+    JSR replant
+.planted
+ENDMACRO
+\ (for a piece to the view's right edge)
+MACRO PLANT_END
+    LDA #RR_END : CMP r_pcur : BEQ planted
+    JSR replant
+.planted
+ENDMACRO
+MACRO GO_V v
+    LDY r_y : LDA v : JSR put_go
+ENDMACRO
+
+\ A shared byte inline (writer.6502's put_bnd): BND_ZP v or BND_X arr puts
+\ in Y its offset from r_bp0 or r_bp1, for odd pixel boundary v (or arr,X)
+\ of line r_y, with C set for r_bp1; the caller makes the byte in A without
+\ touching C (LDA, AND, ORA); BND_PUT stores it. Clobbers A and Y.
+MACRO BND_ZP v
+    LDY v : LDA r_y : AND #7 : ORA bnd_ofs,Y : CPY #BND_SPLIT : TAY
+ENDMACRO
+MACRO BND_X arr
+    LDY arr,X : LDA r_y : AND #7 : ORA bnd_ofs,Y : CPY #BND_SPLIT : TAY
+ENDMACRO
+MACRO BND_PUT
+    BCS second
+    STA (r_bp0),Y
+    BRA done
+.second
+    STA (r_bp1),Y
+.done
+ENDMACRO
+
+\ The span [r_a, r_b) of line r_y, which is in X, into its gaps (pool k),
+\ writing what shows; each way out goes to next. Only a span that starts
+\ inside a gap and ends inside it too (split), or one on a line no face has
+\ touched (fresh), can be empty (r_a >= r_b), so only those test it.
+ASSERT UNTOUCHED >= 128 AND POOL_FIELD <= 128   ; a node is a positive byte
 MACRO INSERT k, next
 {
     GS = pool_gs(k)
     GE = pool_ge(k)
     GH = pool_gh(k)
     GN = pool_gn(k)
-    LDA r_a : CMP r_b : BCS out
-    LDX r_y
-    LDA head,X : BEQ out
-    CMP #UNTOUCHED : BEQ fresh_far
+    PV = r_pv + k
+    PVA = r_pva + k
+    PVB = r_pvb + k
+    LDA head,X : BEQ out                ; the line is full
+    BMI fresh_far                       ; no face here yet (UNTOUCHED)
     STZ r_prev
 .walk
-    TAX
     \ Past the gaps that end at or before the span starts.
-    LDA GE,X : CMP r_a : BEQ skip : BCS found
-.skip
+    TAX
+    LDA r_a : CMP GE,X : BCC found
     STX r_prev
     LDA GN,X : BNE walk
 .out
@@ -489,30 +547,36 @@ MACRO INSERT k, next
 .fresh_far
     JMP fresh
 .found
-    LDA GS,X : CMP r_b : BCS out        ; the span ends before this gap
-    \ X is a gap [s, e) the span overlaps: e > a and s < b.
-    CMP r_a : BCC cut_left
+    \ X is a gap [s, e) with e > a; the span overlaps it unless s >= b, and
+    \ then it overlaps none after it either.
+    LDA GS,X : CMP r_b : BCS out
+    CMP r_a : BCS at_start
+    JMP cut_left
+.at_start
     \ The piece starts at the gap's start: its shared byte, if s is odd.
-    STA r_lo
     LSR A : BCC left_even
-    LDA GH,X : AND #PIX_LEFT : ORA r_pvb + k
-    LDY GS,X : JSR put_bnd
+    BND_X GS
+    LDA GH,X : AND #PIX_LEFT : ORA PVB
+    BND_PUT
 .left_even
     LDA r_b : CMP GE,X : BCS whole
     \ [s, b): the gap becomes [b, e), waiting on the byte at b.
-    STA r_hi
-    LDA r_pv + k : JSR put_run
+    ENTER_X GS
+    PLANT_ZP r_b
     LDA r_b : STA GS,X
-    LDA GH,X : AND #PIX_RIGHT : ORA r_pva + k : STA GH,X
+    LDA GH,X : AND #PIX_RIGHT : ORA PVA : STA GH,X
+    GO_V PV
     JMP next
 .whole
     \ [s, e): the gap goes, with its shared byte at e if e is odd.
-    LDA GE,X : STA r_hi
-    LSR A : BCC right_even
-    LDA GH,X : AND #PIX_RIGHT : ORA r_pva + k
-    LDY GE,X : JSR put_bnd
+    LDA GE,X : LSR A : BCC right_even
+    BND_X GE
+    LDA GH,X : AND #PIX_RIGHT : ORA PVA
+    BND_PUT
 .right_even
-    LDA r_pv + k : JSR put_run
+    ENTER_X GS
+    PLANT_X GE
+    GO_V PV
     LDY r_prev : BNE unlink_mid
     LDY r_y
     LDA GN,X : STA head,Y : BNE unlinked     ; (Z from the LDA)
@@ -522,7 +586,7 @@ MACRO INSERT k, next
     LDA GN,X : STA GN,Y
 .unlinked
     \ On to the next gap if the span goes past this one.
-    LDA r_hi : CMP r_b : BCS out2
+    LDA GE,X : CMP r_b : BCS out2
     LDA GN,X : BEQ out2
     TAX
     JMP found
@@ -533,46 +597,57 @@ MACRO INSERT k, next
     LDA r_b : CMP GE,X : BCC split
     \ [a, e): the gap becomes [s, a), waiting on the byte at a; and the
     \ shared byte at e if e is odd.
-    LDA GE,X : STA r_hi
-    LSR A : BCC cut_even
-    LDA GH,X : AND #PIX_RIGHT : ORA r_pva + k
-    LDY GE,X : JSR put_bnd
+    LDA GE,X : LSR A : BCC cut_even
+    BND_X GE
+    LDA GH,X : AND #PIX_RIGHT : ORA PVA
+    BND_PUT
 .cut_even
-    LDA r_a : STA r_lo : STA GE,X
-    LDA r_pv + k : JSR put_run
-    LDA GH,X : AND #PIX_LEFT : ORA r_pvb + k : STA GH,X
-    LDA r_hi : CMP r_b : BCS out2
+    ENTER_ZP r_a
+    PLANT_X GE
+    GO_V PV
+    LDA GE,X : CMP r_b                  ; (C: the span ends in this gap)
+    LDA r_a : STA GE,X
+    LDA GH,X : AND #PIX_LEFT : ORA PVB : STA GH,X
+    BCS out2
     STX r_prev
     LDA GN,X : BEQ out2
     TAX
     JMP found
 .split
-    \ [a, b) inside the gap: it splits into [s, a) and a new [b, e).
+    \ [a, b) inside the gap, unless it's empty: the gap splits into [s, a)
+    \ and a new [b, e).
+    LDA r_a : CMP r_b : BCS out2
     LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
     INC gtop + k
-    LDA r_b : STA GS,Y : STA r_hi
+    LDA r_b : STA GS,Y
     LDA GE,X : STA GE,Y
-    LDA GH,X : AND #PIX_RIGHT : ORA r_pva + k : STA GH,Y
+    LDA GH,X : AND #PIX_RIGHT : ORA PVA : STA GH,Y
     LDA GN,X : STA GN,Y
     TYA : STA GN,X
-    LDA r_a : STA GE,X : STA r_lo
-    LDA GH,X : AND #PIX_LEFT : ORA r_pvb + k : STA GH,X
-    LDA r_pv + k : JSR put_run
+    LDA r_a : STA GE,X
+    LDA GH,X : AND #PIX_LEFT : ORA PVB : STA GH,X
+    ENTER_ZP r_a
+    PLANT_ZP r_b
+    GO_V PV
     JMP next
 .overflow
     \ No room for the gaps this piece would leave: it isn't drawn.
     LDA #&FF : STA rs_overflow
     JMP next
 .fresh
-    \ The line's first face: one gap [0, VIEW_W) with no neighbours.
-    LDA r_a : STA r_lo
-    LDA r_b : STA r_hi
+    \ The line's first face (X is still the line): one gap [0, VIEW_W) with
+    \ no neighbours, unless the span is empty.
+    LDA r_a : CMP r_b : BCC fresh_some
+    JMP next
+.fresh_some
     LDA r_a : BNE fresh_cut
     LDA r_b : CMP #VIEW_W : BNE fresh_right
     \ All of it.
     STZ head,X
     DEC nopen
-    LDA r_pv + k : JSR put_run
+    STZ put_go + 1                      ; (the slot for pixel 0)
+    PLANT_END
+    GO_V PV
     JMP next
 .fresh_right
     \ [0, b): the gap [b, W) waits on the byte at b.
@@ -580,50 +655,59 @@ MACRO INSERT k, next
     INC gtop + k
     LDA r_b : STA GS,Y
     LDA #VIEW_W : STA GE,Y
-    LDA r_pva + k : STA GH,Y
+    LDA PVA : STA GH,Y
     LDA #0 : STA GN,Y
     TYA : STA head,X
-    LDA r_pv + k : JSR put_run
+    STZ put_go + 1
+    PLANT_ZP r_b
+    GO_V PV
     JMP next
 .fresh_cut
     LDA r_b : CMP #VIEW_W : BNE fresh_mid
     \ [a, W): the gap [0, a) waits on the byte at a.
-    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow2
     INC gtop + k
     LDA #0 : STA GS,Y : STA GN,Y
     LDA r_a : STA GE,Y
-    LDA r_pvb + k : STA GH,Y
+    LDA PVB : STA GH,Y
     TYA : STA head,X
-    LDA r_pv + k : JSR put_run
+    ENTER_ZP r_a
+    PLANT_END
+    GO_V PV
     JMP next
+.overflow2
+    JMP overflow
 .fresh_mid
     \ [a, b): gaps [0, a) and [b, W).
-    LDY gtop + k : CPY #POOL_HELD : BCC two
-    JMP overflow
-.two
+    LDY gtop + k : CPY #POOL_HELD : BCS overflow2
     INC gtop + k : INC gtop + k
     LDA #0 : STA GS,Y
     LDA r_a : STA GE,Y
-    LDA r_pvb + k : STA GH,Y
+    LDA PVB : STA GH,Y
     TYA : STA head,X
     INY : TYA : STA GN - 1,Y
     LDA r_b : STA GS,Y
     LDA #VIEW_W : STA GE,Y
-    LDA r_pva + k : STA GH,Y
+    LDA PVA : STA GH,Y
     LDA #0 : STA GN,Y
-    LDA r_pv + k : JSR put_run
+    ENTER_ZP r_a
+    PLANT_ZP r_b
+    GO_V PV
     JMP next
 }
 ENDMACRO
 
+\ The copies, each entered (by segment) at entry with X = r_y loaded, and
+\ each line leaving X = r_y for the next copy.
+.entry0 LDX r_y
 .loop0
 .chk0   BRA chk_test0                 ; patched: CHK_TEST or CHK_SKIP
         ZA_CANJUMP chk_test0, chk_end0
 .chk_test0 CHECK
 .chk_end0
         \ A line that starts a character row: its row's pointers.
-        LDA r_y : BIT #4 : BNE row0
-        LDX r_y : JSR row_setup
+        TXA : BIT #4 : BNE row0
+        JSR row_setup
 .row0
         IF RASTER_PAINTER
 .mode0    JMP ins0                    ; patched: ins0 or paint0
@@ -639,9 +723,10 @@ ENDMACRO
         ZA_CANJUMP sbg_0, sb_end0
 .sbg_0  STEPG 1
 .sb_end0
-.next0  INC r_y : LDA r_y : CMP f_yend : BNE loop1
+.next0  INC r_y : LDX r_y : CPX f_yend : BNE loop1
         JMP seg_end
 
+.entry1 LDX r_y
 .loop1
 .chk1   BRA chk_test1                 ; patched: CHK_TEST or CHK_SKIP
         ZA_CANJUMP chk_test1, chk_end1
@@ -661,9 +746,10 @@ ENDMACRO
         ZA_CANJUMP sbg_1, sb_end1
 .sbg_1  STEPG 1
 .sb_end1
-.next1  INC r_y : LDA r_y : CMP f_yend : BNE loop2
+.next1  INC r_y : LDX r_y : CPX f_yend : BNE loop2
         JMP seg_end
 
+.entry2 LDX r_y
 .loop2
 .chk2   BRA chk_test2                 ; patched: CHK_TEST or CHK_SKIP
         ZA_CANJUMP chk_test2, chk_end2
@@ -683,9 +769,10 @@ ENDMACRO
         ZA_CANJUMP sbg_2, sb_end2
 .sbg_2  STEPG 1
 .sb_end2
-.next2  INC r_y : LDA r_y : CMP f_yend : BNE loop3
+.next2  INC r_y : LDX r_y : CPX f_yend : BNE loop3
         JMP seg_end
 
+.entry3 LDX r_y
 .loop3
 .chk3   BRA chk_test3                 ; patched: CHK_TEST or CHK_SKIP
         ZA_CANJUMP chk_test3, chk_end3
@@ -705,7 +792,7 @@ ENDMACRO
         ZA_CANJUMP sbg_3, sb_end3
 .sbg_3  STEPG 1
 .sb_end3
-.next3  INC r_y : LDA r_y : CMP f_yend : BEQ seg_end3
+.next3  INC r_y : LDX r_y : CPX f_yend : BEQ seg_end3
         JMP loop0
 .seg_end3
         JMP seg_end
@@ -1032,7 +1119,7 @@ NEXT
 \ the two patterns' bytes those splits were drawn in; different patterns
 \ forget the screen's lines.
 
-ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, g_s, g_e, g_h
+ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, bg_k, bg_x, g_s, g_e, g_h
 ZA_AUTO 4, bgv_l
 ZA_AUTO 4, bgv_la
 ZA_AUTO 4, bgv_lb
@@ -1103,53 +1190,85 @@ ASSERT VIEW_H <= BG_SCREEN
 }
 ASSERT VIEW_H MOD 8 = 0
 
-\ The gap [g_s, g_e), its neighbours' halves in g_h, split at bg_split,
-\ with phase k's patterns. Keeps X.
+\ The gap at node X of pool k, split at bg_split, with phase k's patterns.
+\ All of it left of the split (as every gap is when there's no horizon,
+\ which Driller's views have not) is one piece, inline, with its shared
+\ bytes from its neighbours' halves (gh); otherwise fill_split. Keeps X.
 MACRO FILL k
 {
+    GS = pool_gs(k)
+    GE = pool_ge(k)
+    GH = pool_gh(k)
+    LDA bg_split : CMP GE,X : BCC split
+    LDA GS,X : LSR A : BCC l_even
+    BND_X GS
+    LDA GH,X : AND #PIX_LEFT : ORA bgv_lb + k
+    BND_PUT
+.l_even
+    LDA GE,X : LSR A : BCC l_end
+    BND_X GE
+    LDA GH,X : AND #PIX_RIGHT : ORA bgv_la + k
+    BND_PUT
+.l_end
+    ENTER_X GS
+    PLANT_X GE
+    GO_V bgv_l + k
+    BRA done
+.split
+    LDA GS,X : STA g_s
+    LDA GE,X : STA g_e
+    LDA GH,X : STA g_h
+    LDA #k : STA bg_k
+    JSR fill_split
+.done
+}
+ENDMACRO
+
+\ fill_split: the gap [g_s, g_e) of line r_y, its neighbours' halves in g_h,
+\ which ends right of the split, in phase bg_k's patterns: the left one's
+\ piece if it starts left of the split, then the right one's. Keeps X.
+.fill_split
+{
+    STX bg_x
+    LDX bg_k
     LDA g_s : STA r_lo
     CMP bg_split : BCS right
-    \ The left pattern's piece, [s, min(e, split)), and its shared byte at
-    \ s if s is odd.
+    \ [s, split) left, with its shared byte at s if s is odd; then the
+    \ two patterns' shared byte at the split, if it's odd.
     LSR A : BCC l_even
-    LDA g_h : AND #PIX_LEFT : ORA bgv_lb + k
+    LDA g_h : AND #PIX_LEFT : ORA bgv_lb,X : ZA_INDEXEDBY 0..3
     LDY g_s : JSR put_bnd
 .l_even
-    LDA g_e : CMP bg_split : BCC l_end
-    LDA bg_split
-.l_end
-    STA r_hi
-    LDA bgv_l + k : JSR put_run
-    LDA bg_split : CMP g_e : BCC mid
-    \ The gap ends in the left pattern: its shared byte at e, if odd.
-    LDA g_e : LSR A : BCC done
-    LDA g_h : AND #PIX_RIGHT : ORA bgv_la + k
-    LDY g_e : JSR put_bnd
-    BRA done
-.mid
-    \ Both patterns: their shared byte at the split, if it's odd.
+    LDA bg_split : STA r_hi
+    LDA bgv_l,X : ZA_INDEXEDBY 0..3
+    JSR put_run
     LDA bg_split : STA r_lo
     LSR A : BCC r_piece
-    LDA bgv_la + k : ORA bgv_rb + k
+    LDA bgv_la,X : ZA_INDEXEDBY 0..3
+    ORA bgv_rb,X : ZA_INDEXEDBY 0..3
     LDY bg_split : JSR put_bnd
     BRA r_piece
 .right
     \ All of it right of the split: its shared byte at s, if s is odd.
     LSR A : BCC r_piece
-    LDA g_h : AND #PIX_LEFT : ORA bgv_rb + k
+    LDA g_h : AND #PIX_LEFT : ORA bgv_rb,X : ZA_INDEXEDBY 0..3
     LDY g_s : JSR put_bnd
 .r_piece
     LDA g_e : STA r_hi
-    LDA bgv_r + k : JSR put_run
+    LDA bgv_r,X : ZA_INDEXEDBY 0..3
+    JSR put_run
     LDA g_e : LSR A : BCC done
-    LDA g_h : AND #PIX_RIGHT : ORA bgv_ra + k
+    LDA g_h : AND #PIX_RIGHT : ORA bgv_ra,X : ZA_INDEXEDBY 0..3
     LDY g_e : JSR put_bnd
 .done
+    LDX bg_x
+    RTS
 }
-ENDMACRO
 
-\ Line r_y's background, from pool k's gaps; then the next line, at copy
-\ next.
+\ Line r_y's background, from pool k's gaps; then the next line, the next
+\ copy's, which copies 0 to 2 fall into (VIEW_H is a multiple of 4, so the
+\ last line is copy 3's).
+ASSERT VIEW_H MOD 4 = 0
 MACRO BGLINE k, next
 {
     LDX r_y
@@ -1161,40 +1280,36 @@ MACRO BGLINE k, next
     ENDIF
     LDA hsplit,X : STA bg_split
     TXA : ORA bg_buf : TAY              ; the line's record for this screen
-    LDA head,X : BEQ faces
-    CMP #UNTOUCHED : BNE gaps
+    LDA head,X : BNE some
+    \ Faces filled it.
+    LDA #0 : STA bg_was,Y
+    JMP stepped
+.some
+    BPL gaps
     \ No face here: background alone, which the screen may hold already.
     LDA bg_split : INC A
     CMP bg_was,Y : BNE draw
     JMP stepped
 .draw
     STA bg_was,Y
-    \ [0, W) with no neighbours (both its ends are even), as if it were
-    \ node 0, which has no next.
-    STZ g_s
-    LDA #VIEW_W : STA g_e
+    \ [0, W) with no neighbours: node 0 (raster_frame), which has no next.
     LDX #0
-    BRA one
-.faces
-    LDA #0 : STA bg_was,Y
-    JMP stepped
+    BRA gap
 .gaps
     TAX
     LDA #0 : STA bg_was,Y
 .gap
-    LDA pool_gs(k),X : STA g_s
-    LDA pool_ge(k),X : STA g_e
-    LDA pool_gh(k),X : STA g_h
-.one
     FILL k
     LDA pool_gn(k),X : TAX : BEQ stepped
     JMP gap
 .stepped
     INC r_y
-    LDA r_y : CMP #VIEW_H : BCS done
-    JMP next
-.done
-    RTS
+    IF k = 3
+        LDA r_y : CMP #VIEW_H : BCS done
+        JMP next
+    .done
+        RTS
+    ENDIF
 }
 ENDMACRO
 

@@ -109,7 +109,7 @@ NEXT
     STY r_row
     LDA rr_planted,Y : STA r_pcur
     LDA row_scr,Y : STA r_bp0+1 : INC A : STA r_bp1+1
-    TYA : CLC : ADC #HI(rr_rows) : STA r_rr+1 : STA put_run.jsr+2
+    TYA : CLC : ADC #HI(rr_rows) : STA r_rr+1 : STA put_run.jsr+2 : STA put_go+2
 .row_same
     RTS
 
@@ -148,6 +148,33 @@ NEXT
 .blocked
     LDA #RR_END
     BRA move
+}
+
+\ put_go: into the row's run (row_load patches the page, ENTER the slot),
+\ whose planted RTS returns to put_go's caller. Y the line, A the byte.
+.put_go
+    JMP rr_rows                         ; patched: the piece's row and entry
+    ZA_CANJUMP rr_rows
+    ZA_RETURN
+
+\ replant: the row's plant moved to A, the slot after a piece's last whole
+\ byte, which isn't where it is (r_pcur); for a piece to the view's right
+\ edge, only if the plant is in its way, as put_run. Keeps X.
+.replant
+{
+    CMP #RR_END : BEQ to_end
+.move
+    LDY r_pcur : STA r_pcur
+    LDA #OP_STA_ABSY : STA (r_rr),Y
+    LDY r_pcur : LDA #OP_RTS : STA (r_rr),Y
+    RTS
+.to_end
+    LDA put_go + 1 : CMP r_pcur : BEQ blocked : BCS clear
+.blocked
+    LDA #RR_END
+    BRA move
+.clear
+    RTS
 }
 
 \ put_bnd: A into the shared byte at odd pixel boundary Y of line r_y.
