@@ -80,8 +80,8 @@ SECTION ObjWork
 .pb_yl      SKIP NP2
 .pa_yh      SKIP NP2
 .pb_yh      SKIP NP2
-.p_fl       SKIP NP2 + 1            ; a pass's f (bound - v, or v - bound) for each
-.p_fh       SKIP NP2 + 1            ; vertex, the first again after the last
+.p_fl       SKIP 2 * NP2 + 1        ; a pass's f (bound - v, or v - bound) for each
+.p_fh       SKIP 2 * NP2 + 1        ; vertex, the first again after the last (either half's)
 .p_n        SKIP 1                  ; the 2D polygon's vertices
 \ the faces drawn, in the order found
 .tf_n       SKIP 1
@@ -500,41 +500,44 @@ ASSERT (PROJ_XC + (VIEW_FX << GUARD_XS)) * 2 < &10000   ; (|b - a| fits 16 bits)
 ENDSECTION
 SECTION ObjMore
 
-\ CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below: one side of
-\ the view's rectangle (the model's _clip_edge), from the source buffer (its
-\ arrays on the side's axis, then the other) to the destination: keep the
-\ axis's coordinate <= bound if below, else >= bound (which is 0); a
-\ crossing from the edge's inside end.
-MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
-    LDX #0
+\ CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below: one side of the view's
+\ rectangle (the model's _clip_edge), from the polygon's half of the pa and
+\ pb arrays (clip2d.src: 0 or NP2) to the other: its arrays on the side's
+\ axis, then the other's; keep the axis's coordinate <= bound if below,
+\ else >= bound (which is 0); a crossing from the edge's inside end. Z set
+\ if nothing's left.
+MACRO CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below
+    LDX clip2d.src
+    TXA : CLC : ADC p_n : STA clip2d.end
 .f
     IF below
-        LDA #LO(bound) : SEC : SBC sal,X : STA p_fl,X
-        LDA #HI(bound) : SBC sah,X : STA p_fh,X
+        LDA #LO(bound) : SEC : SBC sa_l,X : STA p_fl,X
+        LDA #HI(bound) : SBC sa_h,X : STA p_fh,X
     ELSE
         ASSERT bound = 0
-        LDA sal,X : STA p_fl,X
-        LDA sah,X : STA p_fh,X
+        LDA sa_l,X : STA p_fl,X
+        LDA sa_h,X : STA p_fh,X
     ENDIF
-    INX : CPX p_n : BNE f
-    LDA p_fl : STA p_fl,X               ; the first again after the last
-    LDA p_fh : STA p_fh,X
-    STZ clip2d.m
-    LDX #0
+    INX : CPX clip2d.end : BNE f
+    LDY clip2d.src                      ; the first again after the last
+    LDA p_fl,Y : STA p_fl,X
+    LDA p_fh,Y : STA p_fh,X
+    LDA #NP2 : SEC : SBC clip2d.src : STA clip2d.m
+    TYA : TAX
 .vertex
     STX clip2d.i
     LDA p_fh,X : BMI a_out
     LDY clip2d.m
-    LDA sal,X : STA dal,Y
-    LDA sah,X : STA dah,Y
-    LDA sol,X : STA dol,Y
-    LDA soh,X : STA doh,Y
+    LDA sa_l,X : STA sa_l,Y
+    LDA sa_h,X : STA sa_h,Y
+    LDA so_l,X : STA so_l,Y
+    LDA so_h,X : STA so_h,Y
     INC clip2d.m
     LDA p_fh+1,X : BPL next             ; both in
     \ the crossing from a (X) to b
     STX clip2d.ip
-    INX : CPX p_n : BNE b_set
-    LDX #0
+    INX : CPX clip2d.end : BNE b_set
+    LDX clip2d.src
 .b_set
     STX clip2d.iq
     BRA cut
@@ -542,8 +545,8 @@ MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
     LDA p_fh+1,X : BMI next             ; both out
     \ the crossing from b to a (X)
     STX clip2d.iq
-    INX : CPX p_n : BNE p_set
-    LDX #0
+    INX : CPX clip2d.end : BNE p_set
+    LDX clip2d.src
 .p_set
     STX clip2d.ip
 .cut
@@ -552,78 +555,78 @@ MACRO CLIP_PASS sal, sah, sol, soh, dal, dah, dol, doh, bound, below
     LDA p_fh,X : STA clip_cut.fp+1
     LDA p_fl,Y : STA clip_cut.fq
     LDA p_fh,Y : STA clip_cut.fq+1
-    LDA sol,X : STA clip_cut.po
-    LDA soh,X : STA clip_cut.po+1
-    LDA sol,Y : STA clip_cut.qo
-    LDA soh,Y : STA clip_cut.qo+1
+    LDA so_l,X : STA clip_cut.po
+    LDA so_h,X : STA clip_cut.po+1
+    LDA so_l,Y : STA clip_cut.qo
+    LDA so_h,Y : STA clip_cut.qo+1
     JSR clip_cut
     LDY clip2d.m
-    LDA #LO(bound) : STA dal,Y
-    LDA #HI(bound) : STA dah,Y
-    LDA clip_cut.r : STA dol,Y
-    LDA clip_cut.r+1 : STA doh,Y
+    LDA #LO(bound) : STA sa_l,Y
+    LDA #HI(bound) : STA sa_h,Y
+    LDA clip_cut.r : STA so_l,Y
+    LDA clip_cut.r+1 : STA so_h,Y
     INC clip2d.m
 .next
-    LDX clip2d.i : INX : CPX p_n : BEQ finished
+    LDX clip2d.i : INX : CPX clip2d.end : BEQ finished
     JMP vertex
 .finished
-    LDA clip2d.m : STA p_n
+    \ the other half's now
+    LDA #NP2 : SEC : SBC clip2d.src : STA clip2d.src
+    LDA clip2d.m : SEC : SBC clip2d.src : STA p_n
 ENDMACRO
 ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 
-\ clip2d: the polygon clipped to the view's rectangle, [0, CLIP_W] x [0,
-\ CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges a
-\ vertex is beyond (OC_*): the passes for the others are skipped, as they'd
-\ change nothing (a crossing lies between its edge's ends, so it isn't
-\ beyond an edge neither of them is). Each pass goes from pa to pb, and
-\ back.
+\ clip2d: the polygon in pa clipped to the view's rectangle, [0, CLIP_W] x
+\ [0, CLIP_H] (the model's clip2d), then its repeats dropped. A = the edges
+\ a vertex is beyond (OC_*): the passes for the others are skipped, as
+\ they'd change nothing (a crossing lies between its edge's ends, so it
+\ isn't beyond an edge neither of them is). Each pass writes the other half
+\ of the pa and pb arrays; the polygon comes back to pa at the end.
 .clip2d
 {
-    ZA_AUTO1 m, i, ip, iq, edges
+    ZA_AUTO1 m, i, ip, iq, edges, src, end
     STA edges
+    STZ src
     LDA #OC_LEFT : BIT edges : BNE pass1
     JMP pass2
 .pass1
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, 0, FALSE
-    JSR back
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, 0, FALSE
     BNE pass2
     RTS
 .pass2
     LDA #OC_RIGHT : BIT edges : BNE pass2_do
     JMP pass3
 .pass2_do
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, pb_xl, pb_xh, pb_yl, pb_yh, CLIP_W, TRUE
-    JSR back
+    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
     BNE pass3
     RTS
 .pass3
     LDA #OC_TOP : BIT edges : BNE pass3_do
     JMP pass4
 .pass3_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, 0, FALSE
-    JSR back
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, 0, FALSE
     BNE pass4
     RTS
 .pass4
     LDA #OC_BOTTOM : BIT edges : BNE pass4_do
-    JMP dedupe
+    JMP passed
 .pass4_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, pb_yl, pb_yh, pb_xl, pb_xh, CLIP_H, TRUE
-    JSR back
-    JMP dedupe
-\ back: pb's polygon to pa; Z set if it's empty
-.back
-    LDX p_n : BEQ empty
-.copy
+    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
+    BNE passed
+    RTS
+.passed
+    \ in pb: down to pa
+    LDA src : BEQ in_pa
+    LDX p_n
+.down
     DEX
     LDA pb_xl,X : STA pa_xl,X
     LDA pb_xh,X : STA pa_xh,X
     LDA pb_yl,X : STA pa_yl,X
     LDA pb_yh,X : STA pa_yh,X
-    TXA : BNE copy
-    LDA p_n
-.empty
-    RTS
+    TXA : BNE down
+.in_pa
+    JMP dedupe
 }
 
 ENDSECTION
