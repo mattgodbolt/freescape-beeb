@@ -213,7 +213,7 @@ SECTION ObjCode
 \ (4 bytes, fp less): fp and fd shifted right together by s = bitlen(fd) -
 \ 16 if positive, so that fd fits 16 bits (whole bytes, then s MOD 8 bits
 \ right, or 8 less that left and a byte down), then floor(2^16 fp / fd) by
-\ sixteen steps of a long division, unrolled; then patched into lerp's
+\ sixteen steps of a long division; then patched into lerp's
 \ products. (When the shifts leave fp = fd, every step takes and ft is
 \ &FFFF, the model's clamp.)
 .frac16
@@ -255,21 +255,24 @@ SECTION ObjCode
     LDA fd+1 : STA fd : LDA fd+2 : STA fd+1
     LDA fp+1 : STA fp : LDA fp+2 : STA fp+1
 .divide
+    \ (a loop, not written out: since the side crossings and joins, and the
+    \ lines from images, it's rare, and the room went to the hot paths)
     LDA fp+1
-    FOR k = 1..16
-        ASL fp : ROL A
-        BCS take                    ; (past 16 bits: at least fd)
-        CMP fd+1 : BCC bit
-        BNE take
-        LDY fp : CPY fd : BCC bit
-    .take
-        TAY                         ; (C is set on every way here)
-        LDA fp : SBC fd : STA fp
-        TYA : SBC fd+1
-        SEC
-    .bit
-        ROL ft : ROL ft+1
-    NEXT
+    LDX #16
+.step
+    ASL fp : ROL A
+    BCS take                        ; (past 16 bits: at least fd)
+    CMP fd+1 : BCC bit
+    BNE take
+    LDY fp : CPY fd : BCC bit
+.take
+    TAY                             ; (C is set on every way here)
+    LDA fp : SBC fd : STA fp
+    TYA : SBC fd+1
+    SEC
+.bit
+    ROL ft : ROL ft+1
+    DEX : BNE step
     \ t's bytes into lerp's quarter-square products (lerp.t0, lerp.t1)
     LDA ft
     STA lerp.a1+1 : STA lerp.a3+1
@@ -3206,11 +3209,22 @@ ASSERT VMAX = 8
 \ vertex beyond any it's clipped (clip2d), else its repeats are dropped;
 \ then the drawn test.
 
+\ SAME_OUT a, b: Z set if the output's vertices X + a and X + b are the same
+\ point
+MACRO SAME_OUT a, b
+    LDA out_vxl + a,X : CMP out_vxl + b,X : BNE done
+    LDA out_vxh + a,X : CMP out_vxh + b,X : BNE done
+    LDA out_vyl + a,X : CMP out_vyl + b,X : BNE done
+    LDA out_vyh + a,X : CMP out_vyh + b,X
+.done
+ENDMACRO
+
 \ poly_face: face X of the object being drawn, its vertices projected. They
 \ go into the output from out_vn as they're gathered, with their outcodes'
 \ AND and OR: wholly inside the view, with no vertex the one before it again
 \ (the last before the first), the drawn test takes them there; else they go
-\ to pa for the 2D clip, or for dedupe, and are staged back.
+\ to pa for the 2D clip, or for dedupe, and are staged back. A quad's, the
+\ most faces', are written out.
 .poly_face
 {
     ZA_AUTO1 face, lp, end, every, any
@@ -3227,6 +3241,37 @@ ASSERT VMAX = 8
     JMP by_pa
 .room
     STA end
+    LDA p_n : CMP #4 : BEQ quad
+    JMP gather
+.quad
+    \ a quad, written out: from out_vn (X) on, and its repeats likewise
+    FOR k = 0..3
+        LDY lp : LDA lp_table + k,Y : TAY
+        IF k = 0
+            LDA voc,Y : STA any : STA every
+        ELSE
+            LDA voc,Y : TSB any
+            AND every : STA every
+        ENDIF
+        LDA vsxl,Y : STA out_vxl + k,X
+        LDA vsxh,Y : STA out_vxh + k,X
+        LDA vsyl,Y : STA out_vyl + k,X
+        LDA vsyh,Y : STA out_vyh + k,X
+    NEXT
+    LDA every : BEQ quad_seen
+    RTS
+.quad_pa
+    JMP to_pa
+.quad_seen
+    LDA any : BNE quad_pa
+    SAME_OUT 0, 3 : BEQ quad_pa
+    SAME_OUT 1, 0 : BEQ quad_pa
+    SAME_OUT 2, 1 : BEQ quad_repeat
+    SAME_OUT 3, 2 : BNE quad_drawn
+.quad_repeat
+    JMP to_pa
+.quad_drawn
+    JMP drawn
 .gather
     LDY lp : INC lp
     LDA lp_table,Y : TAY
@@ -3251,6 +3296,7 @@ ASSERT VMAX = 8
 .differ
     TXA : TAY
     INX : CPX end : BNE repeat
+.drawn
     JSR drawable : BCC rejected
     LDX face : LDA fa_col,X
     JMP commit
