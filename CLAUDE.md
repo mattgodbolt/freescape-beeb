@@ -99,6 +99,8 @@ includes.)
 
 - A local label inside `{}` silently shadows a global of the same name
   (`.keys` hid `keys`).
+- `INCW` (`src/macros.6502`) leaves N and Z its `INC`'s: branch on a
+  loaded byte before it, not after (`LDA (p) : INCW p : BMI` tests `p`).
 - Anything that touches the front end's data at main RAM `&3000` up to
   `SCREEN` (`ObjMemo`, `ObjConst`, `ObjArea`, the area's working copy)
   needs ACCCON X clear, or it reads and writes shadow RAM instead.

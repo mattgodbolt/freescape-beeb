@@ -284,15 +284,16 @@ cpu.debugInstruction.add((addr, opcode) => {
         valuesFrom = null;
         onValued();
     } else if (addr === PANEL_DRAW && bank === BANK_DATA) {
-        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS, line: beamLine(), field: word(sym("fields")) };
+        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS, line: beamLine(), field: word(FIELDS_AT) };
     } else if (addr === PANEL_DRAWN && bank === BANK_DATA && drawFrom) {
         (drawFrom.tile ? tileCycles : glyphCycles).push(now() - drawFrom.t);
         // each cell drawn wholly in the beam's window: begun and done in one
         // field, before the flip's line, so neither a flip nor the beam
         // finds it half drawn
         const line = beamLine();
-        if (drawFrom.field !== word(sym("fields")) || drawFrom.line >= FLIP_LINE_ || line >= FLIP_LINE_)
-            fail(`a cell of the panel drawn from line ${drawFrom.line} to ${line}${drawFrom.field !== word(sym("fields")) ? " of the next field" : ""}, not inside the window before line ${FLIP_LINE_}`);
+        const later = drawFrom.field !== word(FIELDS_AT);
+        if (later || drawFrom.line >= FLIP_LINE_ || line >= FLIP_LINE_)
+            fail(`a cell of the panel drawn from line ${drawFrom.line} to ${line}${later ? " of a later field" : ""}, not inside the window before line ${FLIP_LINE_}`);
         else cellsInWindow++;
         drawFrom = null;
     } else if (addr === IDLE) {
@@ -377,7 +378,7 @@ cpu.debugInstruction.add((addr, opcode) => {
 
 // The panel (src/panel.6502, tools/model/panel.py). Its cells (panel_want,
 // panel_shown) are the model's flat() order; tools/mkpanel.py --check gives
-// what the model makes of them, after the run (checkPanel).
+// what the model makes of them, after the run (below the scripts).
 const BANK_DATA = sym("BANK_DATA");
 const PANEL_WANT = sym("panel_want"), PANEL_SHOWN = sym("panel_shown"), PANEL_CELLS = sym("PANEL_CELLS");
 const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALUED = sym("panel_values.valued");
@@ -387,7 +388,7 @@ const PANEL_VALUES = sym("panel_values"), PANEL_DRAW = sym("panel_draw"), PANEL_
 const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_CELL_US = sym("PANEL_CELL_US");
 const valuesCycles = [], glyphCycles = [], tileCycles = [];
 let valuesFrom = null, drawFrom = null, cellsInWindow = 0;
-const FLIP_LINE_ = sym("FLIP_LINE");
+const FLIP_LINE_ = sym("FLIP_LINE"), FIELDS_AT = sym("fields");
 const PF = (f) => [sym(`PF_${f}`), sym(`PN_${f}`)];
 const [PF_NAME, PN_NAME] = PF("NAME"), [PF_MESSAGE, PN_MESSAGE] = PF("MESSAGE"), [PF_FPS, PN_FPS] = PF("FPS");
 const panelBuild = JSON.parse(fs.readFileSync(path.join(root, "build/panel/panel.json"), "utf8"));

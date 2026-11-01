@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 """The panel's picture and tables (src/panel.6502), from the Atari ST's
-console (decision 8: the ST's colours), at build time.
+console (decision 8: the ST's colours) and the ZX's data, at build time.
 
-    mkpanel.py OUTDIR
+    mkpanel.py OUTDIR ZXSNAP AREAS.json DATA.json
+    mkpanel.py --check < request.json > answer.json
 
-reads Driller's ST executable from the fetched disc image (tools/colour/
-sources.py checks it: ScummVM's budget release, whose console is the NEO
-picture at CONSOLE in X.PRG, games/driller/atari.cpp) and writes into
-OUTDIR:
+The first reads Driller's ST executable from the fetched disc image
+(tools/colour/sources.py checks it: ScummVM's budget release, whose
+console is the NEO picture at CONSOLE in X.PRG and whose vehicle pictures
+are at VEHICLES: games/driller/atari.cpp, amiga.cpp), the original's
+messages from the ZX snapshot, and the areas' names in the records' order,
+and writes into OUTDIR:
 
-    panel.6502   for the assembly (src/panel.6502 includes it): the
-                 picture outside the view, packed; the glyph tables, the
-                 styles and the cells' places (tools/model/panel.py's)
-    panel.json   the picture and the styles' bytes, for the model
-                 (tools/model/panel.py's render) and the check
-    picture.png  the picture at MODE 2's pixels, and picture4x.png at four
-                 by two, as an RGB monitor shows it (tools/pal.py shows it
-                 through PAL: --texels 4 --rows 2)
+    panel.6502   for the assembly (src/panel.6502 includes it): the cells'
+                 places and kinds, the glyph tables, the inks and papers,
+                 the vehicle's tiles, the messages and names (section
+                 PanelData), and the picture packed (section PanelPack)
+    panel.json   the same for the model (tools/model/panel.py) and checks
+    picture.png  the picture at MODE 2's pixels as an RGB monitor shows it,
+                 and sample.png and sample4x.png (four by two) with SAMPLE's
+                 values (tools/pal.py shows them through PAL: --texels 4
+                 --rows 2)
+
+The second is the checks' (check(), below).
 
 The ST's console is 320 pixels by 200 lines around a 248 by 102 view; the
 BBC's screen is 128 MODE 2 pixels (each two of the ST's across: both are
@@ -519,6 +525,7 @@ def assembly(build, packed):
         f"PANEL_GLYPHS = {glyphs}",
         f"PANEL_KINDS = {len(kinds)}",
         f"PANEL_PACKED = {len(packed)}",
+        f"PANEL_MATCH_MIN = {MATCH_MIN}",
         f"PANEL_LOWEST = &{min(a for a, _k in cells):04X}",
         f"PANEL_TILES = {len(build['tiles'])}",
         f"PANEL_AREAS = {len(names)}",

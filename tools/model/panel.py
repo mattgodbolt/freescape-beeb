@@ -7,16 +7,20 @@ panel: a picture that never changes (tools/mkpanel.py makes it from the
 ST's console at build time: Driller's art is never committed) and, over
 it, cells that the logic's values choose.
 
-A cell is two MODE 2 bytes across, four pixels, and its style's lines
-down. What it shows is a glyph: four pixels a line, one bit each (bit 3
-the leftmost), from one of the glyph tables below; each pixel is the
-style's ink or paper for its line, each a MODE 2 byte (a solid colour or a
-pattern's byte for the line). A field is a run of cells across (two bytes
-apart) or down (the style's lines apart), all of one style and table.
+A glyph cell is two MODE 2 bytes across, four pixels, and its table's
+lines down, inside a character row. What it shows is a glyph: four pixels
+a line, one bit each (bit 3 the leftmost), from one of the glyph tables
+below; each pixel is its field's ink for the line (a MODE 2 byte: a solid
+colour or a pattern's byte for the line) where it's lit, else the picture
+under it. A field is a run of cells across (two bytes apart) or down (a
+cell's lines apart), all of one table. The vehicle's picture is tiles
+instead, a byte across and a character row down, as tools/mkpanel.py cuts
+them from the ST's pictures.
 
-    glyph_tables()        every table's glyphs, each a list of line nibbles
-    cells(values)         each field's glyph numbers, from the panel's values
-    render(cells, base)   the screen's bytes (SCREEN to &7FFF) with them drawn
+    values_of(mem, name, over)  the panel's values from the original's variables
+    cells(values, before)       each field's cells, from the values
+    flat(cells), unflat(list)   the cells in the disc's order, and back
+    render(cells)               the screen's bytes (SCREEN to &7FFF) with them drawn
 
 The values (values_of) are the logic's variables the original's panel
 shows ($B72B, docs/research/zx-logic.md): the score, the energy and
@@ -351,10 +355,6 @@ ENTRANCE_WORDS = ("ENTRANCE", "    DEMO")
 def entrance_message(entrance, demo):
     tens = f"{entrance // 10}" if entrance >= 10 else " "
     return f" {ENTRANCE_WORDS[1 if demo else 0]} {tens}{entrance % 10}  "
-
-
-def field(name):
-    return next(f for f in FIELDS if f[0] == name)
 
 
 def cell_places(f):

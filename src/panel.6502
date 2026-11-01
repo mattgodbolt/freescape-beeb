@@ -36,15 +36,14 @@
 \ a call with nothing new costs a compare.
 \
 \ The includer includes this file in main RAM below &3000 (panel_set goes
-\ there); declares the sections PanelData (the code and the tables: in a
-\ sideways bank, called with it paged) and PanelPack (the packed picture,
-\ at PANEL_LOAD: main RAM that's free from the start until panel_init); and
-\ names PANEL_BOUNCE (a page of RAM below &3000 that's
-\ free until panel_init) and where the panel's values come from
-\ (PANEL_POS: x, y and z, words; PANEL_YAW and PANEL_PITCH, bytes: the
+\ there, so code in any bank can call it); declares the sections PanelData
+\ (the code and the tables: in a sideways bank, called with it paged) and
+\ PanelPack (the packed picture, at PANEL_LOAD: main RAM that's free from
+\ the start until panel_init); and names PANEL_BOUNCE (a page of RAM below
+\ &3000 that's free until panel_init) and where the panel's values come
+\ from (PANEL_POS: x, y and z, words; PANEL_YAW and PANEL_PITCH, bytes: the
 \ logic's or the free camera's) and PANEL_FREE (TRUE: the message is the
 \ includer's and the compass always turns; FALSE: the original's).
-\ panel_set is in main RAM (section Live), so code in any bank can call it.
 \ ***************************************************************************
 
 INCLUDE "../build/panel/panel.6502"
@@ -167,7 +166,6 @@ SECTION PanelData
     RTS
 }
 ASSERT LO(SCREEN) = 0
-PANEL_MATCH_MIN = 3                         ; (tools/mkpanel.py's MATCH_MIN)
 
 \ panel_sync: each cell not shown as wanted drawn into both buffers, from
 \ the first, while the beam leaves time; panel_left says where it stopped.
