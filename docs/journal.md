@@ -389,3 +389,102 @@ entered inline through a shared trampoline, faces already wholly behind
 full lines skipped. The third round found little; the round's estimate
 of this design's floor is about 90-95K. The refit: about 28 cycles a
 line, 59 a face-line, 229 a run, 2 a byte and 527 an edge. Decision 32.
+
+## 2026-10-31: area records from the logic's database
+
+The per-area records (`AREAS4`, `AREAS5`) are gone: `area_enter` builds an
+area's working copy on the BBC from Driller's database in the player
+logic's bank (`docs/research/objects.md`, "The records"), and
+`tools/mkareas.py` became the model of that, checked against it byte for
+byte by `tools/areacheck.mjs`. Measured that day (`make objects`, `make
+live`):
+
+- **The check**: the globals and all 29 areas exact, in both builds, the
+  plain one and `OBJ_LOGIC`'s; a corrupted expectation (one plane's
+  normal) and a corrupted conversion (`ob_ix` left unwritten) each failed
+  it. The prototype in Python of the 6502's way (the first corner's cross
+  product, the shrunk apex edges) matched `mkareas.py` on every object
+  before any 6502 was written.
+- **The working copy** (`ObjArea`) is 2,542 bytes: the objects' 19 arrays
+  of 38 (722), the faces' 6 of 128 (768), the planes' 8 of 66 (528), the
+  vertices' 3 of 168 (504), the sensors' 3 of 5 (15), and the 5 counts.
+  `ob_ix` (38) is new.
+- **The conversion** (`AreaConv`, in a sideways bank) is 4,405 bytes:
+  2,655 of code, 175 of its tables, 1,440 of colour streams (the ST's face
+  colours, decision 8, with each area's pointer) and the tape's 135 bytes
+  of globals. Its main RAM part (`AreaCode`: the entry points, the
+  record's reader and the fixed parts' lengths) is 116 bytes.
+- **Its cycles**: `area_init` 68,888; `area_enter` a median of 53,169 over
+  the 29 areas, at most 157,168 (Ketar Hangar, 41 planes). With
+  `OBJ_LOGIC`, which builds the globals again each time, a median of
+  122,077 and at most 226,197. Most of it is the slanted faces' planes
+  and reading the records through main RAM; dividing by shifts and reading
+  only each record's fixed part took the median from 66,272 and the most
+  from 203,717.
+- **The live disc's main RAM**: what it uses below `&3000` now ends at
+  `&269D`, not `&2DB3`, 1,814 bytes freed (2,403 now free): the globals'
+  record, the area directory and the copy's descriptors left `ObjConst`,
+  the f64 table (768 bytes) went to HAZEL after the maths' tables (on a
+  page there; `ObjWork` after it still fits), and `AreaCode` shrank by 90
+  bytes; `ObjArea` grew by `ob_ix`'s 38. The logic's `LOGIC` is bank 4;
+  bank 5 has `LiveData`, the font and `AreaConv`, with 4,968 bytes left.
+- **The object check** still matches the model on all 2,485 views; the
+  page-aligned f64 table took the median view from 204,478 cycles to
+  203,826. `make live` still shows all 614 frames as the model's; an
+  entrance's first frame now spends a median 0.90 fields outside the two
+  halves (most 5.58), against 0.82 (2.78) when the area was copied.
+
+## 2026-10-31: the front end restructured (track M)
+
+Track M restructured stages 1-7 for speed, model and 6502 together, exact
+against each other on all 2,485 check views and on the live disc's 619
+frames. Cycles of `objects_frame` [measured, `make objects`'s
+`tools/objectcheck.mjs --entrance --json` on the 65 entrance views (each a
+turn) and their 260 walk steps], median / p90 / most, against the
+pipeline as the projection track left it (fb90ec2, the same check):
+
+| | step before | step after | turn before | turn after |
+|---|---|---|---|---|
+| object pass | 7,051 / 14,110 / 17,991 | 7,057 / 14,106 / 17,997 | 7,051 / 14,419 / 17,991 | 7,057 / 14,420 / 17,997 |
+| transform | 13,846 / 18,999 / 23,418 | 13,889 / 19,026 / 23,462 | 40,039 / 62,617 / 71,621 | 39,594 / 61,863 / 70,893 |
+| vertex pass (new) | | 18,398 / 30,657 / 42,513 | | 18,421 / 30,675 / 42,513 |
+| projection | 17,524 / 23,224 / 34,354 | 10,570 / 15,786 / 23,742 | 17,245 / 23,952 / 34,142 | 10,582 / 15,780 / 23,686 |
+| faces' own | 48,788 / 69,632 / 98,496 | 12,859 / 19,288 / 30,126 | 48,880 / 70,973 / 98,476 | 12,781 / 19,393 / 30,126 |
+| near clip + guard band | 49,806 / 98,065 / 148,972 | | 48,574 / 97,344 / 146,512 | |
+| the cone (new) | | 66,867 / 139,289 / 176,567 | | 66,799 / 139,665 / 181,587 |
+| 2D clip | 36,072 / 54,839 / 83,192 | 14,653 / 35,140 / 71,564 | 33,918 / 53,882 / 83,145 | 14,181 / 34,618 / 71,414 |
+| drawn test | 5,143 / 9,166 / 14,515 | 4,593 / 8,728 / 14,515 | 5,143 / 9,084 / 14,517 | 4,321 / 8,563 / 14,517 |
+| sort | 12,079 / 28,454 / 47,980 | 8,771 / 27,337 / 52,294 | 12,079 / 28,454 / 47,980 | 12,206 / 30,276 / 52,282 |
+| **total** | **205,851 / 276,842 / 331,324** | **184,419 / 247,910 / 305,945** | **236,918 / 309,672 / 372,760** | **216,847 / 287,068 / 356,276** |
+
+(The near clip and guard band row sums each view's two before taking the
+median. Matrix, output and glue are as before.) On the live disc (`make
+live`), stages 1-7 went from a median 7.25 fields a frame to 6.22, walks
+7.76 to 6.69, turns 9.52 to 8.58.
+
+- **Kept**: one pass over each object's vertices (a band test by bit
+  lengths, then each vertex of a face projected whole projected once, with
+  the shared entries taking about half: 22 full, 7 by Z and 16 by X and Z
+  in a median step's view); faces projected whole taken or dropped by
+  their outcodes, the 2D clip only for those crossing the edges; the sort's
+  compares remembered by pair of slots while the camera's cells hold.
+- **The cone** (proposed, amending decisions 15 and 17): faces the
+  projection can't take whole drawn as the view's rectangle clipped by
+  their edges' planes through the eye. Exact, and the original's pyramid
+  again, but at the median it costs about what the near clip and the guard
+  band did: about three such faces a view, each about four lines and five
+  crossings, and the crossings' division and the lines' products are the
+  frame's two largest routines. Its picture against the model before it:
+  755 of 3,515,200 pixels over the entrance views and walks, none in the
+  order; 5,130 of 26,877,760 over all check views, the order in 3; against
+  the ZX oracle 1,389,622 of 1,406,080 pixels agree, against 1,389,686.
+- **Measured and not built**: a 16-bit camera space with a block exponent
+  an object changes no pixel of the check views (V >> 6, world units,
+  changes 4,571); the transform's adds it would shorten aren't where the
+  cycles are yet.
+- **The area records** come from the logic's database at area entry
+  (merged from a helper's branch: the entry above).
+- The pipeline's code now fills its sideways bank on the live disc but for
+  a few dozen bytes: the old near clip's arithmetic, the guard band and the
+  slow fills went, and a line's quad and a point's square went to tables,
+  to make room.

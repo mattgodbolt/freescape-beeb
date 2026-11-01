@@ -57,10 +57,13 @@ frame is skipped or reused.
   `live_go` copies an area's `LIVE_PATTERNS` (`ld_pats`, from
   `tools/model/colours.py`'s table for the build's display) in on entry and
   calls `raster_forget`. The sky is the background; there's no horizon.
-- **Entering an area** is `area_enter` (`src/area.6502`), which pages the
-  records' bank and puts `ROMSEL_COPY`'s back. Its code is in its own
-  section, `AreaCode`, in main RAM, since it can't page its own bank out
-  from under itself; `&F4` (`ROMSEL_COPY`) is out of baron's pool.
+- **Entering an area** is `area_enter` (`src/area.6502`), which builds the
+  area's working copy from Driller's database in the logic's bank
+  (`objects.md`, "The records"), paging that bank and the conversion's
+  (`AreaConv`, in `BANK_DATA`) in, and puts `ROMSEL_COPY`'s back. Its entry
+  points and its reader of the database's records are in their own section,
+  `AreaCode`, in main RAM, since code in a bank can't page another in from
+  under itself; `&F4` (`ROMSEL_COPY`) is out of baron's pool.
 - **Paging**: `PAGE_IN bank` sets `romsel` and `ROMSEL_COPY` together. Code
   in main RAM pages; nothing in a bank pages another.
 
@@ -88,11 +91,12 @@ the addresses.
 
 | Where | What |
 |---|---|
-| banks `LIVE_RECORD_BANKS` | the area records (`AREAS4`, `AREAS5`, `tools/mkareas.py`); after the last one's, `LiveData` (`LDATA`: the areas' names and patterns, the entrances' cameras, the step for each yaw, and the figures' arithmetic) and the text's widened font (`TextRAM`) |
+| bank `BANK_DB` | the player logic's database bank as the logic builds it (`LOGIC`, from `build/logic6502/`, its `LOGIC_BANK`): Driller's database at its top, which `area_enter` builds each area's working copy from, and the logic's code that reads it, unused yet |
+| bank `BANK_DATA` | `LiveData` (`LDATA`: the areas' names and patterns, the entrances' cameras, the step for each yaw, and the figures' arithmetic), the text's widened font (`TextRAM`), and the working copy's conversion (`AreaConv`, `ACONV`: its code, each area's colour stream, the tape's globals). It's the logic's `LOGIC_CODE_BANK`, so the logic's arrival means sharing it |
 | bank `BANK_RASTER` | the rasteriser: row runs, code, work, state (decision 20) |
 | bank `BANK_OBJ` | the object pipeline's code (`ObjCode`) with the maths' (`src/maths.6502`, `src/project.6502`, which patch themselves) |
-| HAZEL | the maths' tables (`HAZEL`, loaded at `HAZEL_LOAD` by `!BOOT` and copied up once the OS is gone; ACCCON's Y then stays set), then `ObjWork` (the camera with it) |
-| `&0E00` on | `LIVE` (this code, the screen, the interrupt, the keys, the text), `AreaCode` (`LAREA`), `ObjConst` (`OCONST`), `ObjArea` |
+| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), loaded from `HAZEL_LOAD` on by `!BOOT` and copied up once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it) |
+| `&0E00` on | `LIVE` (this code, the screen, the interrupt, the keys, the text), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `ObjConst` (`OCONST`: the loops, the sine table, the matrix's and the clip's tables), `ObjArea`; the rest up to `&3000` free, room for `RasterIn` when `LogicWork` takes the OS's pages |
 | `&0400` on | `Work` (`src/zp.6502`) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
 | main RAM's `&3000` on | the transform's cache (`ObjCache`), which only `objects_frame` touches: `live_loop` clears X before it, and `frame_begin` sets X for the buffer drawn after (decision 31) |
@@ -135,11 +139,12 @@ cache kept), a still frame, the demo.
   `AreaCode` must stay out of sideways RAM.
 - **The player logic (J)**: the logic's labels `sq_lo`, `sq_hi` (and its
   two-argument `PAGE` macro) meet the maths' and this file's names in one
-  assembly; and `LogicWork` (`&0800-&0CFF`) is where `RasterIn` is now. With
-  per-area records built at `area_enter` from the logic's database (M),
-  banks 4 and 5 go to the logic, and `RasterIn` needs a home: about 2K of
-  main RAM, from `ObjConst` (the globals' record and the area directory go
-  with per-area records; the `f64` table could go to HAZEL) or from the
-  glue's code moving into the logic's code bank beside the font.
+  assembly; and `LogicWork` (`&0800-&0CFF`) is where `RasterIn` is now.
+  The working copy is built from the logic's database bank already, and
+  main RAM past `ObjArea` is free for `RasterIn` to move to. With the
+  logic: `OBJ_LOGIC`, `AREA_GLOBALS = Globals`, and `area_enter` after each
+  of the logic's area loads (`AreaChanged`); and `LOGICC` in `BANK_DATA`
+  beside `LiveData`, the font and `AreaConv`, which don't all fit there
+  beside it.
 - **The maths (F)**: the projection's shared-coordinate entries are reached
   by a stub (`live_shared`) until a stage calls them.

@@ -6,7 +6,9 @@
 \ rasteriser and writer (stages 8-10: src/raster.6502's raster_frame),
 \ between frame_begin and frame_end (src/screen.6502). Nothing of a view is
 \ worked out off the BBC. Driller's own data (decision 6: a tech demo,
-\ attributed on the screen) in the engine's records (tools/mkareas.py).
+\ attributed on the screen): its database, in the player logic's bank as
+\ the logic keeps it, which area_enter builds each area's working copy from
+\ (src/area.6502).
 \
 \ The camera is free (the player's logic is another layer): cursor left
 \ and right (or Driller's Q and W) turn a step of 5 degrees a frame, cursor
@@ -43,19 +45,23 @@ ENDIF
 \ The memory map.
 \
 \ Sideways RAM:
-\   LIVE_RECORD_BANKS  the area records (tools/mkareas.py, AREAS<bank>); after
-\                      the last bank's records, LiveData (the names, patterns,
-\                      entrances and steps: tools/mklive.py, LDATA) and the
-\                      text's font (TextRAM)
-\   BANK_OBJ           the object pipeline's code (ObjCode, with the maths'
-\                      code, which patches itself)
-\   BANK_RASTER        the rasteriser's code, row runs and work (decision 20)
+\   BANK_DB      the player logic's database bank as the logic builds it
+\                (build/logic6502's LOGIC, src/logic/bank.6502: Driller's
+\                database at its top), which area_enter builds each area's
+\                working copy from
+\   BANK_DATA    LiveData (the names, patterns, entrances and steps:
+\                tools/mklive.py, LDATA), the text's font (TextRAM), and the
+\                working copy's conversion (AreaConv, ACONV: src/area.6502)
+\   BANK_OBJ     the object pipeline's code (ObjCode, with the maths' code,
+\                which patches itself)
+\   BANK_RASTER  the rasteriser's code, row runs and work (decision 20)
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
-\   the maths' tables (copied in at start from where !BOOT loaded them, at
-\   HAZEL_LOAD) and the pipeline's work (ObjWork, the camera with it)
+\   the maths' tables and the transform's f64 table (ObjTables), copied in
+\   at start from where !BOOT loaded them (HAZEL_LOAD on); then the
+\   pipeline's work (ObjWork, the camera with it)
 \ Main RAM, below &3000 (which ACCCON's X switches):
-\   &0E00 on: this code (LIVE), area_enter's (AreaCode: it pages the
-\   records' banks, so it can't be in one), the pipeline's tables
+\   &0E00 on: this code (LIVE), area_init's and area_enter's (AreaCode: they
+\   page the banks in, so can't be in one), the pipeline's tables
 \   (ObjConst) and the area's working copy (ObjArea)
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
@@ -67,15 +73,15 @@ ENDIF
 \ A routine in a bank is called with its bank paged (PAGE_IN); area_enter puts
 \ back the bank in ROMSEL_COPY, so PAGE_IN keeps that too.
 
+BANK_DB     = 4                 ; src/logic/vars.6502's LOGIC_BANK
+BANK_DATA   = 5                 ; (its LOGIC_CODE_BANK, which the logic will share)
 BANK_RASTER = 6
 BANK_OBJ    = 7
-BANK_DATA   = LIVE_DATA_BANK
+AREA_DB_BANK   = BANK_DB        ; (src/area.6502's)
+AREA_CONV_BANK = BANK_DATA
+SECTION LiveData, org = &8000, guard = &C000, filename = "LDATA", cmos = TRUE
+ENDSECTION
 INCLUDE "../build/live/data.6502"
-FOR i = 0..<LEN(LIVE_RECORD_BANKS)
-    ASSERT LIVE_RECORD_BANKS[i] <> BANK_OBJ AND LIVE_RECORD_BANKS[i] <> BANK_RASTER
-    ASSERT LIVE_RECORD_BANKS[i] >= 4 AND LIVE_RECORD_BANKS[i] <= 7
-NEXT
-ASSERT BANK_OBJ <> BANK_RASTER
 \ (ROMSEL_COPY, the OS's copy of romsel, is src/area.6502's, outside
 \ baron's pool)
 
@@ -83,21 +89,29 @@ MACRO PAGE_IN bank
     LDA #bank : STA ROMSEL_COPY : STA romsel
 ENDMACRO
 
-\ HAZEL: the maths' tables, then the work.
+\ HAZEL: the maths' tables and the f64 table, then the work.
 HAZEL_LOAD  = &4000             ; where !BOOT loads the tables (the screen, cleared after)
 SECTION Hazel, org = &C000, load = &FFFF0000 OR HAZEL_LOAD, filename = "HAZEL"
 INCLUDE "../build/maths/tables.6502"
 .hazel_tables_end
 ENDSECTION
-SECTION ObjWork, org = hazel_tables_end, guard = &E000, virtual = TRUE
+SECTION ObjTables, org = hazel_tables_end, load = &FFFF0000 OR (HAZEL_LOAD + hazel_tables_end - &C000), filename = "OTABLE"
+ENDSECTION
+SECTION ObjWork, org = obj_tables_end, guard = &E000, virtual = TRUE
 ENDSECTION
 \ The cache: main RAM's &3000 on, with ACCCON's X clear.
 OBJ_CACHE_ORG = &3000
 SECTION ObjCache, org = OBJ_CACHE_ORG, guard = SCREEN, virtual = TRUE
 ENDSECTION
-ASSERT HAZEL_LOAD + (hazel_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
+\ the sort's memory after it, likewise only objects_frame's (src/order.6502)
+SECTION ObjMemo, org = obj_cache_end, guard = SCREEN, virtual = TRUE
+ENDSECTION
+ASSERT HAZEL_LOAD + (obj_tables_end - &C000) <= &8000 AND HAZEL_LOAD >= SCREEN
 
-\ The banks.
+\ The banks. The logic's database bank, as the logic builds it.
+SECTION LogicBank, org = &8000, guard = &C000, filename = "LOGIC"
+    INCBIN "../build/logic6502/LOGIC"
+ENDSECTION
 SECTION ObjCode, org = &8000, guard = &C000, filename = "OCODE", cmos = TRUE
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
@@ -126,6 +140,8 @@ ENDSECTION
 SECTION RasterState, org = raster_work_end, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION TextRAM, org = live_data_end, guard = &C000, virtual = TRUE
+ENDSECTION
+SECTION AreaConv, org = text_ram_end, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 
 \ Main RAM.
@@ -172,14 +188,14 @@ ASSERT LIVE_PATTERNS <= RS_PATTERNS
 \ once, which is free until LIVE loads), then main RAM's and HAZEL's files.
 SECTION Boot, filename = "!BOOT", exec = &FFFFFFFF
     EQUS "*| FREESCAPE for the BBC Master: Driller, live ", build_stamp, 13
-    FOR i = 0..<LEN(LIVE_RECORD_BANKS)
-        EQUS "*SRLOAD AREAS", AS_STRING(LIVE_RECORD_BANKS[i]), " 8000 ", AS_STRING(LIVE_RECORD_BANKS[i]), " Q", 13
-    NEXT
-    EQUS "*SRLOAD LDATA ", ~LIVE_DATA_ORG, " ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD LOGIC 8000 ", AS_STRING(BANK_DB), " Q", 13
+    EQUS "*SRLOAD LDATA 8000 ", AS_STRING(BANK_DATA), " Q", 13
+    EQUS "*SRLOAD ACONV ", ~text_ram_end, " ", AS_STRING(BANK_DATA), " Q", 13
     EQUS "*SRLOAD OCODE 8000 ", AS_STRING(BANK_OBJ), " Q", 13
     EQUS "*SRLOAD RRUNS 8000 ", AS_STRING(BANK_RASTER), " Q", 13
     EQUS "*SRLOAD RCODE ", ~raster_runs_end, " ", AS_STRING(BANK_RASTER), " Q", 13
     EQUS "*LOAD HAZEL", 13
+    EQUS "*LOAD OTABLE", 13
     EQUS "*LOAD OCONST", 13
     EQUS "*LOAD LAREA", 13
     EQUS "*RUN LIVE", 13
@@ -331,13 +347,14 @@ ASSERT cam_pitch = cam_x + 7 AND cam_roll = cam_x + 8 AND LV_CAM_BYTES = 9
 \ ---------------------------------------------------------------------------
 \ Setting up.
 
-\ hazel_fill: the maths' tables from HAZEL_LOAD into HAZEL (paged).
+\ hazel_fill: the maths' tables and the f64 table from HAZEL_LOAD into
+\ HAZEL (paged).
 .hazel_fill
 {
     ZA_AUTO2 src, dst
     LDA #LO(HAZEL_LOAD) : STA src : LDA #HI(HAZEL_LOAD) : STA src+1
     LDA #LO(&C000) : STA dst : LDA #HI(&C000) : STA dst+1
-    LDX #HI(hazel_tables_end - &C000 + 255)
+    LDX #HI(obj_tables_end - &C000 + 255)
     LDY #0
 .copy
     LDA (src),Y : STA (dst),Y
@@ -367,7 +384,7 @@ ASSERT LO(hazel_tables_end) = 0
     CPX #REGIONS : BNE region
     RTS
 .regions
-    EQUW hazel_tables_end, obj_work_end
+    EQUW obj_tables_end, obj_work_end
     EQUW OBJ_CACHE_ORG, obj_cache_end           ; (with ACCCON's X clear)
     EQUW obj_area_start, obj_area_end
     EQUW RASTER_IN_ORG, raster_in_end
@@ -1005,6 +1022,9 @@ ENDSECTION
 SECTION ObjConst
 .obj_const_end
 ENDSECTION
+SECTION ObjTables
+.obj_tables_end
+ENDSECTION
 SECTION ObjArea
 .obj_area_end
 ENDSECTION
@@ -1047,3 +1067,7 @@ ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat
 ASSERT obj_cache_end <= SCREEN
 \ Read in the frame: never in &3000-&7FFF, which ACCCON's X switches.
 ASSERT obj_area_end <= &3000 AND raster_in_end <= &3000
+\ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
+ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
+ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
+ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER

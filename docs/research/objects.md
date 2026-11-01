@@ -25,19 +25,24 @@ node tools/objectcheck.mjs build/objects --entrance --profile   # the entrance v
 `build/maths/`), which its rules build. It fails if any stage of any case
 differs from the model, or if the pipeline writes outside its own memory.
 
-## The records (`tools/mkareas.py`)
+## The records (`src/area.6502`, modelled by `tools/mkareas.py`)
 
-Driller's areas in the engine's layout, generated into `build/gen/` from
-`build/data/driller.json` (nothing of Driller's is committed):
-`areas.6502` for the assembler, `areas.json` for the check.
+The stages read an area's objects from one **working copy** (`ObjArea`),
+which `area_enter` builds as the area is entered, on the BBC, from the
+records of Driller's own database: the ZX's bytes in the original's
+layout, at the top of the player logic's bank (`LOGIC_BANK`, `LOGIC_DB`:
+`logic6502.md`), where the logic walks them too. Nothing per area is
+precomputed. `tools/mkareas.py` is the model of what it builds, from
+`build/data/driller.json`, into `build/gen/` (nothing of Driller's is
+committed): `areas.6502` for the assembler, `areas.json` with every area's
+working copy for the check.
 
-- **A slot an object**, structure of arrays, the globals in the first
-  `G_OBJ` slots and the area's after them. Only objects the model can draw
-  get a slot (`objects.shape()` isn't `None`); the object pass walks the
-  area's slots and then the globals', which is the model's order with the
-  undrawable ones left out. The faces' colours are the model's
-  (`render.recolour`, decision 8), and the generator checks the globals are
-  coloured alike in every area, since they're copied once.
+- **A slot an object**, structure of arrays, so every array has one
+  address and the stages index it with `abs,X`: the globals in the first
+  `G_OBJ` slots, built once by `area_init`, and the area's after them. Only
+  objects the model can draw get a slot (`objects.shape()` isn't `None`);
+  the object pass walks the area's slots and then the globals', which is
+  the model's order with the undrawable ones left out.
 - **Kinds** (`ob_flags`' low bits): a cuboid (its box: vertex i has bit k
   set for the high side on axis k), a rectangle (its box and its zero axis,
   `ob_aux`), a generic object (pyramids, polygons, lines; its vertices'
@@ -48,9 +53,8 @@ Driller's areas in the engine's layout, generated into `build/gen/` from
   over `CELL`); the boxes for the coarse cull (`ob_bl*`, `ob_bh*`, the
   bounds) and for the sort (`ob_l*`, `ob_h*`, the header box) are cells.
 - **Each face** (`fa_*`): its colour; its loop, an offset into one table
-  of loops shared by every area (`lp_table`, each distinct loop once); the
-  mask of its object's vertices it uses; and its test (`fa_test`,
-  `fa_tval`):
+  of loops shared by every area (`lp_table`, in `ObjConst`); the mask of
+  its object's vertices it uses; and its test (`fa_test`, `fa_tval`):
   - an **axis test** for a face in a plane x, y or z = P: seen from below
     when the camera's floor cell f < P (`T_AXLO + 2 axis`, tval P), from
     above when P < its ceiling cell e, stored as 255 − e < 255 − P
@@ -59,16 +63,54 @@ Driller's areas in the engine's layout, generated into `build/gen/` from
     reduced normal's two non-zero components (every slanted face in Driller
     has two) and a point of the plane on those axes;
   - `T_ALWAYS` for a line and a sensor's point.
-- **Packed** in the arrays' order, each as long as its count, into
-  sideways RAM from bank 4 (decision 5). `area_enter` copies an area's into
-  the working copy (`ObjArea`), so every array has one address and the
-  stages index it with `abs,X`.
+- **`ob_ix`**: each slot's place in the logic's index of the area's objects
+  (`ix_*`: the area's records, then the globals'), which says where its
+  flags are when the logic is there (below).
 
-Sizes [measured, `make objects`'s `mkareas.py` line]: 29 areas in **24,985
-bytes** (bank 4: 16,125, bank 5: 8,860); the globals' record 686 bytes,
-resident; 70 bytes of shared loops. The largest any area needs, globals
-included: 38 objects, 128 faces, 66 planes, 168 generic vertices, 5
-sensors, so the working copy is 2,504 bytes.
+**How it's built.** For each record in turn, area by area in the
+database's order (`DB_AREAS`, the database's table of areas): its fixed
+part is read into `rec` by `area_record`, in main RAM (`AreaCode`) so that
+it can page the database's bank in; the conversion itself (`AreaConv`) can
+sit in any bank. It does what `objects.shape()` does, in bytes, but in
+three places, each of which `mkareas.py` asserts on every object, so a
+database it couldn't convert fails the build with the reason:
+
+- a slanted face's plane is the cross product at its loop's first corner,
+  (v1 − v0) × (v2 − v1), whose edges are signed bytes, reduced by the
+  greatest common divisor of its two non-zero components (Stein's way, and
+  a division by shifts), not Newell's normal over the whole loop;
+- a pyramid's side loses its apex corner when the apex edge has shrunk to
+  a point, and its apex face goes when any apex edge has, rather than
+  removing repeated corners in general;
+- every loop is one the conversion finds by a constant: `lp_table` holds
+  them in a fixed order (the cuboid's face f at 4 f, a polygon's forward
+  and backward, a pyramid's sides whole and shrunk, its base and apex),
+  and `mkareas.py` refuses a loop that isn't one of them.
+
+**What isn't in the ZX's database** comes from tables `mkareas.py`
+generates from the originals into `AreaConv` (decision 6): each face's
+colour in the version the colours follow (`render.recolour`, decision 8),
+as a stream of colour bytes for each area and the globals, in the records'
+order and layout, which the conversion takes in place of the records' own;
+and the globals' records as the tape has them, for a build without the
+logic, which keeps its own (`AREA_GLOBALS`: the logic's `Globals`).
+
+**The logic's flags** (`OBJ_LOGIC`, a build option). Without it the object
+pass skips a slot whose `ob_state` has bit 7 set, as the data first has
+them. With it, the pass reads the logic's `ix_flags` at the slot's `ob_ix`
+(bit 6 invisible, bit 5 destroyed, as `logic_go_shown` copies them) and
+`area_enter` builds the globals' slots again too, since the logic moves the
+rig's parts as an area loads (`place_rigs`).
+
+**Checked** by `tools/areacheck.mjs` (in `make objects`): the globals'
+slots after `area_init`, then every area after `area_enter`, with the
+working copy past the globals' filled with junk first, against
+`mkareas.py`'s, byte for byte; the build's `AREA_DB` and `AREA_DB_BANK`
+against the logic build's `LOGIC_DB` and `LOGIC_BANK`; nothing written
+outside the working copy and `ObjWork`; and the same on the `OBJ_LOGIC`
+build. It reports the cycles of `area_init` and `area_enter`. The sizes and
+cycles are in the journal (2026-10-31, "area records from the logic's
+database").
 
 ## Cells (stages 2 and 7)
 
@@ -156,35 +198,61 @@ It wasn't built.
 
 ## Stages 4-6: the faces (`src/clip.6502`)
 
-Each seen face as `render.draw_faces` takes it (since the second round,
-below): the near clip in 3D (Sutherland-Hodgman; a line as a segment); a
-face wholly beyond one of the planes x = ±z, 2y = ±z dropped; the guard
-band's clip in 3D (decision 17); the projection (the maths' `project`) and
-each vertex's outcode against the view's rectangle from it; a face wholly
-beyond one edge dropped; a line widened to its quad and a point to its
-square; the 2D clip (or only repeats dropped); and the drawn test. A vertex
-the faces share is tested and projected once (`vflag`'s bits); the clips'
-new vertices follow the object's in the same arrays.
+Each candidate as `render.draw_faces` takes it since the third round (track
+M, below). A polygon object's vertices go first, then its faces:
 
-- **The planes beyond the view's sides** (`clip.beyond`): x = ±z and 2y = ±z
-  lie outside the view's edges (|x| = 0.66 z, |y| = 0.33 z), so a face wholly
-  beyond one can't be seen; compares, made with the guard band's test,
-  since only a vertex beyond one of them can be outside the band. The guard
-  band's tests and planes share the vertex's z << 4, found once by nibble
-  tables.
-- **The near clip's new coordinates** are the model's `round_div` exactly:
-  a product of up to four bytes by four (`umul32`, a column at a time on
-  the maths' quarter squares) and a long division (`udiv`). They're a few
-  units from the eye, where an error would show most.
-- **The guard band's and the 2D clip's** are crossings (`clip.crossing_t`,
-  `lerp`): one fraction t from the edge's inside end, f_P / (f_P − f_Q) to
-  16 bits with both shifted right until the difference fits 16 bits
-  (`frac16`: the shifts, then sixteen unrolled steps, the remainder's high
-  byte in A), and each coordinate P + (Q − P) t / 2^16 rounded half up
-  (`lerp`). From the inside end, the two faces on an edge cut it at one
-  point.
-- **The 2D clip** is 16-bit (inside the guard band everything projects
-  within it), and runs only the passes for edges a vertex is beyond.
+- **The vertex pass** (`vertex_pass`). Each vertex the seen faces use is
+  tested once against the band the projection takes (`band_test`, the
+  model's `clip.projectable`): in front of `ZNEAR`, x within 2^(n + 3) and y
+  within 2^(n + 2), n the bit length of z, as two's complement, so a byte or
+  two of each coordinate against tables indexed by n (`band_*`). The band
+  is inside the guard band (the model asserts), so everything decision 17
+  bought still holds. Then each vertex of a face with no vertex off the band
+  is projected once (`vertex_shared`), in an order for the object's kind
+  (`vp_order`: a cuboid's vertices i and i + 2 share x and z under a level
+  camera, so do a rectangle's along y) that lets `project_y` and
+  `project_z` take a vertex sharing the last one's x and z, or z, with its
+  outcode against the view.
+- **A face projected whole** (`poly_face`): its outcodes' AND drops it;
+  their OR zero takes it as it is, repeats dropped; else the 2D clip.
+- **Any other polygon: the cone** (`cone_face`, the model's
+  `clip.cone_clip`). Every vertex in one of the half-spaces x < −z, x > z,
+  2y > z, 2y < −z, z ≤ 0 (`vertex_code3`, each a 32-bit sum's sign; each
+  misses the view's pyramid wherever the point is) drops it. Else each edge's
+  plane through the eye (`edge_normal`) becomes a line on the screen
+  (`edge_line`), kept if it cuts the view's rectangle, and the rectangle is
+  clipped by each kept line in turn (`cone_pass`, Sutherland-Hodgman, its
+  crossings as the 2D clip's). The face's loop winds anticlockwise about its
+  outward normal (every loop does, `objects.shape`), so its inside is where
+  (A × B) · r ≤ 0 for each edge A → B and every ray r through it, and the
+  rectangle clipped by all its edges' planes is exactly its image: no near
+  plane and no guard band, a pyramid from the eye as the original's.
+  - A box's edge runs along a world axis k, so B − A is a multiple of M's
+    column k and the plane is ± A × M[:, k]: six terms, each a byte product
+    of a 24-bit coordinate's size by a column entry, table-driven
+    (`en_*`), passing over a zero entry (a level camera's matrix has four).
+    Any other edge's is cut16(A) × cut16(B − A), 16-bit products.
+  - The normal is shifted right until it fits `LINE_BITS`, N', and the line
+    is f(x, y) = A x + B y + C, A = −2 N'x, B = N'y, C = 2 XC N'x − YC N'y
+    − 2 FX N'z, by quarter-square products by 13 and 61 in the
+    instructions (2 XC = 128 × 13, YC = 64 × 13, 2 FX = 8 × 317, ASSERTed);
+    with A W and B H it's f at the rectangle's corners by additions, and
+    at a vertex on its sides by one product (`cone_eval`, |A| and |B|
+    patched into quarter-square readers once a pass).
+- **A line's face, or a point's** (`draw_segment`): with an end off the
+  band, a point isn't drawn and a line is clipped in 3D to `ZNEAR` and the
+  planes x = ±z, 2y = ±z, by crossings from the inside end (`seg_clip`, the
+  model's `segment_clip`), after which both ends are in the band; then
+  projected, wholly beyond one edge dropped, widened (`line_quad`,
+  `point_square`) and clipped in 2D.
+- **Crossings** (decision 24: `frac16`, `lerp`): one fraction t from the
+  edge's inside end, f_P / (f_P − f_Q), both shifted right until the
+  difference fits 16 bits, then sixteen unrolled steps; `frac16` patches
+  t's bytes into `lerp`'s quarter-square readers, and `lerp` takes the
+  size of P to Q (up to 24 bits) by them, rounded half up.
+- **The 2D clip** is 16-bit (inside the band everything projects within
+  the guard band's range), and runs only the passes for edges a vertex is
+  beyond.
 - **The drawn test** (`clip.drawable`): three vertices or more, one off the
   line through the first two, decided by the products' signs and zeros
   where it can be, else by two 16 × 16 products.
@@ -193,9 +261,18 @@ new vertices follow the object's in the same arrays.
 
 The original's bubble sort, the model's `compare_axis` case for case, on
 cells: each draw-list entry's box and its side of the camera (across, below,
-above) on each axis are found once, so a compare is byte compares on two
-index registers. 12,103 cycles at the median entrance view, 48,405 at the
-most (19 objects, 324 compares) [measured].
+above) on each axis, so a compare is byte compares on two index registers.
+
+A compare depends on nothing but the two boxes and the camera's ceiling
+cells, so its verdict (keep or swap) is remembered by the pair of slots
+(`so_memo`, a byte a pair: the generation shifted left one, OR keep), under
+a generation (`so_gen`) that moves on when the cells do; when the
+generations run out the memory is cleared. A frame reads a pair's verdict
+from it when it has it, and works out the entries' keys only when it
+doesn't. A turn keeps the cells, so a turning frame's compares are
+remembered; so is every repeat of a pair within a frame. `cache_reset`
+(a new area, or an object moved) clears the memory (`sort_forget`);
+`cache_empty` (a new orientation) leaves it.
 
 ## The output: what the rasteriser reads
 
@@ -212,24 +289,31 @@ Faces nearest first, in the rasteriser's input's shape
 
 | Entry | Does | Inputs | Outputs | Clobbers |
 |---|---|---|---|---|
-| `area_init` | the globals copied in, once | | the working copy's first slots | A X Y, the cache |
-| `area_enter` | an area's record copied in | A: its index in `ar_*` | the working copy, `ob_n`, `ob_state` | A X Y, the cache; pages and restores the bank |
+| `area_init` | the globals' slots built, once | | the working copy's first slots, `ob_n`, `ob_state` | A X Y, the cache; pages and restores the bank |
+| `area_enter` | an area's slots built (and the globals' again, with `OBJ_LOGIC`) | A: its index in the database's table of areas | the working copy (`ob_ix` too), `ob_n`, `ar_counts`, `ob_state` | A X Y, the cache; pages and restores the bank |
 | `objects_frame` | stages 1-7 | `cam_x/y/z` (16-bit, below &8000), `cam_yaw/pitch/roll` (0-71) | `out_*`; also `mat`, `cd_*`, `dl_*`, `tf_*` | A X Y, its zero page |
-| `cache_reset` | every cache emptied | | | A X |
+| `cache_reset` | every cache emptied, and the sort's memory cleared | | | A X Y |
+| `cache_empty` | the transform's cache emptied | | | A X |
 
-- **Paging**: the records' bank only during `area_enter` (it restores
-  `romsel` and its copy at &F4); the maths' tables readable throughout
-  `objects_frame` (HAZEL in the engine: ACCCON's Y); the working copy and
-  the work areas never in `&3000-&7FFF` while the screen's X bit is set, nor
-  in sideways RAM.
-- **The logic** hides and shows by `ob_state`'s bit 7, finds slots by
-  `ob_id`, and must call `cache_reset` if it moves an object (the rig).
+- **Paging**: `area_init` and `area_enter` are called with the pipeline's
+  bank in, page in the conversion's (`AREA_CONV_BANK`) and, a record at a
+  time, the database's (`AREA_DB_BANK`), and restore `romsel` and its copy
+  at &F4; the maths' tables readable throughout `objects_frame` (HAZEL in
+  the engine: ACCCON's Y); the working copy and the work areas never in
+  `&3000-&7FFF` while the screen's X bit is set, nor in sideways RAM.
+- **The logic** hides and shows by `ob_state`'s bit 7, or, with
+  `OBJ_LOGIC`, by its own `ix_flags` at each slot's `ob_ix`; it finds slots
+  by `ob_id`, and must call `area_enter` again after loading an area (the
+  rig's parts move) and `cache_reset` if it moves an object otherwise.
 - **Sections** (each placed by the build's memory map; the check build's
-  in `mk/objects.mk`): `ObjCode` (12.2K of this track's code [measured]),
-  `ObjConst` (2,232 bytes: the f64 table, quarter squares, loops, the area
-  directory, the copy's descriptors, the sine table, the globals' record),
-  `ObjArea` (2,504), `ObjWork` (1,902), `ObjCache` (2,304), `ObjOut`
-  (1,410), and the records' `AreaBank4`, `AreaBank5`.
+  in `mk/objects.mk`): `ObjCode` (this track's code, and the vertex pass's
+  and the cone's tables), `ObjConst` (the loops, the sine table, the
+  matrix's quarter squares), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
+  `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjMemo` (the
+  sort's memory, whole pages, only `objects_frame` and `cache_reset` touch
+  it: beside the cache in the live disc), `ObjOut`;
+  `AreaCode` (`area_init`, `area_enter` and the database's reader, never in
+  sideways RAM) and `AreaConv` (the conversion and its tables, anywhere).
 
 ## The check (`tools/objectcheck.mjs`)
 
@@ -279,11 +363,47 @@ to 271,344 and 242,414; the normalised fractions and the 2D clip's skipped
 passes to 257,135 and 225,807; z << 4 once a vertex to the figures above.
 
 **The target (about 30K a step and 45K a turn at the median) is not met:
-a step is 221K, a turn 253K.** At a median turn now: 30 crossings' fractions
+a step is 221K, a turn 253K.** (Before the third round, below.) At a median turn now: 30 crossings' fractions
 (`frac16`, 20K), 64 products of up to four bytes by four (`umul32`, 16K),
 12 exact near-clip divisions, 56 projections (30K, the maths'), 29 fills
 (17K), the guard and beyond tests (about 20K), the faces' loops and
 copies (about 25K), and the sort (12K).
+
+## The third round: the front end restructured (track M)
+
+Track M took the front end on to restructure it (journal, 2026-10-31,
+"the front end restructured"): one pass over each object's vertices, faces
+projected whole taken or dropped by their outcodes, the cone for the rest,
+the sort's compares remembered, the area records built at area entry. The
+figures, before and after, by stage, are in that journal entry; in short
+[measured], a step's median went from 205,851 to 184,419 cycles and a
+turn's from 236,918 to 216,847, against the projection track's pipeline
+(fb90ec2), exact against the model throughout.
+
+What it found:
+
+- **The vertex pass and the faces projected whole pay.** At a median
+  step [measured], the faces' own work went from 48.8K to 12.9K, with
+  18.4K more for the vertex pass; the projection from 17.5K to 10.6K, the
+  shared entries taking about half the projections; the 2D clip from
+  36.1K to 14.7K.
+- **The cone doesn't pay yet.** Its picture is exact, and it needs no near
+  plane or guard band, but at the median it costs about what the near
+  clip, the guard band and their share of the 2D clip did: a view has
+  about three such faces, each about four edge lines (a plane's normal by
+  byte products, cut to `LINE_BITS`, and three constant products) and five
+  crossings (a sixteen-step division and two products each). The crossings
+  (`frac16`) and the lines (`edge_line`) are the two largest routines of the
+  frame.
+- **The sort's memory** pays on a step (the cells hold) and is even on a
+  turn the check's views see (each entrance view a new camera).
+- **A 16-bit camera space**: the brief's suggestion, measured in the model
+  and not built. With a block exponent an object (its vertices shifted
+  right together until they fit 16 bits), no pixel of the 2,485 check views
+  changes; cut to world units (V >> 6), 4,571 of 26,877,760 change, none
+  in the entrance views [measured]. The 24-bit adds and tests it would
+  shorten aren't where the cycles went, so it waits for a vertex path that
+  uses it.
 
 ## The floor (decision 8a)
 
@@ -327,41 +447,50 @@ of the world goes. The 6502 side isn't built; it's the decision below.
 
 ## Decisions proposed
 
-For the coordinator to number:
+For the coordinator to number. From the first and second rounds (approved,
+now decisions 24-26): clip crossings by one fraction; outcodes from the
+projection and the drawn test; the floor stays a face.
 
-1. **Clip crossings by one fraction** (approved, rtw-sources §1.5): the
-   guard band's and the 2D clip's new vertices from t = f_P / (f_P − f_Q),
-   both shifted right until the difference fits 16 bits, to 16 bits, from
-   the edge's inside end, and each coordinate P + (Q − P) t / 2^16 rounded
-   half up; the near clip's stay exact. Against the exact clips, 149
-   pixels of 32.6 million differ over the check's views, and the draw order
-   in 3 views [measured].
-2. **Outcodes from the projected vertices** (approved): a face wholly beyond
-   one of the view's edges, or needing the 2D clip, is found from its
-   projected vertices; before the guard band, a face wholly beyond x = ±z or
-   2y = ±z (outside the view's sides) is dropped, by compares, which changes
-   no pixel of any check view [measured].
-3. **The drawn test** (approved, in place of the area test): three vertices
-   or more, not all on one line, so no degenerate polygon reaches the
-   rasteriser.
-4. **The floor as the horizon** (amending 8a), not taken: the figures above.
-   A cheaper floor that keeps the edge of the world would draw the horizon
-   and the void past the floor's edges as sky; not built.
+From the third round:
+
+1. **The cone** (amending decisions 15 and 17): a polygon the projection
+   can't take whole (a vertex nearer than `ZNEAR`, or outside the band) is
+   drawn as the view's rectangle clipped by its edges' planes through the
+   eye, its exact image; so polygons have no near plane, and the guard
+   band's clip goes. The band a face is projected whole inside is by bit
+   lengths (x within 2^(n + 3), y within 2^(n + 2)), inside the guard band. A
+   line or a point with an end outside it is clipped in 3D to `ZNEAR` and
+   the planes x = ±z, 2y = ±z by crossings, no longer the exact near clip.
+   Against the model before it [measured, `tools/model` both ways]: 755 of
+   3,515,200 pixels differ over the 65 entrance views and their walks (57
+   in the worst view, the draw order the same); 5,130 of 26,877,760 over all
+   2,485 check views, the order differing in 3. Against the ZX oracle, all
+   of each view's pixels: 1,389,622 of 1,406,080 agree, against 1,389,686
+   before; away from edges 99.95% either way (`make model-zx`).
+2. **No picture change, recorded for the record**: every face's loop winds
+   anticlockwise about its outward normal (a rectangle's high or low face
+   was the other way), so its output polygon's vertices run the other way.
 
 ## What's left
 
-- **The target.** The biggest costs now are per vertex (the projection, the
-  guard and beyond tests, the transform's adds and, on a turn, its fills)
-  and the clips' arithmetic. What would move them most: a pass over each
-  object's vertices before its faces (tests and projections in one tight
-  loop, the faces then only gathering codes); a level camera's paths
-  (rtw-sources §1.3-1.4: the edges' zero components skipped in the adds;
-  one reciprocal for a vertical edge's two ends, which is the projection
-  track's to build); the floor as above; the arithmetic inline (§1.7); a
-  memo of the sort's compares (about half of them repeat).
-- **Size**: this track's code is too big for main RAM beside the rest; the
-  engine's build should put it in a sideways bank with the working copy.
-- **The logic's side**: moving an object (the rig) means updating its
-  record's cells and calling `cache_reset`.
-- **The glue** to the rasteriser: `out_*` to `rs_*`, colour indices to
-  patterns.
+- **The target** (about 40K at the median) is far off. The cone is the
+  largest part: its crossings and its lines. What would move it: a level
+  camera's normals (a box's vertical edges' planes are A's x and z, no
+  products; a horizontal face's other edges share its height's products,
+  by the cofactor identity A x M e = cof(M) (D x e)); fewer crossings (a
+  line's crossing with the rectangle's side is one division, not a
+  fraction and a product); fewer lines (an edge whose plane can't reach
+  the rectangle). Then the vertex pass's own overhead, the transform's adds
+  (a 16-bit space with a block exponent is picture-free, above), and the
+  object pass.
+- **Size**: the pipeline's code fills its sideways bank on the live disc
+  but for a few dozen bytes (the build's guard says when it doesn't fit);
+  cold code (a line's 3D clip, the slow fills, the generic cone edges)
+  could move to the main RAM the per-area records freed.
+- **The logic's side**: a build with the logic (`OBJ_LOGIC`, `AREA_GLOBALS`)
+  calls `area_enter` after each of its area loads, which builds the
+  globals' slots from its records with the rig's parts where it put them.
+- **Area entry's cost** is mostly the slanted faces' planes (the cross
+  product's products, the greatest common divisor and the divisions) and
+  the reading of the records through main RAM; it now also clears the
+  sort's memory.

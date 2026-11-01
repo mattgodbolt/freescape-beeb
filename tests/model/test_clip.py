@@ -1,4 +1,5 @@
 """tools/model/clip.py: the near plane in 3D, the view's rectangle in 2D."""
+import math
 import random
 import unittest
 
@@ -150,3 +151,81 @@ class Guard(unittest.TestCase):
                 sx, sy = parts.project(x, y, z)
                 self.assertLess(abs(sx), (1 << 15) - 1)
                 self.assertLess(abs(sy), (1 << 15) - 1)
+
+
+class Cone(unittest.TestCase):
+    """The cone (clip.py): a face as the view's rectangle clipped by its
+    edges' planes through the eye."""
+
+    def face(self, rng):
+        # a random convex quad in a plane, in front of the eye, wound
+        # anticlockwise about the normal that faces the eye
+        cx, cy, cz = rng.randint(-3000, 3000), rng.randint(-1500, 1500), rng.randint(2000, 9000)
+        ux, uy, uz = rng.randint(-900, 900), rng.randint(-900, 900), rng.randint(-300, 300)
+        vx, vy, vz = rng.randint(-900, 900), rng.randint(-900, 900), rng.randint(-300, 300)
+        quad = [(cx - ux - vx, cy - uy - vy, cz - uz - vz), (cx + ux - vx, cy + uy - vy, cz + uz - vz),
+                (cx + ux + vx, cy + uy + vy, cz + uz + vz), (cx - ux + vx, cy - uy + vy, cz - uz + vz)]
+        n = clip.cross((2 * ux, 2 * uy, 2 * uz), (2 * vx, 2 * vy, 2 * vz))
+        facing = sum(n[k] * quad[0][k] for k in range(3))
+        if facing > 0:                  # facing away: turn it round
+            quad.reverse()
+        # (None if it's seen within a few degrees of edge-on, or is a sliver,
+        # where a sixteenth of rounding moves its far corners anywhere)
+        size = math.hypot(*n) * math.hypot(*quad[0])
+        sliver = math.hypot(*n) < 0.3 * math.hypot(ux, uy, uz) * math.hypot(vx, vy, vz) * 4
+        return None if abs(facing) < 0.2 * size or sliver else quad
+
+    def test_matches_the_projection(self):
+        """A face in front, inside the guard band: the cone's polygon is its
+        projection clipped to the view, to within the projection's error."""
+        from tools.model import parts
+        rng = random.Random(41)
+        checked = 0
+        for _ in range(400):
+            quad = self.face(rng)
+            if quad is None or not all(clip.projectable(v) for v in quad):
+                continue
+            lines = [clip.screen_line(clip.edge_normal(quad[i], quad[(i + 1) % 4])) for i in range(4)]
+            cone = clip.cone_clip(lines)
+            flat = clip.clip2d([parts.project(*v) for v in quad])
+            self.assertEqual(clip.drawable(cone), clip.drawable(flat))
+            if not cone or not flat:
+                continue
+            # every vertex of each near some vertex of the other
+            for p in cone:
+                self.assertLess(min(abs(p[0] - q[0]) + abs(p[1] - q[1]) for q in flat), 12)
+            checked += 1
+        self.assertGreater(checked, 100)
+
+    def test_inside_the_view(self):
+        rng = random.Random(43)
+        for _ in range(300):
+            quad = [(rng.randint(-1 << 18, 1 << 18), rng.randint(-1 << 17, 1 << 17),
+                     rng.randint(-1 << 16, 1 << 18)) for _ in range(3)]
+            lines = [clip.screen_line(clip.edge_normal(quad[i], quad[(i + 1) % 3])) for i in range(3)]
+            for x, y in clip.cone_clip(lines):
+                self.assertTrue(0 <= x <= clip.WIDTH and 0 <= y <= clip.HEIGHT)
+
+    def test_code3_misses_the_view(self):
+        """A point in a code3 half-space is outside the view's pyramid."""
+        rng = random.Random(47)
+        for _ in range(5000):
+            v = (rng.randint(-5000, 5000), rng.randint(-5000, 5000), rng.randint(-5000, 5000))
+            if clip.code3(v) and v[2] > 0:
+                x, y, z = v
+                self.assertTrue(abs(x * FX) > XC * z or abs(y * 2 * FX) > XC * z)
+
+    def test_segment_clip_projectable(self):
+        rng = random.Random(53)
+        for _ in range(2000):
+            a, b = [(rng.randint(-1 << 20, 1 << 20), rng.randint(-1 << 19, 1 << 19),
+                     rng.randint(-1 << 18, 1 << 20)) for _ in range(2)]
+            for v in clip.segment_clip(a, b):
+                self.assertTrue(clip.projectable(v))
+
+    def test_band_inside_the_guard(self):
+        rng = random.Random(59)
+        for _ in range(5000):
+            v = (rng.randint(-1 << 22, 1 << 22), rng.randint(-1 << 21, 1 << 21), rng.randint(ZNEAR, 1 << 20))
+            if clip.projectable(v):
+                self.assertFalse(clip.outside_guard(v))
