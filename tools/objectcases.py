@@ -124,6 +124,8 @@ def case(db, layout, a_index, area, camera, name):
 
 WALK_STEPS = 4                      # frames of a walk from each entrance, as the
 WALK_STEP = 25                      # original steps (step sin / 64, floored); world units
+STRAFE_STEPS = 4                    # frames of a strafe along each axis from each entrance,
+STRAFE_STEP = 48                    # world units a frame: across three cells
 
 
 def cameras(db, layout, quick=False):
@@ -144,6 +146,18 @@ def cameras(db, layout, quick=False):
             z += (WALK_STEP * cos[c.yaw]) // 64
             moved = cam.Camera(x, c.y, z, c.yaw, c.pitch, c.roll)
             out.append((index[area["id"]], area, moved, "%s-w%d" % (name, k)))
+    # Strafes from each entrance along each axis, the angles kept: the
+    # camera's cells move past boxes' sides one at a time, which the sort's
+    # memory must see (src/order.6502). After the walks, so that those
+    # follow their entrances as before.
+    for area, e, c in views:
+        name = "a%03d-e%03d" % (area["id"], e["id"])
+        for axis in range(3):
+            for k in range(1, STRAFE_STEPS + 1):
+                p = [c.x, c.y, c.z]
+                p[axis] += STRAFE_STEP * k
+                moved = cam.Camera(p[0], p[1], p[2], c.yaw, c.pitch, c.roll)
+                out.append((index[area["id"]], area, moved, "%s-s%d%d" % (name, axis, k)))
     rng = random.Random(1987)
     picks = views[::max(1, len(views) // (3 if quick else 8))]
     for area, e, c in picks:

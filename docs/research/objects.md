@@ -349,10 +349,14 @@ Faces nearest first, in the rasteriser's input's shape
 ## The check (`tools/objectcheck.mjs`)
 
 `tools/objectcases.py` runs the model's own functions (render.render's
-stages 1-7, asserted equal to `render()` on every entrance view) on 2,485
-cameras: the 65 entrance views, a four-step walk from each, and from eight
-entrances every yaw, every pitch and every roll with the others kept, and
-24 random angles. The checker runs each through `objects_frame` headless
+stages 1-7, asserted equal to `render()` on every entrance view) on its
+cameras: the 65 entrance views, a four-step walk from each, a four-step
+strafe from each along each axis (`STRAFE_STEP` a frame, so that the
+camera's cells pass boxes' sides one at a time, which the sort's memory
+must see), and from eight entrances every yaw, every pitch and every roll
+with the others kept, and 24 random angles (the strafes since the fourth
+round: before it, 2,485 cameras). The checker runs each through
+`objects_frame` headless
 and compares the matrix, the candidates and their masks, every candidate's
 camera-space vertices (read as `transform_object` returns), every
 candidate's drawn faces, the order and the output, exactly; and that
@@ -445,7 +449,7 @@ end's optimisation rounds (track O)"). Each round profiled first
 alone, the frames that only move), took the hottest routines against the
 checklist (`../chuckie-egg-2-beeb/docs/optimising.md`), and kept a change
 only if it measured faster and stayed exact: the model is unchanged, so no
-pixel moved, and every stage of all 2,485 check views and every frame of the
+pixel moved, and every stage of every check view and every frame of the
 live disc agree with it as before.
 
 Kept:
