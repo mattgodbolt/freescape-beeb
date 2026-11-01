@@ -36,7 +36,7 @@ $(SLIDES_DIR)/slides.6502 $(SLIDES_VIEWS) &: tools/mkslides.py $(DATA_JSON) $(MO
 # Two passes, as the live discs' (mk/live.mk): the parts into
 # $(SLIDES_DIR)/parts/ and their description, then the loader packs them.
 # (mk/live.mk's, read before this file)
-LOADER_SOURCES ?= src/loader.6502 src/zx02.6502
+LOADER_SOURCES ?= src/loader.6502 src/zx02.6502 src/defs.6502
 $(SLIDES_SYMBOLS) $(SLIDES_DIR)/parts.6502 &: $(SLIDES_SOURCES) $(SLIDES_DIR)/slides.6502 | build
 	@mkdir -p $(SLIDES_DIR)/parts
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -p $(SLIDES_DIR)/parts -log1 $(SLIDES_DIR)/parts.6502 --warn 2 \

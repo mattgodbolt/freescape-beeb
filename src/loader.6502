@@ -10,10 +10,11 @@
 \ sector), unpacking each stream into its place as its bytes arrive: a
 \ sideways bank paged by ROMSEL (and the OS's copy at &F4), or main RAM.
 \ The parts that can only go in once the OS is gone (HAZEL, which holds the
-\ filing system's workspace until then, and ANDY, the MOS's) ride packed in
-\ !BOOT itself, and go in after the last read, with interrupts off for
-\ good; then the disc's code starts at LD_EXEC. A disc that wants the OS
-\ still there (LD_KEEP_OS) has no such parts, and starts with it running.
+\ filing system's workspace until then; page &0D, its NMI code's while it
+\ reads; ANDY, the MOS's) ride packed in !BOOT itself, and go in after the
+\ last read, with interrupts off for good; then the disc's code starts at
+\ LD_EXEC. A disc that wants the OS still there (LD_KEEP_OS) has no such
+\ parts, and starts with it running.
 \
 \ The build assembles it on its own, after the disc's own build (the first
 \ pass) has written each part as a file (baron -p) into LD_BUILD + "parts/"
@@ -30,27 +31,26 @@
 \   LD_LATE     the parts in !BOOT, the same; where may also be ANDY (a
 \               bank OR ROMSEL_ANDY) or HAZEL (-1, from &C000)
 \
-\ The parts going to one place are one image, from the lowest's start to the
-\ highest's end, each part over those before it and any gap zero, packed as
-\ one stream. A stream: the place (a byte: ROMSEL's value, or LD_RAM), the
-\ image's address (a word), then the ZX02 stream; LD_END ends them.
+\ The parts going to one place (a bank; main RAM; HAZEL) are one image, from
+\ the lowest's start to the highest's end, each part over those before it
+\ and any gap zero, packed as one stream. A stream: the place (a byte:
+\ ROMSEL's value, or LD_RAM), the image's address (a word), then the ZX02
+\ stream; LD_END ends them.
 \
-\ tools/loadcheck.mjs boots the disc, runs to LD_EXEC, and holds every
-\ part's place in memory to its file, byte for byte, timing the boot.
+\ tools/loadcheck.mjs boots the disc, runs to the loader's jump to LD_EXEC,
+\ and holds every part's place in memory to its file, byte for byte, timing
+\ the boot.
 \ ***************************************************************************
 
+INCLUDE "defs.6502"
 INCLUDE LD_BUILD + "parts.6502"
 INCLUDE "zx02.6502"
 
-\ The MOS's and the hardware's.
+\ The MOS's and the hardware's (romsel, acccon and its bits: src/defs.6502).
 osasci      = &FFE3
 osword      = &FFF1
-romsel      = &FE30
 ROMSEL_COPY = &F4               ; the OS's copy of romsel
 ROMSEL_ANDY = &80               ; romsel's bit 7: ANDY over the bank's &8000-&8FFF
-acccon      = &FE34
-ACCCON_X    = 4                 ; the CPU's &3000-&7FFF is shadow RAM
-ACCCON_Y    = 8                 ; HAZEL's RAM at &C000-&DFFF
 MODE7_SCREEN = &7C00            ; the screen the boot shows, while this loads
 
 \ The disc: drive 0's, as SHIFT-BREAK boots it, ten 256-byte sectors a
@@ -227,7 +227,7 @@ SECTION Loader, org = LD_ORG, load = &FFFF0000 OR LD_ORG, exec = &FFFF0000 OR ld
 IF LD_KEEP_OS
     LDA ld_romsel : STA ROMSEL_COPY : STA romsel
 ELSE
-    \ the OS is done with: !BOOT's own streams, into HAZEL and ANDY
+    \ the OS is done with: !BOOT's own streams (LD_LATE's)
     SEI
     LDA #ACCCON_Y : TSB acccon
     LDA #LO(ld_late) : STA ld_src : LDA #HI(ld_late) : STA ld_src+1
