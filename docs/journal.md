@@ -554,3 +554,16 @@ Driller's views drawn fresh from 122,247 to 119,638 cycles, the median
 unchanged at about 110K; grouping faces by object measured at under 2K a
 view, so it wasn't built. The round's account of what's left: about 45
 cycles a piece, about 70 a face-line, and 27K of byte stores.
+
+## 2026-11-01: Driller's 192-line screen (track T)
+
+The screen went to 24 rows (decision 43), which `make frames` checks
+against MOS 3.20's MODE 2 centre, and the flip at the view's end moved
+with the sync. The memory it freed went to the speed work: the front
+end's code bank from 134 bytes free to 2,558, its main-RAM room at &3000
+from 256 to 1,336, the fill's bank from 225 to 760, the logic's shadow
+room from 2,272 to 6,368. Measured free on jsbeeb over 64 seconds of play
+and not yet used: ANDY's 4K, 229 bytes of page 1, 137 of zero page, and
+page &0D below &0D9F. The front end's code starts at `OBJ_CODE_ORG`, the
+fastest of ten offsets measured (they spread about ±0.2%). Every frame of
+both live discs is still the model's, byte for byte.

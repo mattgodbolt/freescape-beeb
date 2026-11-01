@@ -508,3 +508,14 @@ a frame drawn into it first. Each logic pass waits for a key reading made
 after the last pass ended, a turn shows its first 5° step one field into
 its pass, and a tap acts once (an earlier fault took one tap twice). Frame
 figures are now taken over the frames drawn.
+
+## 43. Driller's 192-line screen, and the memory it frees (2026-11-01, autonomous; amends 2, 9, 31, 34, 40)
+
+The screen is 24 character rows, 192 lines, as Driller's and the ZX's
+are: the 104-line view and ten rows below it, at `SCREEN` (12K a buffer),
+kept centred where MOS 3.20 puts MODE 2. That frees 4K of main and 4K of
+shadow RAM, into which the area's working copy, the front end's tables,
+the maths code and the rasteriser's state moved (`docs/research/live.md`
+has the map, every boundary ASSERTed). The view doesn't change; the live
+disc's text is condensed into the ten rows, the attribution kept
+(decision 6).
