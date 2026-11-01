@@ -3,25 +3,31 @@
 // 6502 (src/raster.6502, src/writer.6502), headless, its view's bytes against
 // the model's (tools/model/raster.py, writer.py) exactly.
 //
-//   node tools/rastercheck.mjs BUILD [--scenes FILE] [--scene TEXT] [--json OUT] [--verbose]
+//   node tools/rastercheck.mjs BUILD [--scenes FILE] [--scene TEXT] [--json OUT] [--hot OUT] [--verbose]
 //
 // BUILD holds the check build (RCODE, RRUNS, symbols.json) and scenes.json
 // (mk/raster.mk); --scenes names another scene file. For each scene it
 // writes the faces, patterns and horizon into rs_*, forgets what the screens
 // held, fills the screen with bytes the frame must change (the view's with
-// each expected byte's complement), calls check_frame, and checks:
+// each expected byte's complement), poisons the frame's own work (the
+// lines' heads, the vertices' lines, the pools), calls check_frame, and
+// checks:
 //   - the view's bytes are the model's, in the screen ACCCON's X chose, and
-//     as many were written as the model's counts say;
+//     as many bytes, shared bytes and runs were written as the model's
+//     counts say;
 //   - nothing else of either screen changed;
 //   - nothing was written outside the rasteriser's own memory (its zero
 //     page, the stack, its sections) and the view;
 //   - rs_overflow is set exactly when the model's pools overflowed.
 // Then each sequence of frames goes into alternate screens without
 // forgetting, each frame checked the same way: what the 6502 leaves alone
-// must be what's wanted. It reports each scene's cycles, split by what ran
+// must be what's wanted, and it must write as many bytes as the
+// background's records leave (tools/rasterscenes.py's held_writes). It reports each scene's cycles, split by what ran
 // (an instruction-level profile over the routines' labels), and the cost
 // model fitted to them; --json writes them with the model's counts
-// (docs/research/raster.md).
+// (docs/research/raster.md), and --hot each instruction's cycles and
+// executions by address, for a profile line by line against baron's
+// listing.
 //
 // Exits non-zero when any scene disagrees.
 import fs from "node:fs";
@@ -30,7 +36,7 @@ import { headless } from "./run6502.mjs";
 const args = process.argv.slice(2);
 const dir = args[0];
 if (!dir) {
-    console.error("usage: rastercheck.mjs BUILD [--scene TEXT] [--json OUT] [--verbose]");
+    console.error("usage: rastercheck.mjs BUILD [--scenes FILE] [--scene TEXT] [--json OUT] [--hot OUT] [--verbose]");
     process.exit(2);
 }
 const opt = (name) => {
@@ -39,6 +45,7 @@ const opt = (name) => {
 };
 const only = opt("--scene");
 const jsonOut = opt("--json");
+const hotOut = opt("--hot");
 const verbose = args.includes("--verbose");
 
 const symFile = `${dir}/symbols.json`;
@@ -127,12 +134,20 @@ const bucket = (a) => {
     }
     return b;
 };
-
 // Instruction counts at a few addresses: the runs entered, the shared bytes.
-const counted = { runs: S("put_run.jsr"), joins: S("put_bnd") };
+// The runs entered (every one goes through put_go), and the row runs' code:
+// a byte of the view written from outside it is a shared one.
+const counted = { runs: S("put_go") };
+const runsLo = S("rr_rows");
+const runsHi = runsLo + 256 * Math.ceil(VIEW_H / 8);
 
 await m.call(S("check_init"));
 const stub = await m.empty();
+// --hot: each instruction's cycles and executions over the scenes, by address.
+const hot = hotOut ? new Map() : null;
+// The work each frame makes afresh, poisoned before each.
+const work = [[S("head"), VIEW_H], [S("vk"), S("RS_VERTICES")], [S("pools"), 16 * S("POOL_FIELD")]];
+let poison = 0;
 
 function writeScene(s) {
     const patterns = [];
@@ -200,6 +215,10 @@ async function frame(s, shadow, fresh) {
             for (let c = 0; c < VIEW_BYTES; c++) m.poke(addr(y, c), want[y][c] ^ 0xff, space);
     }
     const before = { [space]: m.read(SCREEN, 0x8000 - SCREEN, space), [other]: m.read(SCREEN, 0x8000 - SCREEN, other) };
+    // The frame's own work (the lines' heads, the vertices' lines, the
+    // pools) must be made by the frame: whatever it held is poisoned.
+    poison++;
+    for (const [at, n] of work) m.write(at, Array.from({ length: n }, (_, i) => (i * 97 + poison * 31 + 0x5b) & 255), BANK);
 
     // Profile: each instruction's cycles to its routine's bucket.
     const prof = {};
@@ -212,16 +231,23 @@ async function frame(s, shadow, fresh) {
         if (prevAddr !== null) {
             const b = bucket(prevAddr);
             prof[b] = (prof[b] || 0) + (now - prevT);
+            if (hot) {
+                const h = hot.get(prevAddr) || [0, 0];
+                h[0] += now - prevT;
+                h[1]++;
+                hot.set(prevAddr, h);
+            }
         }
         prevAddr = a;
         prevT = now;
         if (a === counted.runs) counts.runs++;
-        else if (a === counted.joins) counts.joins++;
         return false;
     });
     const onWrite = m.cpu.debugWrite.add((a) => {
-        if (viewAddrs.has(a)) counts.bytes++;
-        else if (!writable(a) && strays.length < 8) strays.push(a);
+        if (viewAddrs.has(a)) {
+            counts.bytes++;
+            if (prevAddr < runsLo || prevAddr >= runsHi) counts.joins++;
+        } else if (!writable(a) && strays.length < 8) strays.push(a);
         return false;
     });
     const { total } = await m.call(S("check_frame"));
@@ -255,6 +281,12 @@ async function frame(s, shadow, fresh) {
     const want_counts = countsOf(s);
     if (overflow !== want_counts.overflow) problems.push(`rs_overflow ${overflow}, the model's ${want_counts.overflow}`);
     if (fresh && counts.bytes !== want_counts.bytes) problems.push(`${counts.bytes} view bytes written, the model's ${want_counts.bytes}`);
+    if (fresh && counts.joins !== want_counts.joins) problems.push(`${counts.joins} shared bytes written, the model's ${want_counts.joins}`);
+    if (fresh && counts.runs !== want_counts.runs) problems.push(`${counts.runs} runs entered, the model's ${want_counts.runs}`);
+    // A held frame writes what the background's records leave
+    // (tools/rasterscenes.py's held_writes).
+    const held = PAINTER ? s.painter.written : s.written;
+    if (!fresh && held !== undefined && counts.bytes !== held) problems.push(`${counts.bytes} view bytes written, the records' ${held}`);
     return { cycles, prof, counts, problems };
 }
 
@@ -285,6 +317,15 @@ const sum = results.reduce((t, r) => t + r.cycles, 0);
 console.log(`${results.length - failures}/${results.length} scenes match the model; ` +
     `${sum} cycles in all, by part: ` +
     Object.entries(totals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(100 * v / sum).toFixed(1)}%`).join(", "));
+// The distribution over the scenes, each drawn fresh: the median the
+// middle one, p90 by nearest rank.
+if (results.length) {
+    const sorted = results.map((r) => r.cycles).sort((a, b) => a - b);
+    const rank = (q) => sorted[Math.max(0, Math.ceil(q * sorted.length) - 1)];
+    console.log(`cycles a scene: min ${sorted[0]}, median ${sorted[(sorted.length - 1) >> 1]}, ` +
+        `mean ${Math.round(sum / sorted.length)}, p90 ${rank(0.9)}, max ${sorted[sorted.length - 1]}`);
+}
+if (hotOut) fs.writeFileSync(hotOut, JSON.stringify(Object.fromEntries([...hot].map(([a, v]) => [a, v]))) + "\n");
 
 // The sequences: frames in turn into alternate screens, each keeping what
 // was drawn into it two frames before.
