@@ -11,57 +11,59 @@
 \ src/logic/hooks.6502.
 \ ***************************************************************************
 
-\ PAGE reg, bank: bank paged in, by register reg (A or Y), which it clobbers.
-MACRO PAGE "A", bank
+\ LOGIC_PAGE reg, bank: bank paged in, by register reg (A or Y), which it
+\ clobbers. (Not PAGE: a macro's name is a keyword, and the engine has a
+\ label .page.)
+MACRO LOGIC_PAGE "A", bank
     LDA #bank : STA romsel : STA logic_paged
 ENDMACRO
-MACRO PAGE "Y", bank
+MACRO LOGIC_PAGE "Y", bank
     LDY #bank : STY romsel : STY logic_paged
 ENDMACRO
 
 \ logic_go_pass: a pass of the logic (logic_pass): A = 0 if nothing was to
 \ be done (no key and no minute), 1 if a pass ran, 2 if the game is over.
 .logic_go_pass
-    PAGE A, LOGIC_CODE_BANK
+    LOGIC_PAGE A, LOGIC_CODE_BANK
     JMP logic_pass
 
 \ logic_go_minute: a minute of the clock has ended (logic_minute).
 .logic_go_minute
-    PAGE A, LOGIC_CODE_BANK
+    LOGIC_PAGE A, LOGIC_CODE_BANK
     JMP logic_minute
 
 \ logic_go_init: the logic ready, once LOGICW, LOGIC and LOGICC are
 \ loaded: the area's objects indexed.
 .logic_go_init
-    PAGE A, LOGIC_BANK
+    LOGIC_PAGE A, LOGIC_BANK
     JMP index_objects
 
 \ logic_go_colours: the screen takes the area's colours (the original's
 \ $A77A, which its redraw runs when AreaChanged is set): ScreenColours,
 \ the sensors' flash counters, and AreaChanged cleared.
 .logic_go_colours
-    PAGE A, LOGIC_BANK
+    LOGIC_PAGE A, LOGIC_BANK
     JMP screen_update
 
 \ logic_go_shown: each of the area's objects' and the globals' flags into
 \ ix_flags, for the renderer (shown_flags).
 .logic_go_shown
-    PAGE A, LOGIC_BANK
+    LOGIC_PAGE A, LOGIC_BANK
     JMP shown_flags
 
 \ far_events: the events (LOGIC_BANK), from the pass (LOGIC_CODE_BANK).
 .far_events
-    PAGE A, LOGIC_BANK
+    LOGIC_PAGE A, LOGIC_BANK
     JSR events
-    PAGE A, LOGIC_CODE_BANK
+    LOGIC_PAGE A, LOGIC_CODE_BANK
     RTS
 
 \ far_answer: answer (LOGIC_BANK, which has the records) for touch
 \ (LOGIC_CODE_BANK), keeping A and C. Clobbers Y.
 .far_answer
-    PAGE Y, LOGIC_BANK
+    LOGIC_PAGE Y, LOGIC_BANK
     JSR answer
-    PAGE Y, LOGIC_CODE_BANK
+    LOGIC_PAGE Y, LOGIC_CODE_BANK
     RTS
 
 \ wait ($A56F, $A9D0): Countdown = A, and the interrupt counts it to 0

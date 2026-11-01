@@ -199,6 +199,7 @@ RIG_PARTS = {&87A5, &87C0, &87CE, &87DE, &87EE}
 \ the values scaled by it. Nothing more happens if there's no such area.
 .load_area
 {
+    JSR hook_loaded                             ; (the camera jumps, for the frames between)
     STZ MinuteSeen : STZ MinuteCount
     LDA #&40
     TSB zx(&87FE) : TSB zx(&880E) : TSB zx(&881E)    ; three globals hidden

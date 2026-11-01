@@ -127,6 +127,15 @@ ASSERT ZXI_KeyTable3[0] = ZX_KEYS3 AND ZXI_KeyTable2[0] = ZX_KEYS2
 \ set seen last time waits RepeatDelay, then RepeatRate, before it counts
 \ again (both 0 in play). The original reads the Kempston joystick too
 \ when Control is 2; Driller's is 0 in play, and the BBC has none.
+\ The bitmap is logic_keys: src/input.6502's keys, or the includer's
+\ (LOGIC_KEYS: the live disc's adds the keys gone down since the last
+\ pass, so a key tapped between passes still acts).
+IF DEFINED(LOGIC_KEYS)
+    logic_keys = LOGIC_KEYS
+ELSE
+    logic_keys = keys
+ENDIF
+ASSERT logic_keys >= &100                       ; (rest's rows six bytes each: absolute)
 .read_keys
 {
     ZA_AUTO1 mask
@@ -135,7 +144,7 @@ ASSERT ZXI_KeyTable3[0] = ZX_KEYS3 AND ZXI_KeyTable2[0] = ZX_KEYS2
     \ are empty.
     STZ KeyCount
     FOR r = 0..KEYS_BYTES - 1
-        LDA keys + r : STA KeyRows + r : BEQ empty
+        LDA logic_keys + r : STA KeyRows + r : BEQ empty
         LDX #r : JSR take : BCC empty
         JMP rest + 6 * r                        ; five taken: the rows after it as read
     .empty
@@ -147,7 +156,7 @@ ASSERT ZXI_KeyTable3[0] = ZX_KEYS3 AND ZXI_KeyTable2[0] = ZX_KEYS2
     \ rest: the rows after the one the fifth key was in, as read
 .rest
     FOR r = 1..KEYS_BYTES - 1
-        LDA keys + r : STA KeyRows + r
+        LDA logic_keys + r : STA KeyRows + r
     NEXT
     BRA read
     \ take: half-row X's keys, lowest bit first, as codes in Keys, each

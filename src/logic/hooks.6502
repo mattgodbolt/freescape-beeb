@@ -10,6 +10,10 @@
 \ another bank in puts the caller's back before it returns (logic_paged
 \ says which: LDA logic_paged : STA romsel). They may use any of the pool's bytes
 \ the logic isn't using across the call (baron's allocator sees to it).
+\
+\ An includer that fills one in names its own routine before including
+\ this file, as LOGIC_HOOK_WAIT, LOGIC_HOOK_WALKED or LOGIC_HOOK_LOADED
+\ (src/live.6502 does), and the hook is that routine.
 \ ***************************************************************************
 
 \ hook_sound ($9574): play sound A (the original waits while it plays).
@@ -19,8 +23,34 @@
 \ hook_wait: wait while the interrupt counts Countdown down from A frames
 \ (the turn's and step's size keys, 7; the crosshair keys, 9; FCL DELAY).
 \ Countdown is 0 once the logic goes on.
+IF DEFINED(LOGIC_HOOK_WAIT)
+    hook_wait = LOGIC_HOOK_WAIT
+ELSE
 .hook_wait
     RTS
+ENDIF
+
+\ hook_walked (the move, $A220, once the walk is done and before the
+\ margin): TargetX, TargetY and TargetZ are where the walk stopped, and
+\ PlayerX, PlayerY and PlayerZ where it began (on the probe's step, the
+\ feet), so the segment between is what the move checked. Not the
+\ original's: it's for the frames shown between passes (decision 4).
+IF DEFINED(LOGIC_HOOK_WALKED)
+    hook_walked = LOGIC_HOOK_WALKED
+ELSE
+.hook_walked
+    RTS
+ENDIF
+
+\ hook_loaded (an area's load, $BE18, as it begins): the camera is about to
+\ be put somewhere new, maybe in another area, rather than moved. Not the
+\ original's: it's for the frames shown between passes.
+IF DEFINED(LOGIC_HOOK_LOADED)
+    hook_loaded = LOGIC_HOOK_LOADED
+ELSE
+.hook_loaded
+    RTS
+ENDIF
 
 \ hook_key_lights ($99AE, $9A64): the panel's key lights, A = 0 off, 1 on.
 .hook_key_lights
