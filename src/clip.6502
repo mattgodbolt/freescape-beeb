@@ -843,13 +843,14 @@ ENDMACRO
 \ drawable: C set if the polygon staged in out_v (p_n vertices from out_vn,
 \ its repeats dropped, inside the view) is drawn (the model's drawable):
 \ three or more vertices, one off the line through the first two. dx ey =
-\ dy ex is decided by the products' signs and zeros where it can be, then
-\ by the sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger,
-\ and the other way about), else by the products.
+\ dy ex is decided by the products' zeros and signs where it can be (from
+\ the differences' high bytes, before any size is taken), then by the
+\ sizes' order (|dx| > |dy| and |ey| > |ex| make dx ey the larger, and the
+\ other way about), else by the products.
 .drawable
 {
     ZA_AUTO2 dx, dy, ex, ey
-    ZA_AUTO1 i, sa, sb, s, s1, end
+    ZA_AUTO1 i, s1, end, dxz, dyz, sized, sxy
     LDA p_n : CMP #3 : BCS enough
     RTS                             ; (C clear)
 .enough
@@ -857,21 +858,48 @@ ENDMACRO
     LDY out_vn : LDX out_vn : INX
     DIFF2D dx, out_vxl, out_vxh
     DIFF2D dy, out_vyl, out_vyh
-    ABS16 dx : STA sa               ; (dx, dy kept as sizes, their signs here)
-    ABS16 dy : STA sb
-    ORDER16 dx, dy : STA s1
+    \ dxz, dyz: non-zero if dx, dy are zero; sxy: their signs EORed (bit 7)
+    LDA dx : ORA dx+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dxz
+    LDA dy : ORA dy+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dyz
+    LDA dx+1 : EOR dy+1 : STA sxy
+    STZ sized
     LDA out_vn : CLC : ADC #2 : STA i
 .vertex
     LDX i : LDY out_vn
     DIFF2D ex, out_vxl, out_vxh
     DIFF2D ey, out_vyl, out_vyh
-    ABS16 ey : PSIGN sa : STA s     ; dx ey's sign
-    ABS16 ex : PSIGN sb             ; dy ex's
-    CMP s : BNE off_line            ; (their signs or zeros differ)
-    CMP #0 : BEQ next               ; (both zero: on the line)
+    \ dx ey zero? then dy ex must be too, else it's off the line
+    LDA dxz : BNE e1_zero
+    LDA ey : ORA ey+1 : BEQ e1_zero
+    \ dx ey not zero: dy ex must be, with the same sign, for it to be on the line
+    LDA dyz : BNE off_line
+    LDA ex : ORA ex+1 : BEQ off_line
+    LDA ey+1 : EOR ex+1 : EOR sxy : BMI off_line
+    JMP sizes                       ; (the same sign)
+.e1_zero
+    LDA dyz : BNE next
+    LDA ex : ORA ex+1 : BNE off_line
+.next
+    INC i : LDA i : CMP end : BEQ on_line
+    JMP vertex
+.on_line
+    CLC
+    RTS
+.off_line
+    SEC
+    RTS
+.sizes
     \ the same sign: the sizes decide, by their order if it can
+    LDA sized : BNE have_sizes
+    INC sized
+    ABS16 dx
+    ABS16 dy
+    ORDER16 dx, dy : STA s1
+.have_sizes
+    ABS16 ex
+    ABS16 ey
     LDA s1 : BEQ products
-    ORDER16 ey, ex : CMP s1 : BEQ off_line
+    ORDER16 ey, ex : CMP s1 : BEQ off
 .products
     LDA dx : STA umul16.ma
     LDA dx+1 : STA umul16.ma+1
@@ -890,20 +918,15 @@ ENDMACRO
     PLA : CMP umul16.mp+3 : BNE pop3
     PLA : CMP umul16.mp+2 : BNE pop2
     PLA : CMP umul16.mp+1 : BNE pop1
-    PLA : CMP umul16.mp : BNE off_line
-.next
-    INC i : LDA i : CMP end : BEQ on_line
-    JMP vertex
-.on_line
-    CLC
-    RTS
+    PLA : CMP umul16.mp : BNE off
+    JMP next
 .pop3
     PLA
 .pop2
     PLA
 .pop1
     PLA
-.off_line
+.off
     SEC
     RTS
 }
@@ -2610,23 +2633,35 @@ SECTION ObjCode
 \ 2^(n + BAND_XS) or y beyond 2^(n + BAND_YS) either way, n = bitlen(z). v
 \ is within 2^k when v + 2^k has no bit from k + 1 up: the band_* tables,
 \ indexed by 2n, have that bias and the mask of those bits for each of v's
-\ top two bytes. X is kept.
+\ top two bytes, read 32 on (2 bitlen(z's top byte) indexing them) or 16 on
+\ (2 bitlen(its middle byte)). From BAND_MID up, k is past 15 for both x and
+\ y, so the top byte alone decides. X is kept.
 MACRO BAND_TEST
-    LDY vz2,X : BMI off : BEQ near
-    LDA proj_bl2,Y : CLC : ADC #32 : TAY     ; 2n, n >= 17: k past 15 for both
-    LDA vx2,X : CLC : ADC band_xb2,Y : AND band_xm2,Y : BNE off
-    LDA vy2,X : CLC : ADC band_yb2,Y : AND band_ym2,Y : BNE off
+    LDY vz2,X : BEQ near : BMI off_top
+    LDA proj_bl2,Y : TAY                ; 2n - 32
+    LDA vx2,X : CLC : ADC band_xb2 + 32,Y : AND band_xm2 + 32,Y : BNE off_top
+    LDA vy2,X : CLC : ADC band_yb2 + 32,Y : AND band_ym2 + 32,Y : BNE off_top
     CLC
+    BRA done
+.off_top
+    SEC
     BRA done
 .near
     LDY vz1,X : BEQ off                 ; (z < 256: nearer than ZNEAR)
-    LDA proj_bl2,Y : CLC : ADC #16 : TAY
-    LDA vx1,X : CLC : ADC band_xb1,Y : STA band_t
-    LDA vx2,X : ADC band_xb2,Y : AND band_xm2,Y : BNE off
-    LDA band_t : AND band_xm1,Y : BNE off
-    LDA vy1,X : CLC : ADC band_yb1,Y : STA band_t
-    LDA vy2,X : ADC band_yb2,Y : AND band_ym2,Y : BNE off
-    LDA band_t : AND band_ym1,Y : BNE off
+    CPY #BAND_MID : BCC low
+    LDA proj_bl2,Y : TAY                ; 2n - 16
+    LDA vx2,X : CLC : ADC band_xb2 + 16,Y : AND band_xm2 + 16,Y : BNE off
+    LDA vy2,X : CLC : ADC band_yb2 + 16,Y : AND band_ym2 + 16,Y : BNE off
+    CLC
+    BRA done
+.low
+    LDA proj_bl2,Y : TAY                ; 2n - 16
+    LDA vx1,X : CLC : ADC band_xb1 + 16,Y : STA band_t
+    LDA vx2,X : ADC band_xb2 + 16,Y : AND band_xm2 + 16,Y : BNE off
+    LDA band_t : AND band_xm1 + 16,Y : BNE off
+    LDA vy1,X : CLC : ADC band_yb1 + 16,Y : STA band_t
+    LDA vy2,X : ADC band_yb2 + 16,Y : AND band_ym2 + 16,Y : BNE off
+    LDA band_t : AND band_ym1 + 16,Y : BNE off
     CLC
     BRA done
 .off
@@ -2635,6 +2670,10 @@ MACRO BAND_TEST
 ENDMACRO
 ASSERT ZNEAR = 256                      ; (BAND_TEST's: not nearer, a top byte non-zero)
 ZA_AUTO1 band_t
+\ z's middle byte from BAND_MID up (z's top byte 0): n at least 14, so k
+\ past 15 for x and y both, and the band's low bytes (biases and masks) 0
+BAND_MID = 1 << (16 - 1 - BAND_YS - 8)
+ASSERT BAND_XS >= BAND_YS AND 14 + BAND_YS >= 16
 
 \ band_test: BAND_TEST, as a routine.
 .band_test
@@ -2736,13 +2775,18 @@ ZA_AUTO1 band_t
     LDX of_cand : LDA cd_vmask,X : STA used : STA vp_need
     STZ vp_off
     LDX #0
+    BRA band
+.unused
+    INX
 .band
-    LSR used : BCC band_next
+    LSR used : BCC unused
     BAND_TEST : BCC band_next
     LDA bit8,X : TSB vp_off
 .band_next
     INX
-    LDA used : BNE band
+    LDA used : BEQ banded
+    JMP band
+.banded
     \ the vertices to project: every one used, unless some are off the band
     LDA vp_off : BEQ needed
     STZ vp_need

@@ -92,7 +92,8 @@ const arr = (name, i) => m.peek(S(name) + i, space(S(name)));
 let failures = 0;
 const fail = (what) => {
     failures++;
-    if (failures <= 40) console.log(`FAIL ${what}`);
+    if (args.includes("--quiet") ? failures <= 8 : failures <= 40)
+        console.log(`FAIL ${args.includes("--quiet") ? what.slice(0, 200) : what}`);
 };
 
 // --- Where the pipeline may write: its zero page, the stack, its own
@@ -147,8 +148,10 @@ const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
 // --profile: every instruction's cycles to the routine it's in (the last
 // label at or below it that isn't inside a scope), over all the views;
 // --profile-walks, over the walks' steps alone (the frames that only move).
+// --fine: by every label, scoped ones too; --top N: the N largest.
 const walksOnly = args.includes("--profile-walks");
 const profile = args.includes("--profile") || walksOnly ? new Map() : null;
+const fine = args.includes("--fine");
 let profiling = false;
 const routines = [];
 if (profile) {
@@ -157,7 +160,7 @@ if (profile) {
         for (const s of a.sections)
             if ((s.name === "ObjCode" || s.name === "ObjMore") && s.labels)
                 for (const [k, v] of Object.entries(s.labels))
-                    if (!k.includes(".") && !k.includes("@")) routines.push([v.value, k]);
+                    if (!k.includes("@") && (fine || !k.includes("."))) routines.push([v.value, k]);
     routines.sort((a, b) => a[0] - b[0]);
 }
 const routineOf = (pc) => {
@@ -410,17 +413,40 @@ const p90 = (v) => {
     const s = [...v].sort((a, b) => a - b);
     return s.length ? s[Math.ceil(0.9 * s.length) - 1] : 0;
 };
+// --quiet: each group's total alone; --compare OLD.json: each stage's
+// median / p90 / max / mean against an earlier run's --json, view for view.
+const quiet = args.includes("--quiet");
+const compareFile = opt("--compare");
+const before = compareFile ? new Map(JSON.parse(fs.readFileSync(compareFile, "utf8")).map((r) => [r.name, r])) : null;
+const mean = (v) => Math.round(v.reduce((a, b) => a + b, 0) / (v.length || 1));
 const report = (label, rows) => {
     if (!rows.length) return;
-    console.log(`${label}: ${rows.length} views, cycles median / p90 / max`);
-    const line = (name, vals) => {
+    console.log(`${label}: ${rows.length} views, cycles median / p90 / max${before ? " / mean, before and now" : ""}`);
+    const line = (name, vals, old) => {
         const top = Math.max(...vals);
         const who = rows[vals.indexOf(top)].name;
+        if (old) {
+            const f = (v) => `${median(v)} / ${p90(v)} / ${Math.max(...v)} / ${mean(v)}`;
+            const d = mean(vals) - mean(old);
+            if (Math.max(...vals, ...old) > 0)
+                console.log(`  ${name.padEnd(10)} ${f(old).padEnd(34)} ${f(vals).padEnd(34)} (${d >= 0 ? "+" : ""}${d})`);
+            return;
+        }
         console.log(
             `  ${name.padEnd(10)} ${String(median(vals)).padStart(8)} ${String(p90(vals)).padStart(8)} ` +
                 `${String(top).padStart(8)}  ${who}`,
         );
     };
+    const was = before ? rows.map((r) => before.get(r.name)).filter(Boolean) : null;
+    if (was && was.length === rows.length) {
+        for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0), was.map((r) => r.stages[st] || 0));
+        line("total", rows.map((r) => r.total), was.map((r) => r.total));
+        return;
+    }
+    if (quiet) {
+        line("total", rows.map((r) => r.total));
+        return;
+    }
     for (const st of STAGE_NAMES) line(st, rows.map((r) => r.stages[st] || 0));
     line("total", rows.map((r) => r.total));
     if (rows[0].calls) {
@@ -451,7 +477,7 @@ if (profile) {
     const total = [...profile.values()].reduce((a, b) => a + b, 0);
     const n = walksOnly ? results.filter((r) => /-w\d+$/.test(r.name)).length : results.length;
     console.log(`profile: cycles by routine over ${n} ${walksOnly ? "walk steps" : "views"}`);
-    for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40))
+    for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("--top") ?? 40)))
         console.log(`  ${r.padEnd(20)} ${String(Math.round(c / n)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);
 }
 if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify(results, null, 1) + "\n");
