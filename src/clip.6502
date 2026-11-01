@@ -68,7 +68,8 @@ SECTION ObjWork
 .vsxh       SKIP VALL
 .vsyl       SKIP VALL
 .vsyh       SKIP VALL
-.fp_idx     SKIP NPOLY              ; the face's loop, as vertex indices
+.fp_idx     SKIP NPOLY              ; the face's loop, as vertex indices (the cone's: the first again after the last)
+.fp_bh      SKIP VMAX + 1           ; the cone's: 1 for a vertex of the loop at or behind the eye, the first again
 \ the 2D polygons, 16-bit coordinates: the clip's passes go from one
 \ buffer to the other and back; each pb array follows its pa array, so
 \ that the cone's passes can take either as theirs by an index's base
@@ -1827,7 +1828,8 @@ ENDMACRO
 \ line's own, and a side's the corner's at its start plus a product (A x
 \ along the top and bottom, B y down the left and right); any other's two
 \ products. (Every way gives the same f, the tag only the shortest.) Its A
-\ and B in the readers (cone_line). Y is kept.
+\ and B in the readers (cone_line). Y is kept, and A is f's top byte
+\ (cf3,Y: every way's last store).
 .cone_eval
     LDX pa_tg,Y
     JMP (ce_jump,X)
@@ -1970,16 +1972,23 @@ ASSERT NLINES < LB_SIDE
 
 \ cone_pass: the polygon (p_n vertices, tagged and labelled, in cp_src's
 \ half) clipped to line X (the model's _cone_pass) into the other half,
-\ which cp_src then names: p_n left, Z set if none.
+\ which cp_src then names: p_n left, Z set if none. With every vertex
+\ inside the line, it's left where it is, as it was.
 .cone_pass
 {
-    ZA_AUTO1 i, end
+    ZA_AUTO1 i, end, outs
     JSR cone_line
     STX cp_line
+    STZ outs
     LDA cp_src : TAY : CLC : ADC p_n : STA end
 .f
     JSR cone_eval
+    ORA outs : STA outs                 ; (f's sign)
     INY : CPY end : BNE f
+    BIT outs : BMI some_out
+    LDA p_n                             ; (none: Z clear)
+    RTS
+.some_out
     LDX cp_src                          ; the first again after the last
     LDA cf0,X : STA cf0,Y
     LDA cf1,X : STA cf1,Y
@@ -2075,17 +2084,31 @@ ENDMACRO
 \ take some vertex of it, as the cone's polygon in pa (p_n vertices, its
 \ repeats dropped): C clear if nothing's left. (render.py's draw_faces and
 \ edge_lines, and clip.py's cone_clip.) An edge with both ends at or behind
-\ the eye (z <= 0) has no line.
+\ the eye (z <= 0) has no line; the lines of those with both in front come
+\ first, then those with one, each in the loop's order.
 .cone_face
 {
-    ZA_AUTO1 face, n, j, every, nl, vi, vk
+    ZA_AUTO1 face, n, j, every, nl, vi, vk, phase
     STX face
     LDA fa_nv,X : STA n
     LDY fa_loop,X
     LDX #0
 .index
     LDA lp_table,Y : STA fp_idx,X
+    \ fp_bh: 1 if it's at or behind the eye (z <= 0)
+    PHY : TAY
+    LDA vz2,Y : BMI behind
+    ORA vz1,Y : ORA vz0,Y : BEQ behind
+    LDA #0
+    BRA placed
+.behind
+    LDA #1
+.placed
+    STA fp_bh,X
+    PLY
     INY : INX : CPX n : BNE index
+    LDA fp_idx : STA fp_idx,X           ; the first again after the last
+    LDA fp_bh : STA fp_bh,X
     \ every vertex in one of code3's half-spaces: not seen (the AND is
     \ settled once it's 0)
     LDA #&FF : STA every
@@ -2097,20 +2120,18 @@ ENDMACRO
     INX : CPX n : BNE code
     JMP none
 .coded
-    \ each edge's line, kept if it cuts the rectangle
+    \ each edge's line, kept if it cuts the rectangle: in phase 0 those with
+    \ both ends in front, in phase 1 those with one behind (an edge's ends
+    \ behind, counted, is its phase)
     STZ nl
+    STZ phase
+.phases
     STZ j
 .edge
-    LDX j : LDA fp_idx,X : STA vi
-    INX : CPX n : BNE no_wrap
-    LDX #0
-.no_wrap
-    LDA fp_idx,X : STA vk
-    \ both ends at or behind the eye: no line
-    TAX : JSR behind : BCC in_front
-    LDX vi : JSR behind : BCS passed
-.in_front
-    LDX vi : LDY vk
+    LDX j
+    LDA fp_bh,X : CLC : ADC fp_bh+1,X : CMP phase : BNE passed
+    LDA fp_idx+1,X : STA vk : TAY
+    LDA fp_idx,X : STA vi : TAX
     JSR edge_normal
     LDX nl
     JSR edge_line
@@ -2122,6 +2143,9 @@ ENDMACRO
     INC nl
 .passed
     INC j : LDA j : CMP n : BNE edge
+    LDA phase : BNE made
+    INC phase : BRA phases
+.made
     \ the rectangle, clipped by each line kept
     LDA nl : BEQ whole
     LDX #0
@@ -2160,15 +2184,6 @@ ENDMACRO
 .in_pa
     JSR dedupe
 .deduped
-    SEC
-    RTS
-\ behind: C set if vertex X's z <= 0
-.behind
-    LDA vz2,X : BMI at_or_behind
-    ORA vz1,X : ORA vz0,X : BEQ at_or_behind
-    CLC
-    RTS
-.at_or_behind
     SEC
     RTS
 .rect_x

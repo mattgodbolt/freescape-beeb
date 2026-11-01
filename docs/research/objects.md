@@ -276,10 +276,16 @@ M, below). A polygon object's vertices go first, then its faces:
     rectangle (projected then if the vertex pass hadn't), the point a face
     projected whole has there too (`clip.JOINS`). Any other crossing is the
     model's crossing from the inside end, as before.
+  - The lines of edges with both ends in front come first, then those
+    with one end behind, each in the loop's order (`render.FRONT_FIRST`):
+    a floor's far edge's line before its sides', which then mostly cut
+    nothing more. Side crossings and joins being the same points whatever
+    the order, that leaves the general crossings, which it makes rare.
   - The first line's pass is made from the rectangle's corners' signs
     (`cone_first`), and each later pass writes the other half of one pair
     of arrays (pb follows pa, `cp_src` naming the polygon's half), so
-    nothing is copied back between passes.
+    nothing is copied back between passes; a pass that finds every vertex
+    inside its line leaves the polygon where it is.
 - **A line's face, or a point's** (`draw_segment`): with an end off the
   band, a point isn't drawn and a line is clipped in 3D to `ZNEAR` and the
   planes x = ±z, 2y = ±z, by crossings from the inside end (`seg_clip`, the

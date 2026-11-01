@@ -79,7 +79,19 @@ def edge_lines(s, m, loop, cs):
             normal = clip.edge_normal(cs[i], cs[k])
         lines.append(clip.screen_line(normal))
         ends.append((i, k))
+    if FRONT_FIRST:
+        order = sorted(range(len(lines)), key=lambda j: not (cs[ends[j][0]][2] > 0 and cs[ends[j][1]][2] > 0))
+        lines = [lines[j] for j in order]
+        ends = [ends[j] for j in order]
     return lines, ends
+
+
+# The lines of edges with both ends in front come first, then the rest, each
+# in the loop's order: a floor's far edge, say, before its sides, whose
+# lines then mostly cut nothing it hasn't. With side crossings and joins
+# the same point whatever the order, it changes only the general crossings,
+# which it makes rare. Off, the loop's order.
+FRONT_FIRST = True
 
 
 def _cone_face(s, m, f, poly, cs, project, image, tally):
