@@ -237,6 +237,61 @@ class Cone(unittest.TestCase):
             checked += 1
         self.assertGreater(checked, 100)
 
+    def test_image_gradient_is_the_planes(self):
+        """The line through an end's image toward the edge's vanishing point
+        faces the way the edge's plane's line does: (a, b) a positive
+        multiple of the plane's (-2 Nx, Ny), N = A x d, to the image's
+        rounding."""
+        from tools.model import parts
+        rng = random.Random(73)
+        checked = 0
+        for _ in range(3000):
+            a = (rng.randint(-1 << 20, 1 << 20), rng.randint(-1 << 19, 1 << 19), rng.randint(ZNEAR, 1 << 20))
+            if not clip.projectable(a):
+                continue
+            d = tuple(rng.randint(-65, 65) for _ in range(3))
+            n = clip.cross(a, d)
+            plane = (-2 * n[0], n[1])
+            p = parts.project(*a)
+            g = clip.image_gradient(p, d)
+            # (the image's rounding, a few sixteenths, moves (a, b) by a few
+            # times |dz|: a gradient much larger than that, not an edge
+            # nearly pointing at the eye)
+            if math.hypot(*g) < 1 << 15:
+                continue
+            # the same direction: their cross product small against their sizes,
+            # their dot product positive
+            dot = g[0] * plane[0] + g[1] * plane[1]
+            crs = g[0] * plane[1] - g[1] * plane[0]
+            size = math.hypot(*g) * math.hypot(*plane)
+            self.assertGreater(dot, 0)
+            self.assertLess(abs(crs), 0.01 * size)
+            checked += 1
+        self.assertGreater(checked, 1000)
+
+    def test_image_line(self):
+        """image_line's line runs through its point, faces (a, b)'s way and
+        fits IMAGE_BITS; with a or b zero it's a unit."""
+        rng = random.Random(79)
+        for _ in range(3000):
+            p = (rng.randint(-20000, 21000), rng.randint(-20000, 21000))
+            a, b = rng.randint(-1 << 21, 1 << 21), rng.randint(-1 << 21, 1 << 21)
+            if rng.random() < 0.1:
+                a = 0
+            elif rng.random() < 0.1:
+                b = 0
+            if not (a or b):
+                continue
+            line = clip.image_line(a, b, p)
+            self.assertEqual(clip.line_f(line, p), 0)
+            for v in line[:2]:
+                self.assertLess(abs(v), 1 << clip.IMAGE_BITS)
+            self.assertGreaterEqual(line[0] * a + line[1] * b, 0)
+            if not a or not b:
+                self.assertEqual(abs(line[0]) + abs(line[1]), 1)
+            for k in range(4):
+                self.assertLess(abs(clip.line_f(line, clip.RECT[k])), 1 << 31)
+
     def test_side_crossing(self):
         """A line's crossing with a side is its exact crossing rounded half
         up from the corner inside it (with SIDE_RECIP, within the

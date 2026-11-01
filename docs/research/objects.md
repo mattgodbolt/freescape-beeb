@@ -26,6 +26,7 @@ node tools/objectcheck.mjs build/objects --entrance --profile-walks --fine --top
                                       # by every label, scoped ones too
 .venv/bin/python -I tools/model/render.py --diff clip.SIDE_RECIP build/data/driller.json build/zx/views
                                       # a model flag's pixels, and the ZX oracle's agreement
+                                      # (render.py's own flags too, such as render.IMAGE_LINES)
 ```
 
 `make objects` needs `make colours` and the maths' tables (`make maths`'s
@@ -147,7 +148,11 @@ them]; `mat_big` marks those (see the transform).
 ## Stage 2: the object pass (`src/objects.6502`)
 
 For each slot: hidden (`ob_state` bit 7, the logic's) skips it; the coarse
-cull is six byte compares; a sensor's watching test is the model's
+cull is a byte compare an axis at most, the one that can cull on it (a box's
+H against f + 1 ahead along the axis, or its L against e ahead against it),
+which `camera_setup` patches into the pass's three slots each frame, or a
+branch past the slot (since the seventh round; a level camera's y never
+culls, nor an axis square to the view); a sensor's watching test is the model's
 (`sensor_watching`: side bits and the Manhattan distance); then each face's
 test, one compare (a plane's: the two terms' signs settle most, else two of
 the maths' `mul`). The candidates go into `cd_obj` (slots in order),
@@ -174,7 +179,10 @@ faces use).
 - **A box's vertices** from the corner: `V0 = C0 − M c`, then each wanted
   vertex its parent plus an edge (7 from 3 from 1 from 0, 5 from 1, 6 from
   2): one 24-bit vector add a vertex, only for the vertices the seen faces
-  use and those they're built from.
+  use and those they're built from. Under a level camera (since the seventh
+  round) the cache's edges along x and z have y 0 and the one along y has x
+  and z 0, exactly, so a cuboid's 1, 4 and 5 add x and z and copy y, 2 adds
+  y and copies x and z, and 3, 6 and 7 are copies.
 - **The products** are all 64 u m for a cell u (0-127) and an entry m of
   M: by quarter squares, `f64(u + 64 + m) − f64(u + 64 − m)` from a
   768-byte table of 64 (n² DIV 4), both indices bytes: three byte
@@ -227,51 +235,72 @@ M, below). A polygon object's vertices go first, then its faces:
   i + 2 share x and z under a level camera, so do a rectangle's along y)
   that lets `project_y` and `project_z` take a vertex sharing the last one's
   x and z, or z, with its outcode against the view (a `project_y` vertex's x
-  part the last one's). Under a level camera (`mat_tilt` 0) the upper vertex
-  of such a pair goes by `vertex_up`, `project_y` without the compares.
+  part the last one's; since the seventh round each coordinate's from a table
+  by its high byte, `oc_x` and `oc_y` in `ObjConst`, but for the far edge's
+  own high byte, where the low byte decides). Under a level camera
+  (`mat_tilt` 0) the upper vertex of such a pair goes by `vertex_up`,
+  `project_y` without the compares.
 - **A face projected whole** (`poly_face`): its vertices go straight into
   the output (`out_v*` from `out_vn`) as they're gathered, with their
-  outcodes' AND, which drops it, and OR. Wholly inside, and with no vertex
-  the one before it again (the first against the last), the drawn test
-  takes them there and `commit` records the face; else they go to `pa` for
-  the 2D clip, or for `dedupe`, and are staged back (`stage_pa`). A cone's
-  polygon and a line's take the same `stage_pa`, `drawable` and `commit`.
+  outcodes' AND, which drops it, and OR; a quad's gather and repeat tests
+  are written out. Wholly inside, and with no vertex the one before it
+  again (the first against the last), the drawn test takes them there and
+  `commit` records the face; else they go to `pa` for the 2D clip, or for
+  the repeats' test, which stages them back (`dedupe_stage`: straight into
+  the output when they'd fit as they come, else deduped where they are and
+  staged after, as before, so that only what's left is measured against the
+  room). A cone's polygon and a line's take the same `dedupe_stage`,
+  `drawable` and `commit`.
 - **Any other polygon: the cone** (`cone_face`, the model's
   `clip.cone_clip`). Every vertex in one of the half-spaces x < −z, x > z,
   2y > z, 2y < −z, z ≤ 0 (`vertex_code3`, each a 32-bit sum's sign; each
   misses the view's pyramid wherever the point is) drops it; the AND stops
   once it's 0. Else each edge's
-  plane through the eye (`edge_normal`) becomes a line on the screen
-  (`edge_line`), kept if it cuts the view's rectangle, and the rectangle is
-  clipped by each kept line in turn (`cone_pass`, Sutherland-Hodgman, its
-  crossings as the 2D clip's). The face's loop winds anticlockwise about its
-  outward normal (every loop does, `objects.shape`), so its inside is where
-  (A × B) · r ≤ 0 for each edge A → B and every ray r through it, and the
-  rectangle clipped by all its edges' planes is exactly its image: no near
-  plane and no guard band, a pyramid from the eye as the original's.
-  - A box's edge runs along a world axis k, so B − A is a multiple of M's
-    column k and the plane is ± A × M[:, k]: each non-zero entry c of the
-    column gives two terms, A's coordinates by c, so c is patched into the
-    quarter-square reader once for both (`en_mul`: a signed 24-bit
-    coordinate by a byte, its raw top byte's excess taken off), and an entry
-    of ±64 is a shift (`en_shl6`; a level camera's column for y is (0, 64,
-    0)). Under a level camera (`mat_tilt` 0: M's y row and column (0, 64,
-    0)) the same N comes by the cofactor identity A × M e_k = cof(M) (D ×
-    e_k), D = A's world offset from the eye (A = M D): along y it's (−64 Az,
-    0, 64 Ax); along x (m20 Ay, d dz, −m00 Ay) and along z (m22 Ay, −d dx,
-    −m02 Ay), d = `mat_d` = m00 m22 − m02 m20, the y cofactor, which
-    `matrix_build` keeps and patches into `en_dmul` (a shift when it's 4096,
-    a yaw a multiple of 90 degrees). Exact, as the general way's, with two
-    byte products and one of d fewer than the general way's four. Any other
-    edge's is cut16(A) × cut16(B − A), 16-bit products.
-  - The normal is shifted right until it fits `LINE_BITS`, N' (one bit
-    length for the three components, then their 16-bit windows shifted
-    together), and the line is f(x, y) = A x + B y + C, A = −2 N'x, B =
-    N'y, C = P − Q − R, P = 2 XC N'x, Q = YC N'y, R = 2 FX N'z, by
-    quarter-square products by 13 and 61 in the instructions on the raw
-    bytes (2 XC = 128 × 13, YC = 64 × 13, 2 FX = 8 × 317, ASSERTed). The
-    line keeps f at the rectangle's corners, ±P ± Q − R (`lfc`), which
-    decides whether it cuts and stands for a corner's f in the passes.
+  plane through the eye becomes a line on the screen, kept if it cuts the
+  view's rectangle, and the rectangle is clipped by each kept line in turn
+  (`cone_pass`, Sutherland-Hodgman, its crossings as the 2D clip's). The
+  face's loop winds anticlockwise about its outward normal (every loop
+  does, `objects.shape`), so its inside is where (A × B) · r ≤ 0 for each
+  edge A → B and every ray r through it, and the rectangle clipped by all
+  its edges' planes is exactly its image: no near plane and no guard band,
+  a pyramid from the eye as the original's.
+  - **A line from images** (since the seventh round: `image_edge`,
+    `image_line`, the model's `render._image_line` and `clip.image_line`,
+    `render.IMAGE_LINES`). An edge's plane's line runs through the image of
+    any point of the edge in front of the eye, so an edge with an end the
+    projection takes (not in `vp_off`; projected then if it wasn't) has its
+    line through that image: through both images when it takes both (as a
+    face projected whole has that edge), or for a box's edge, along M's
+    column d for its axis, toward its vanishing point, square to (FY dy + v
+    dz, FX dx − u dz), (u, v) the image less the view's centre (N = A × d,
+    and (−2 Nx, Ny) is Az / FX times that). `matrix_build` keeps FX M0k and
+    FY M1k for each column (`im_cols`), so a line takes two products of a
+    16-bit coordinate by a byte at most, and none for a level camera's
+    vertical edge. The pair is shifted right together until both fit
+    `IMAGE_BITS`, or is a unit (±1) when the other is 0, and the line is
+    f(x, y) = A x + B y + C with C = −(A px + B py) (`im_term`, products of
+    sixteen bits by sixteen), so it passes through the image exactly; f at
+    the rectangle's corners is C, C + A W, C + A W + B H and C + B H
+    (`im_w`: a coefficient by W = 128 × 13).
+  - **Else the plane's own line** (`edge_normal`, `edge_line`): a generic
+    object's edge with one end taken, an edge with neither, or images that
+    give no direction. A box's edge runs along a world axis k, so B − A is
+    a multiple of M's column k and the plane is ± A × M[:, k]: each non-zero
+    entry c of the column gives two terms, A's coordinates by c, so c is
+    patched into the quarter-square reader once for both (`en_mul`: a
+    signed 24-bit coordinate by a byte, its raw top byte's excess taken
+    off), and an entry of ±64 is a shift (`en_shl6`). Any other edge's is
+    cut16(A) × cut16(B − A), 16-bit products. The normal is shifted right
+    until it fits `LINE_BITS`, N', and the line is A = −2 N'x, B = N'y, C =
+    2 XC N'x − YC N'y − 2 FX N'z = −R − (A W + B H) / 2, its corners'
+    f by `image_line`'s tail. (Until the seventh round a level camera's
+    planes had closed forms by M's cofactors, and this way was written for
+    speed; it's rare now, so it's written for room.)
+  - Either way the line keeps f at the rectangle's corners (`lfc`), which
+    decides whether it cuts and stands for a corner's f in the passes. A
+    face's lines are made in the order below, and none after one with every
+    corner outside it, which leaves nothing (the model makes them so too,
+    so that the vertices the images project are the same).
   - Each of the clipped polygon's vertices is tagged with the rectangle's
     sides it's on (`pa_tg`, `OC_*`; a crossing gets its ends' sides in
     common), so a pass's f at a vertex (`cone_eval`) is a corner's own, a
@@ -289,7 +318,9 @@ M, below). A polygon object's vertices go first, then its faces:
     point whatever piece of the side is being cut, by the 2D clip's
     reciprocals (`clip.side_d`, `SIDE_RECIP`: a's nine bits, and a product
     of sixteen bits by nine, at most the side's length) where it was an
-    eleven-step division rounded half up. A line square to two sides (B zero,
+    eleven-step division rounded half up; for a of 1 (a unit line from
+    images, square to the side), f there itself, exactly (`clip.UNIT_SIDES`,
+    since the seventh round). A line square to two sides (B zero,
     a level camera's vertical edge's, or A zero) crosses both at the same
     point, which `side_cut` keeps for the second (`ln_scl`, `ln_sch`), and
     the passes add no term for a zero coefficient. **Along a line** whose edge shares a vertex with the
@@ -402,7 +433,7 @@ Faces nearest first, in the rasteriser's input's shape
   main RAM on the live disc, which any bank paged sees; the 2D clip, its
   crossings and their reciprocals, and the cone's side crossings),
   `ObjConst` (the loops, the sine table, the
-  matrix's quarter squares), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
+  matrix's quarter squares, the outcodes' tables), `ObjTables` (the transform's f64 table, page-aligned in HAZEL),
   `ObjArea` (the working copy), `ObjWork`, `ObjCache`, `ObjMemo` (the
   sort's memory, whole pages, only `objects_frame` and `cache_reset` touch
   it: beside the cache in the live disc), `ObjOut`;
@@ -424,7 +455,8 @@ and compares the matrix, the candidates and their masks, every candidate's
 camera-space vertices (read as `transform_object` returns), every
 candidate's drawn faces, the order and the output, exactly; the work no
 output need show, because what it would change can be cut away later (the
-lines the cone makes, `edge_line`'s calls, and the vertices projected, the
+lines the cone makes, `edge_line`'s and `image_line`'s calls, but an
+`image_line` that found no direction, and the vertices projected, the
 calls of the projection's three entries); and that nothing outside the pipeline's memory was
 written. It reports each stage's
 cycles (each instruction's to the innermost stage routine running) and the
@@ -686,6 +718,68 @@ What's left:
 - **The faces' gather** (`poly_face`) and the transform's adds, each a few
   per cent.
 
+## The seventh round (track W)
+
+Track W took stages 1-7 through another round, profiled as the sixth
+(`--profile-walks`, `--fine`, `--compare`), keeping what measured faster:
+all exact against the model but the first, a proposed decision. The
+figures, before and after, by stage, step and turn, and the live disc's,
+are in the journal's entry for track W.
+
+Kept:
+
+- **The cone's lines from images** (proposed below): an edge with an end
+  the projection takes has its line through that end's image, through both
+  when it takes both (above). Measured, the lines' saving is smaller than
+  their products suggested: C = −(A px + B py) still takes two products of
+  sixteen bits by sixteen, and a one-end line's image is often projected
+  for it alone; the planes' level closed forms went for room, and
+  `edge_line`, now rare, was written again for room. With them, **a unit
+  line's side crossings exact** (`clip.UNIT_SIDES`).
+- **Outcodes by table** (`oc_x`, `oc_y` by the high byte, in `ObjConst`;
+  the check build's `ObjConst` moved to the OS's pages at `&0A00` for them).
+- **A quad's gather and repeat tests written out**, most faces being quads;
+  room from `frac16`'s division as a loop (it's rare since the side
+  crossings, joins and lines from images).
+- **The cull's compares patched in** (`camera_setup` into `object_pass`'s
+  three slots: the compare that can cull on each axis, or a branch past it).
+- **Dedupe straight into the output** (`dedupe_stage`), and the 2D clip and
+  the cone staging their own polygons.
+- **A level camera's cuboid vertices by copies** (the transform, above).
+
+Measured and not kept:
+
+- **An object passed over when every vertex its seen faces use is in one
+  of code3's half-spaces** (each of its faces would be dropped anyway, so
+  no pixel changes; in the model `draw_faces` would return nothing, before
+  any vertex is tested or projected). It catches most of the candidates
+  that draw nothing, and none that draws, but `vertex_code3` on every
+  candidate's vertices, until the AND is 0, cost more than the projections
+  and faces it saved (the journal's entry for track W has the figures).
+- **`im_term` on the cone's readers** rather than its own: its own
+  quarter-square instructions, patched, measured a little faster.
+
+What's left:
+
+- **Candidates that draw nothing**: about a quarter of the walks'
+  candidates, with about a quarter of their vertices (the journal's entry),
+  are transformed, tested and mostly projected, then dropped face by face;
+  mostly objects in front but to the side. A test per object must be
+  cheaper than `vertex_code3` a vertex: a box's corners against the
+  view's side planes from the cache (V0 = C0 − M c and the three edges,
+  so a plane's least value over the corners is V0's plus each edge's
+  negative part, a few 24-bit sums), or in world space against cells
+  before the transform.
+- **The lines**, still the cone's largest part: C's two products of sixteen
+  bits by sixteen; and the cone's passes' products (`cone_eval`), which a
+  unit line could skip.
+- **The projection's overheads**, unchanged: the copies into its arguments
+  and `pmul`'s calls. Its code is in `ObjMore`, whose room (and the bank's)
+  doesn't take the projection written out per block; the vertex pass's
+  band test for a level cuboid's upper vertices could take z's and x's
+  test from the vertex below.
+- **The floor** is still the largest face.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -776,18 +870,32 @@ clip.SIDE_RECIP`):
    of an eleven-step division rounded half up; still the line's own point
    whatever the polygon. The draw order is unchanged in every view measured.
 
+From the seventh round (track W; `render.IMAGE_LINES` and `clip.UNIT_SIDES`
+together against the model before them, by a run of `render.render` both
+ways over the views `render.py --diff` takes, and over all the check's):
+
+6. **The cone's lines from images** (amending decisions 33, 41 and 45): an
+   edge whose end the projection takes has its line through that end's
+   projected image, not from its plane's normal: through both ends' images
+   when the projection takes both, and for a box's edge with one, toward the
+   edge's vanishing point (square to (FY dy + v dz, FX dx − u dz), d M's
+   column for its axis, (u, v) the image less the view's centre); its
+   direction shifted to `IMAGE_BITS`, or a unit when it's square to a side,
+   and C exact, so the line passes through the image itself, where a face
+   projected whole has that vertex. A unit line's crossing with the side
+   it's square to is f there exactly, not the reciprocal's. Other edges keep
+   their planes' lines. The pixel figures, over the entrance views and
+   walks, every check view and against the ZX oracle, are in the journal's
+   entry for track W. `IMAGE_BITS` of 12, 13 or 15 changes them by a few
+   pixels at most.
+
 ## What's left
 
-- **The target** (about 40K at the median) is far off. The cone is the
-  largest part: its crossings and its lines. What would move it: a level
-  camera's normals (a box's vertical edges' planes are A's x and z, no
-  products; a horizontal face's other edges share its height's products,
-  by the cofactor identity A x M e = cof(M) (D x e)); fewer crossings (a
-  line's crossing with the rectangle's side is one division, not a
-  fraction and a product); fewer lines (an edge whose plane can't reach
-  the rectangle). Then the vertex pass's own overhead, the transform's adds
-  (a 16-bit space with a block exponent is picture-free, above), and the
-  object pass.
+- **The target** (under 100K at a step's median, track W's brief) is still
+  off: the seventh round's what's left, above, has the largest parts (the
+  candidates that draw nothing, the cone's lines and passes, the
+  projection's overheads, the floor). Then the transform's adds (a 16-bit
+  space with a block exponent is picture-free, above).
 - **Size**: the pipeline's code fills its sideways bank on the live disc
   but for a few dozen bytes (the build's guard says when it doesn't fit);
   cold code (a line's 3D clip, the slow fills, the generic cone edges)

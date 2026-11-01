@@ -35,7 +35,12 @@ SECTION ObjWork
 .mat_valid  SKIP 1                  ; non-zero once built
 .mat_big    SKIP 1                  ; non-zero if an entry is beyond -64..64
 .mat_tilt   SKIP 1                  ; 0 for a level camera's: y row and column (0, 64, 0); else &FF
-.mat_d      SKIP 2                  ; ... and then M's y cofactor, M00 M22 - M02 M20
+.im_fx0     SKIP 3                  ; FX M0k, by the column k, 24-bit signed (im_cols) ...
+.im_fx1     SKIP 3
+.im_fx2     SKIP 3
+.im_fy0     SKIP 3                  ; ... and FY M1k
+.im_fy1     SKIP 3
+.im_fy2     SKIP 3
 ENDSECTION
 
 M00 = mat + 0 : M01 = mat + 1 : M02 = mat + 2
@@ -148,6 +153,7 @@ ENDMACRO
     MMUL sr, nsy
     LDA acc : SEC : SBC mp : STA mp : LDA acc+1 : SBC mp+1 : STA mp+1
     MROUND : STA M12
+    JSR im_cols
     \ mat_big: an entry beyond 64 either way (src/transform.6502's fills)
     STZ mat_big
     LDX #8
@@ -160,22 +166,55 @@ ENDMACRO
 .small
     DEX : BPL big
     \ mat_tilt: 0 if M's y row and column are (0, 64, 0), every entry within
-    \ -64..64 (a level camera: pitch and roll 0), else &FF; and then its y
-    \ cofactor, which the cone's edge planes take (src/clip.6502's en_dmul,
-    \ patched with it)
+    \ -64..64 (a level camera: pitch and roll 0), else &FF
     LDA #&FF : STA mat_tilt
     LDA mat_big : ORA M01 : ORA M10 : ORA M12 : ORA M21 : BNE done
     LDA M11 : CMP #64 : BNE done
     STZ mat_tilt
-    MMUL M00, M22 : LDA mp : STA mat_d : LDA mp+1 : STA mat_d+1
-    MMUL M02, M20
-    LDA mat_d : SEC : SBC mp : STA mat_d
-    LDA mat_d+1 : SBC mp+1 : STA mat_d+1
-    JMP en_dset
 .done
     RTS
 }
-ASSERT 2 * 64 * 64 < &8000              ; (mat_d: a positive 16-bit number)
+
+\ im_cols: for each column k of M, FX M0k and FY M1k (im_fx*, im_fy*), which
+\ the cone's lines from images take (src/clip.6502's image_edge): 317 m from
+\ mmul's 61 m and 256 m, then times 4, or 8.
+.im_cols
+{
+    ZA_AUTO1 k
+    LDX #2
+.column
+    STX k
+    LDA mat,X : JSR im_317
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    LDX k
+    LDA im_t : STA im_fx0,X
+    LDA im_t+1 : STA im_fx1,X
+    LDA im_t+2 : STA im_fx2,X
+    LDA mat+3,X : JSR im_317
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    LDX k
+    LDA im_t : STA im_fy0,X
+    LDA im_t+1 : STA im_fy1,X
+    LDA im_t+2 : STA im_fy2,X
+    DEX : BPL column
+    RTS
+\ im_317: im_t (24-bit) = 317 A, A an entry of M
+.im_317
+    PHA
+    LDY #61 : JSR mmul                  ; (|A| + 61 within msq's 128)
+    PLA : CLC : ADC mp+1 : STA im_t+1
+    LDA mp : STA im_t
+    LDA im_t+1 : ASL A
+    LDA #0 : ADC #&FF : EOR #&FF        ; (its sign, extended)
+    STA im_t+2
+    RTS
+}
+ZA_AUTO 4, im_t                         ; (src/clip.6502's image lines' too)
+ASSERT 317 * 65 < &8000 AND 4 * 317 = VIEW_FX AND 8 * 317 = VIEW_FY   ; (317 m fits 16 bits)
+ASSERT im_fx1 = im_fx0 + 3 AND im_fx2 = im_fx1 + 3 AND im_fy1 = im_fy0 + 3 AND im_fy2 = im_fy1 + 3
 
 ENDSECTION
 

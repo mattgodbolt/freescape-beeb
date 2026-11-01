@@ -36,8 +36,6 @@ SECTION ObjWork
 .cell_f     SKIP 3                  ; the camera's floor cell on each axis, at most 254
 .cell_e     SKIP 3                  ; its ceiling cell, at most 255
 .thr        SKIP 8                  ; a face is seen if thr[fa_test] < fa_tval
-.cull_hi    SKIP 3                  ; the coarse cull: a box goes if its H < cull_hi ...
-.cull_lo    SKIP 3                  ; ... or its L >= cull_lo, on some axis
 .cd_n       SKIP 1                  ; the candidates
 .cd_obj     SKIP N_OBJ
 .cd_mask    SKIP N_OBJ
@@ -76,18 +74,31 @@ SECTION ObjCode
     .e_ok
         STA cell_e + k
         EOR #&FF : STA thr + 2 * k + 1   ; T_AXHI + 2 k: seen if 255 - e < 255 - P
-        \ the cull, on the matrix's ahead row
-        STZ cull_hi + k
-        LDA #255 : STA cull_lo + k
+        \ the cull, on the matrix's ahead row, as object_pass's slot k: a box
+        \ goes if its H < f + 1 (ahead along the axis), or its L >= e (ahead
+        \ against it), or the slot is skipped
+        SLOT = WHERE(k = 0, object_pass.slot0, WHERE(k = 1, object_pass.slot1, object_pass.slot2))
         LDA mat + 6 + k : BMI behind
-        CMP #CULL_K : BCC done
-        LDA cell_f + k : INC A : STA cull_hi + k
-        BRA done
+        CMP #CULL_K : BCC skip
+        LDA cell_f + k : INC A : STA SLOT + 4
+        LDA #OP_BCC : STA SLOT + 5
+        LDA #LO(ob_bhx + k * N_OBJ) : STA SLOT + 1
+        LDA #HI(ob_bhx + k * N_OBJ) : STA SLOT + 2
+        BRA test
     .behind
         CMP #(256 - CULL_K) AND &FF : BEQ minus
-        BCS done
+        BCS skip
     .minus
-        LDA cell_e + k : STA cull_lo + k
+        LDA cell_e + k : STA SLOT + 4
+        LDA #OP_BCS : STA SLOT + 5
+        LDA #LO(ob_blx + k * N_OBJ) : STA SLOT + 1
+        LDA #HI(ob_blx + k * N_OBJ) : STA SLOT + 2
+    .test
+        LDA #OP_LDA_ABSX : STA SLOT
+        BRA done
+    .skip
+        LDA #OP_BRA : STA SLOT
+        LDA #OP_SLOT - 2 : STA SLOT + 1
     .done
     NEXT
     LDA #255 : STA thr + T_PLANE    ; never by compare: plane_test decides
@@ -95,6 +106,11 @@ SECTION ObjCode
     RTS
 }
 ASSERT CULL_K > 0 AND CULL_K < 128
+ASSERT ob_bhy = ob_bhx + N_OBJ AND ob_bhz = ob_bhy + N_OBJ
+\ The opcodes camera_setup patches into object_pass's slots, and a slot's
+\ length (its LDA abs,X, CMP # and branch)
+OP_LDA_ABSX = &BD : OP_BCC = &90 : OP_BCS = &B0 : OP_BRA = &80
+OP_SLOT = 7                         ; (the CMP's operand at 4, the branch at 5)
 
 \ object_pass: the candidates, from the area's slots and then the globals'.
 .object_pass
@@ -112,6 +128,13 @@ ASSERT CULL_K > 0 AND CULL_K < 128
     INC globals
     LDA #G_OBJ : STA last
     LDX #0
+    BRA object
+.next
+    INX
+    CPX last : BNE object
+    BRA wrap
+.finished
+    RTS
 .object
     IF DEFINED(OBJ_LOGIC)
         \ hidden by the logic's flags for its index's object (src/area.6502)
@@ -119,18 +142,15 @@ ASSERT CULL_K > 0 AND CULL_K < 128
     ELSE
         LDA ob_state,X : BMI next
     ENDIF
-    LDA ob_bhx,X : CMP cull_hi+0 : BCC next
-    LDA ob_bhy,X : CMP cull_hi+1 : BCC next
-    LDA ob_bhz,X : CMP cull_hi+2 : BCC next
-    LDA ob_blx,X : CMP cull_lo+0 : BCS next
-    LDA ob_bly,X : CMP cull_lo+1 : BCS next
-    LDA ob_blz,X : CMP cull_lo+2 : BCC faces
-.next
-    INX
-    CPX last : BNE object
-    BRA wrap
-.finished
-    RTS
+    \ the coarse cull: on each axis, a box's H against f + 1, or its L
+    \ against e, or nothing, as camera_setup patches the slot
+.slot0
+    LDA ob_bhx,X : CMP #0 : BCC next
+.slot1
+    LDA ob_bhy,X : CMP #0 : BCC next
+.slot2
+    LDA ob_bhz,X : CMP #0 : BCC next
+    ASSERT slot1 = slot0 + OP_SLOT AND slot2 = slot1 + OP_SLOT AND P% = slot2 + OP_SLOT
 .faces
     STX obj
     LDA ob_flags,X : AND #K_MASK : CMP #K_SENSOR : BEQ sensor

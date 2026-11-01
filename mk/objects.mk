@@ -148,9 +148,10 @@ ASSERT CHECK_CODE_GUARD - check_entries_end >= &C000 - OBJ_CODE_ORG
 \ area_init and area_enter page the banks, so their code is never in one.
 SECTION AreaCode, org = CHECK_CODE_GUARD, guard = &5980, filename = "OAREA", cmos = TRUE
 ENDSECTION
-SECTION ObjConst, org = &5980, guard = &5B80, filename = "OCONST"
+\ (the OS's pages above ObjOut: nothing of the OS runs while the check calls)
+SECTION ObjConst, org = &0A00, guard = &0E00, filename = "OCONST"
 ENDSECTION
-SECTION ObjArea, org = &5B80, guard = &6600, virtual = TRUE
+SECTION ObjArea, org = &5980, guard = &6600, virtual = TRUE
 ENDSECTION
 SECTION ObjWork, org = &6600, guard = &7000, virtual = TRUE
 ENDSECTION
