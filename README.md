@@ -40,12 +40,12 @@ BBC's own timing of the whole frame, and of its two halves: stages 1-7
 Incentive Software's.*
 
 **How fast:** measured on the disc's check (journal, 2026-10-31), a frame
-takes a median of 13 fields, about four frames a second, of which about
-seven fields are stages 1-7 and five the fill. The original redrew about
+takes a median of about 12 fields, about four frames a second, of which
+about seven fields are stages 1-7 and four and a half the fill. The original redrew about
 once every two-thirds of a second on the Spectrum. Every stage now matches
 the model exactly, so the work from here is speed: the front end is being
-restructured, the fill is in optimisation rounds, and the projection has
-already halved. Driller's player logic is built in 6502 and checked pass by
+restructured, the fill has had its optimisation rounds (a tenth off), and the
+projection has already halved. Driller's player logic is built in 6502 and checked pass by
 pass against the original's, and comes next, so you walk with Driller's own
 collision. `docs/journal.md` has the story as it goes.
 

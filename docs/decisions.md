@@ -396,3 +396,11 @@ slideshow's place as the public disc.
   says where the input can go then).
 - `area_enter`'s code in main RAM (section `AreaCode`), since it pages the
   records' banks in.
+
+## 32. The span buffer's pools hold 127 gaps (2026-10-31, autonomous)
+
+Each of the span buffer's four pools holds 127 gaps rather than 254, to
+free bank space for faster code. Driller's views need at most 102 (median
+30, journal 2026-10-31); two synthetic scenes now overflow and take
+decision 20's rule, in the model and the 6502 alike. No view of Driller's
+changes.

@@ -367,3 +367,25 @@ view. The BBC's own timing of each half, which it shows, agreed with the
 emulator's count within 8 cycles on all 1,228. Merging main's larger
 projection tables pushed the transform's cache out of HAZEL into main
 RAM's `&3000` (decision 31).
+
+## 2026-10-31: the live disc, and the fill's optimisation rounds
+
+**The live disc** (`docs/research/live.md`, decisions 30-31) runs the
+whole pipeline on the BBC: `objects_frame` then `raster_frame` every
+frame, from the camera alone, with a free camera, the demo, and the BBC's
+own timing of the whole frame and both halves on the screen (User VIA T2
+and the field count). `make live` saw 614 frames, every one the model's
+render of its camera byte for byte; the BBC's own timing agreed with the
+emulator's within 8 cycles on all 1,228 halves. Measured over those
+frames (fields a frame, median / p90 / max): the whole frame 13.0 / 18.5 /
+22.6; stages 1-7 7.25 / 9.55 / 11.64; stages 8-10 5.29 / 9.33 / 11.18. About
+four frames a second at the median. It became `freescape.ssd`.
+
+**The fill's optimisation rounds** (`docs/research/raster.md`): three
+rounds on Driller's 65 views drawn fresh took the fill's median from
+125,057 cycles to 109,526 (p90 221,578 to 189,141; most 364,050 to
+319,467): edges worked out once per vertex and set up inline, runs
+entered inline through a shared trampoline, faces already wholly behind
+full lines skipped. The third round found little; the round's estimate
+of this design's floor is about 90-95K. The refit: about 28 cycles a
+line, 59 a face-line, 229 a run, 2 a byte and 527 an edge. Decision 32.
