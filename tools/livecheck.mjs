@@ -549,15 +549,17 @@ const standing = () => {
     const [a, b] = [frames.at(-2), frames.at(-1)];
     return a && b.ev === events && a.ev === events && !b.anOn && a.area === b.area && a.camera.join() === b.camera.join();
 };
-const settledNow = () => settledExtra() && (IDLE ? idleSeen : standing());
+// (and the panel drawn as wanted, so each pass's panel is shown before the
+// next)
+const panelDone = () => panelCells(PANEL_WANT).join() === panelCells(PANEL_SHOWN).join();
+const settledNow = () => settledExtra() && (IDLE ? idleSeen : standing()) && panelDone();
 const settle = (what) => until(settledNow, `${what}: settling`);
 // Settled, every cell of the panel is drawn as wanted within PANEL_FIELDS
 // fields: the loops that draw nothing find the beam's window once a field.
 const PANEL_FIELDS = 8;
 let panelSettled = 0;
 async function panelDrawn(what) {
-    const drawn = () => panelCells(PANEL_WANT).join() === panelCells(PANEL_SHOWN).join();
-    for (let i = 0; !drawn(); i++) {
+    for (let i = 0; !panelDone(); i++) {
         if (i >= PANEL_FIELDS) return fail(`${what}: the panel isn't drawn as wanted ${PANEL_FIELDS} fields on`);
         await session.runFor(FIELD);
     }
@@ -1090,6 +1092,23 @@ async function freeScript() {
             if (movedN < hold.frames - 1) fail(`${hold.keys} at ${live.entrances[at].name}: moved in ${movedN} frames of ${hold.frames}`);
             else if (ok) holdsOk++;
         }
+    }
+
+    // The panel's values the free camera's play never changes, its
+    // variables staying as the game starts: the jet's picture and a score
+    // of seven digits, then back. Each set by a step and drawn whole
+    // (settled), so the model renders it.
+    script = "panel";
+    const zxPoke = (a, v) => (ram[ZXV_ + a - sym("ZXV_ORG")] = v);
+    const zxStart = [0x877a, 0x8872, 0x8873, 0x8874].map((a) => [a, ram[ZXV_ + a - sym("ZXV_ORG")]]);
+    for (const set of [[[0x877a, 1], [0x8872, 0x87], [0x8873, 0xd6], [0x8874, 0x12]], zxStart]) {
+        await settle("the panel's values");
+        for (const [a, v] of set) zxPoke(a, v);
+        session.keyDownRaw(BBC.UP);
+        await framesMade(1, "the panel's values");
+        session.keyUpRaw(BBC.UP);
+        await settle("the panel's values");
+        await panelDrawn("the panel's values");
     }
 
     // The demo: no key until it starts, then a step a frame.

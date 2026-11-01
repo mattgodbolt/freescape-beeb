@@ -33,7 +33,7 @@ LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros
                src/area.6502 src/matrix.6502 src/transform.6502 src/objects.6502 src/clip.6502 \
                src/order.6502 src/maths.6502 src/project.6502 $(wildcard src/logic/*.6502)
 LIVE_SHOTS  ?= 0 18 26 40 57
-LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise
+LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise fcl
 # mk/maths.mk, mk/objects.mk and mk/logic6502.mk name these too, but are
 # read after this file.
 MATHS_GEN   ?= build/maths/consts.6502 build/maths/tables.6502
