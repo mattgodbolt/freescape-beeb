@@ -1,111 +1,834 @@
 \ ***************************************************************************
-\ FREESCAPE for the BBC Master - the area records (docs/research/objects.md)
+\ FREESCAPE for the BBC Master - the working copy of an area's objects,
+\ built from Driller's database (docs/research/objects.md, "The records")
 \
-\ tools/mkareas.py packs each area's objects into sideways RAM
-\ (build/gen/areas.6502, sections AreaBank*) and defines the working copy
-\ the object pipeline reads (section ObjArea): structure of arrays, a slot
-\ an object, the globals in the first G_OBJ slots and the area's after
-\ them. Entering an area copies its record into the working copy, so every
-\ array has one address whatever the area, and the stages index them with
-\ abs,X.
+\ The object pipeline reads an area's objects from one working copy
+\ (section ObjArea, defined by tools/mkareas.py): structure of arrays, a
+\ slot an object it can draw, the globals in the first G_OBJ slots and the
+\ area's after them, so every array has one address whatever the area and
+\ the stages index them with abs,X. Entering an area builds its part from
+\ the records of Driller's own database, the ZX's bytes in the original's
+\ layout, where the player logic keeps them: the top of its sideways bank
+\ (src/logic/bank.6502's LOGIC_BANK and LOGIC_DB). tools/mkareas.py is the
+\ model of what this builds, and tools/areacheck.mjs holds the two to each
+\ other, byte for byte, for every area.
+\
+\ What the conversion needs that the ZX's database hasn't is in AreaConv,
+\ from tools/mkareas.py: each face's colour, from the version the colours
+\ follow (decision 8), as a stream of colour bytes for each area in its
+\ records' order; and the globals' records as the tape has them, for a
+\ build without the player logic.
 \
 \ Entry points:
-\   area_init    once: the globals copied in, shown as the data has them
-\   area_enter   A = the area's index (0 .. AR_COUNT - 1, the directory's
-\                order): its record copied in, its objects shown as the
-\                data has them, the transform's cache emptied. The bank
-\                paged at &8000 (romsel, and its copy at ROMSEL_COPY) is
-\                put back after. Not while the object pipeline is running.
+\   area_init    once: the globals' slots built, shown as the data has them
+\   area_enter   A = the area's index (0 .. AR_COUNT - 1, the database's
+\                order): its slots built after the globals', its objects
+\                shown as the data has them (ob_state), each slot's place in
+\                the logic's index (ob_ix) set, the transform's cache
+\                emptied. With the logic (OBJ_LOGIC), the globals' slots are
+\                built again too, as the logic moves the rig's parts as an
+\                area loads. Not while the object pipeline is running.
+\ Both are called with the object pipeline's bank paged, and put back the
+\ bank in romsel and its copy, ROMSEL_COPY (&F4), as they found it.
 \
-\ The working copy is never in sideways RAM (the build that places it
-\ ASSERTs so), since the copy pages the record's bank in at &8000; nor is
-\ this code, which is why it has its own section, AreaCode, which the build
-\ puts in main RAM.
+\ The build defines:
+\   AREA_DB_BANK    the bank with the logic's database at its top
+\   AREA_CONV_BANK  the bank AreaConv is in (none: main RAM)
+\   AREA_GLOBALS    where the globals' records are, in main RAM: the
+\                   logic's (src/logic/vars.6502's Globals, which it moves);
+\                   without it, the tape's, in AreaConv
+\   OBJ_LOGIC       the logic is there: the object pass takes what's hidden
+\                   from its ix_flags (bit 6 invisible, bit 5 destroyed), by
+\                   ob_ix; without it, from ob_state's bit 7, which the logic
+\                   would set and clear by slot (ob_id gives each slot's id)
 \
-\ The runtime state beside the copy: ob_state's bit 7 hides an object
-\ (the logic sets and clears it by slot; ob_id gives each slot's Driller
-\ id), and ob_n is the slots in use.
+\ The conversion's code (AreaConv) can be in any bank: it reads a record by
+\ area_record (the area's header by area_fetch), which is in main RAM with
+\ the entry points (AreaCode), so that it can page the database's bank in.
+\ What it writes, the working copy and ObjWork, is never in sideways RAM
+\ (ASSERTed below).
+\
+\ How it converts, where it isn't objects.shape()'s way (tools/mkareas.py
+\ asserts each on every object): a slanted face's plane is the cross product
+\ at its loop's first corner, reduced by its components' greatest common
+\ divisor; a pyramid's side loses its apex corner when its apex edge has
+\ shrunk to a point, and its apex face goes when any apex edge has; each
+\ loop is found by a constant (lp_table's fixed order).
 \ ***************************************************************************
 
 ROMSEL_COPY = &F4                   ; the OS's copy of romsel, kept as the OS keeps it
-NSPACES     = 5                     ; a record's counts: objects, faces, planes, vertices, sensors
+NSPACES     = 5                     ; objects, faces, planes, vertices, sensors
+IX_HIDDEN   = &60                   ; a record's flags: invisible (bit 6), destroyed (bit 5)
+AREA_DB     = &C000 - AREA_DB_LEN   ; the database, at the top of its bank (src/logic/vars.6502's LOGIC_DB)
+IF DEFINED(AREA_GLOBALS)
+    AG_ADDR = AREA_GLOBALS : AG_BANK = AREA_DB_BANK
+ELIF DEFINED(AREA_CONV_BANK)
+    AG_ADDR = ac_tape_globals : AG_BANK = AREA_CONV_BANK
+ELSE
+    AG_ADDR = ac_tape_globals : AG_BANK = AREA_DB_BANK
+ENDIF
+IF DEFINED(IX_MAX)
+    ASSERT IX_MOST <= IX_MAX
+ENDIF
+ASSERT AR_COUNT < 128 AND FETCH_N < 128 AND G_RECORDS > 0
+ASSERT gv_y = gv_x + N_GV AND gv_z = gv_y + N_GV
+ASSERT ob_bly = ob_blx + N_OBJ AND ob_blz = ob_bly + N_OBJ
+ASSERT ob_bhy = ob_bhx + N_OBJ AND ob_bhz = ob_bhy + N_OBJ
+ASSERT ob_ly = ob_lx + N_OBJ AND ob_lz = ob_ly + N_OBJ
+ASSERT ob_hy = ob_hx + N_OBJ AND ob_hz = ob_hy + N_OBJ
+ASSERT T_AXLO = 0 AND T_AXHI = 1 AND F_HIDDEN = &80
 
 SECTION ObjWork
 .ob_n       SKIP 1                  ; slots in use: G_OBJ + the area's objects
 .ob_state   SKIP N_OBJ              ; bit 7: hidden
+    \ the conversion's
+.rec        SKIP FETCH_N + 1        ; the record read (area_fetch), and a zero (AC_ZERO)
+.ac_bank    SKIP 1                  ; the bank area_fetch reads
+.ac_next    SKIP NSPACES            ; each space's next free entry
+.ac_n       SKIP 1                  ; records to go
+.ac_i       SKIP 1                  ; the record's place in the logic's index
+.ac_count   SKIP 1                  ; the area's records
+    \ the object being converted
+.ac_c       SKIP 6                  ; its faces' colours
+.ac_lo      SKIP 3                  ; its box, cells
+.ac_hi      SKIP 3
+.ac_bl      SKIP 3                  ; its bounds
+.ac_bh      SKIP 3
+.ac_f0      SKIP 1                  ; its first face and vertex
+.ac_g0      SKIP 1
+.ac_kind    SKIP 1                  ; its ob_flags, but F_HIDDEN
+.ac_nv      SKIP 1
+.ac_aux     SKIP 1
+    \ the face being added (ac_face)
+.ac_ft      SKIP 1                  ; its test and tval
+.ac_fv      SKIP 1
+.ac_fl      SKIP 1                  ; its loop and length
+.ac_fn      SKIP 1
+.ac_fm      SKIP 1                  ; the vertices it uses
+.ac_v0      SKIP 3                  ; a slanted face's first vertex, cells
+.ac_nn      SKIP 6                  ; its normal, (v1 - v0) x (v2 - v1), 16-bit signed
 ENDSECTION
 
-\ AREA_COPY counts, dest_lo, dest_hi: each array of the record at src (its
-\ counts at counts) to its destination in the tables given; src is left
-\ past the record.
-MACRO AREA_COPY counts, dest_lo, dest_hi
-    LDX #0
-.array
-    STX i
-    LDA dest_lo,X : STA dst
-    LDA dest_hi,X : STA dst+1
-    LDY ad_space,X
-    LDA counts,Y : BEQ next
-    TAX
-    LDY #0
-.byte
-    LDA (src),Y : STA (dst),Y
-    INY : DEX : BNE byte
-    TYA : CLC : ADC src : STA src
-    BCC next
-    INC src+1
-.next
-    LDX i : INX : CPX #AD_COUNT : BNE array
+\ The pointers: the record being read, and the colour stream.
+ZA_AUTO2 ac_src, ac_col
+
+MACRO AC_PAGE bank
+    LDA #bank : STA ROMSEL_COPY : STA romsel
 ENDMACRO
 
 SECTION AreaCode
 
-\ area_init: the globals' record into the working copy's first slots.
+\ area_init: the globals' slots.
 .area_init
 {
     ZA_ENTRY
-    ZA_AUTO2 src, dst
-    ZA_AUTO1 i
-    LDA #LO(globals_record + NSPACES) : STA src
-    LDA #HI(globals_record + NSPACES) : STA src+1
-    AREA_COPY globals_record, ad_gdest_lo, ad_gdest_hi
-    LDX #G_OBJ - 1
-.state
-    LDA ob_flags,X : AND #F_HIDDEN : STA ob_state,X
-    DEX : BPL state
+    LDA ROMSEL_COPY : PHA
+    IF DEFINED(AREA_CONV_BANK)
+        AC_PAGE AREA_CONV_BANK
+    ENDIF
+    JSR ac_globals
+    PLA : STA ROMSEL_COPY : STA romsel
     LDA #G_OBJ : STA ob_n
     JMP cache_reset
 }
 
-\ area_enter: area A's record into the working copy after the globals.
+\ area_enter: area A's slots after the globals'.
 .area_enter
 {
     ZA_ENTRY
-    ZA_AUTO2 src, dst
-    ZA_AUTO1 i
     TAX
     LDA ROMSEL_COPY : PHA
-    LDA ar_bank,X : STA ROMSEL_COPY : STA romsel
-    LDA ar_lo,X : STA src
-    LDA ar_hi,X : STA src+1
-    LDY #NSPACES - 1
-.counts
-    LDA (src),Y : STA ar_counts,Y
-    DEY : BPL counts
-    LDA src : CLC : ADC #NSPACES : STA src
-    BCC copy
-    INC src+1
-.copy
-    AREA_COPY ar_counts, ad_dest_lo, ad_dest_hi
+    IF DEFINED(AREA_CONV_BANK)
+        AC_PAGE AREA_CONV_BANK
+    ENDIF
+    TXA
+    JSR ac_area
     PLA : STA ROMSEL_COPY : STA romsel
-    LDA ar_counts : CLC : ADC #G_OBJ : STA ob_n
+    JMP cache_reset
+}
+
+\ area_record: the record at ac_src, in bank ac_bank, into rec: its fixed
+\ part, by its type (AC_FIXED). area_fetch: Y bytes of it (1 to FETCH_N).
+\ Both put back the bank that was in. Clobbers A, Y.
+.area_record
+    LDA ROMSEL_COPY : PHA
+    LDA ac_bank : STA ROMSEL_COPY : STA romsel
+    LDA (ac_src) : AND #&0F : TAY
+    LDA ac_fixed,Y : TAY
+    BRA area_copy
+.area_fetch
+    LDA ROMSEL_COPY : PHA
+    LDA ac_bank : STA ROMSEL_COPY : STA romsel
+.area_copy
+{
+    DEY
+.byte
+    LDA (ac_src),Y : STA rec,Y
+    DEY : BPL byte
+    PLA : STA ROMSEL_COPY : STA romsel
+    RTS
+}
+.ac_fixed   EQUB AC_FIXED
+ASSERT LEN(AC_FIXED) = 16 AND MAX(AC_FIXED) = FETCH_N AND MIN(AC_FIXED) > REC_LEN
+
+ENDSECTION
+
+SECTION AreaConv
+
+\ ac_globals: the globals' records into slots from 0.
+.ac_globals
+{
+    LDA #LO(AG_ADDR) : STA ac_src
+    LDA #HI(AG_ADDR) : STA ac_src+1
+    LDA #AG_BANK : STA ac_bank
+    LDA #LO(ac_stream_globals) : STA ac_col
+    LDA #HI(ac_stream_globals) : STA ac_col+1
+    LDX #NSPACES - 1
+.zero
+    STZ ac_next,X
+    DEX : BPL zero
+    LDA #G_RECORDS : STA ac_n
+    JSR ac_records
+    LDX #G_OBJ - 1
+.state
+    LDA ob_flags,X : AND #F_HIDDEN : STA ob_state,X
+    DEX : BPL state
+    RTS
+}
+
+\ ac_area: area A's records into the slots after the globals'.
+.ac_area
+{
+    IF DEFINED(OBJ_LOGIC)
+        PHA : JSR ac_globals : PLA          ; (the logic moves the rig's parts)
+    ENDIF
     TAX
+    LDA ac_streams_lo,X : STA ac_col
+    LDA ac_streams_hi,X : STA ac_col+1
+    \ the area's record: the database's word for it, an offset
+    TXA : ASL A                             ; (AR_COUNT < 128: C clear)
+    ADC #LO(AREA_DB + DB_AREAS) : STA ac_src
+    LDA #HI(AREA_DB + DB_AREAS) : ADC #0 : STA ac_src+1
+    LDA #AREA_DB_BANK : STA ac_bank
+    LDY #2 : JSR area_fetch
+    LDA rec : CLC : ADC #LO(AREA_DB) : STA ac_src
+    LDA rec+1 : ADC #HI(AREA_DB) : STA ac_src+1
+    LDY #AREA_N_OBJECTS + 1 : JSR area_fetch
+    LDA rec + AREA_N_OBJECTS : STA ac_n : STA ac_count
+    LDA ac_src : CLC : ADC #AREA_FIRST : STA ac_src
+    BCC first
+    INC ac_src+1
+.first
+    LDA #G_OBJ : STA ac_next + 0
+    LDA #G_FACE : STA ac_next + 1
+    LDA #G_PLANE : STA ac_next + 2
+    LDA #G_GV : STA ac_next + 3
+    LDA #G_SENSOR : STA ac_next + 4
+    JSR ac_records
+    \ the area's counts, its slots shown as the data has them, and the
+    \ globals' places in the logic's index, after the area's records
+    LDA ac_next + 0 : STA ob_n
+    SEC : SBC #G_OBJ : STA ar_counts + 0
+    LDA ac_next + 1 : SEC : SBC #G_FACE : STA ar_counts + 1
+    LDA ac_next + 2 : SEC : SBC #G_PLANE : STA ar_counts + 2
+    LDA ac_next + 3 : SEC : SBC #G_GV : STA ar_counts + 3
+    LDA ac_next + 4 : SEC : SBC #G_SENSOR : STA ar_counts + 4
+    LDX ob_n
     BRA state_next
 .state
     LDA ob_flags,X : AND #F_HIDDEN : STA ob_state,X
 .state_next
     DEX : CPX #G_OBJ : BCS state
-    JMP cache_reset
+    LDX #G_OBJ - 1
+.global
+    LDA ac_gix,X : CLC : ADC ac_count : STA ob_ix,X
+    DEX : BPL global
+    RTS
 }
+
+\ ac_records: ac_n records from ac_src, each read and converted.
+.ac_records
+{
+    STZ ac_i
+    STZ rec + AC_ZERO
+    LDA ac_n : BEQ done
+.record
+    JSR area_record
+    LDA ac_src : CLC : ADC rec + REC_LEN : STA ac_src
+    BCC read
+    INC ac_src+1
+.read
+    JSR ac_object
+    INC ac_i
+    DEC ac_n : BNE record
+.done
+    RTS
+}
+
+\ ac_object: the record in rec to a slot, if it's drawn (objects.shape()).
+\ Each kind ends at ac_slot, which takes the slot if a face was made.
+.ac_object
+{
+    LDA rec : AND #&1F
+    CMP #15 : BCS none                      ; (a group: there are none)
+    TAX
+    \ its colours, from the stream
+    LDY ac_colours,X : BNE coloured
+.none
+    RTS                                     ; (an entrance)
+.coloured
+    DEY
+.colour
+    LDA (ac_col),Y : STA rec + REC_COLOURS,Y
+    DEY : BPL colour
+    LDA ac_colours,X : CLC : ADC ac_col : STA ac_col
+    BCC unpacked
+    INC ac_col+1
+.unpacked
+    FOR i = 0..2
+        LDA rec + REC_COLOURS + i : AND #&0F : STA ac_c + 2 * i
+        LDA rec + REC_COLOURS + i : LSR A : LSR A : LSR A : LSR A : STA ac_c + 2 * i + 1
+    NEXT
+    \ its box, and its bounds as far as the box
+    FOR k = 0..2
+        LDA rec + REC_POS + k : STA ac_lo + k : STA ac_bl + k
+        CLC : ADC rec + REC_SIZE + k : STA ac_hi + k : STA ac_bh + k
+    NEXT
+    LDA ac_next + 1 : STA ac_f0
+    LDA ac_next + 3 : STA ac_g0
+    CPX #1 : BNE not_cuboid
+    JMP ac_cuboid
+.not_cuboid
+    CPX #2 : BNE not_sensor
+    JMP ac_sensor
+.not_sensor
+    CPX #3 : BNE not_rect
+    JMP ac_rect
+.not_rect
+    CPX #10 : BCS not_pyramid
+    JMP ac_pyramid
+.not_pyramid
+    BNE polygon
+    JMP ac_line
+.polygon
+    JMP ac_polygon
+}
+
+\ ac_cuboid: face f (0-5) on axis f DIV 2, its high side if f is odd,
+\ drawn if it has a colour and the box is wide on the other two axes; its
+\ test is T_AXLO or T_AXHI + 2 axis, which is f.
+.ac_cuboid
+{
+    ZA_AUTO1 wide
+    STZ wide                                ; bit k: the sizes but axis k's are non-zero
+    FOR k = 0..2
+        LDA rec + REC_SIZE + (k + 1) MOD 3 : BEQ narrow
+        LDA rec + REC_SIZE + (k + 2) MOD 3 : BEQ narrow
+        LDA #1 << k : TSB wide
+    .narrow
+    NEXT
+    FOR f = 0..5
+        LDA ac_c + f : BEQ skip
+        LDA wide : AND #1 << (f DIV 2) : BEQ skip
+        LDA #f : STA ac_ft
+        IF f AND 1
+            LDA ac_hi + f DIV 2 : EOR #&FF
+        ELSE
+            LDA ac_lo + f DIV 2
+        ENDIF
+        STA ac_fv
+        LDA #4 * f : STA ac_fl
+        LDA #4 : STA ac_fn
+        LDA #CUBE_VMASK[f] : STA ac_fm
+        LDA ac_c + f : JSR ac_face
+    .skip
+    NEXT
+    LDA #K_CUBOID : STA ac_kind
+    LDA #8 : STA ac_nv
+    STZ ac_aux
+    JMP ac_slot
+}
+
+\ ac_rect: a rectangle with one zero size is a rectangle on that axis, its
+\ colour 0 seen from below and 1 from above; with two, a line from its
+\ low corner to its high; with three, nothing.
+.ac_rect
+{
+    ZA_AUTO1 zeros, axis
+    STZ zeros
+    LDX #2
+.size
+    LDA rec + REC_SIZE,X : BNE wide
+    INC zeros : STX axis                    ; (the first zero axis, by the last written)
+.wide
+    DEX : BPL size
+    LDA zeros : CMP #1 : BEQ rect
+    CMP #3 : BEQ none
+    \ a line: its ends the box's corners
+    LDX ac_g0
+    FOR k = 0..2
+        LDA ac_lo + k : STA gv_x + k * N_GV,X
+        LDA ac_hi + k : STA gv_x + k * N_GV + 1,X
+    NEXT
+    JMP ac_line_ends
+.none
+    RTS
+.rect
+    LDA #4 : STA ac_fn
+    LDA #LP_RECT : STA ac_fl
+    LDA #&0F : STA ac_fm
+    LDX axis
+    LDA ac_c : BEQ no_low
+    TXA : ASL A : STA ac_ft                 ; T_AXLO + 2 axis
+    LDA ac_lo,X : STA ac_fv
+    LDA ac_c : JSR ac_face
+.no_low
+    LDA ac_c + 1 : BEQ no_high
+    TXA : SEC : ROL A : STA ac_ft           ; T_AXHI + 2 axis
+    LDA ac_lo,X : EOR #&FF : STA ac_fv
+    LDA ac_c + 1 : JSR ac_face
+.no_high
+    LDA #K_RECT : STA ac_kind
+    LDA #4 : STA ac_nv
+    STX ac_aux
+    JMP ac_slot
+}
+
+\ ac_line: a line between its record's two vertices (none if they're one).
+.ac_line
+{
+    LDX ac_g0
+    LDY #0
+    FOR k = 0..2
+        LDA rec + REC_VERTS + k : STA gv_x + k * N_GV,X
+        CMP rec + REC_VERTS + 3 + k : BEQ same
+        INY
+    .same
+        LDA rec + REC_VERTS + 3 + k : STA gv_x + k * N_GV + 1,X
+    NEXT
+    TYA : BNE ac_line_ends
+    RTS
+}
+
+\ ac_line_ends: a line between the two vertices at ac_g0, in colour 0.
+.ac_line_ends
+{
+    LDA ac_c : BEQ none
+    LDA #T_ALWAYS : STA ac_ft
+    LDA #255 : STA ac_fv
+    LDA #LP_LINE : STA ac_fl
+    LDA #2 : STA ac_fn : STA ac_nv
+    LDA #3 : STA ac_fm
+    LDA ac_c : JSR ac_face
+    LDA #K_GENERIC OR F_LINE : STA ac_kind
+    JMP ac_generic
+.none
+    RTS
+}
+
+\ ac_sensor: a point at its cell, in its colour.
+.ac_sensor
+{
+    LDA ac_c : BEQ none
+    LDY ac_next + 4 : STY ac_aux
+    INC ac_next + 4
+    LDA rec + REC_AXES : STA sn_axes,Y
+    LDA rec + REC_RANGE : STA sn_rl,Y
+    LDA rec + REC_RANGE + 1 : STA sn_rh,Y
+    FOR k = 0..2
+        LDA ac_lo + k : STA ac_hi + k : STA ac_bh + k
+    NEXT
+    LDA #T_ALWAYS : STA ac_ft
+    LDA #255 : STA ac_fv
+    LDA #LP_POINT : STA ac_fl
+    LDA #1 : STA ac_fn : STA ac_fm : STA ac_nv
+    LDA ac_c : JSR ac_face
+    LDA #K_SENSOR : STA ac_kind
+    JMP ac_slot
+.none
+    RTS
+}
+
+\ ac_pyramid: its eight vertices from its type's table (PYR_REC), then its
+\ sides, base and apex.
+.ac_pyramid
+{
+    ZA_AUTO1 at, end, shrunk
+    \ each coordinate its cell plus the record's byte that PYR_REC names
+    TXA : SEC : SBC #4 : STA at
+    ASL A : ADC at : ASL A : ASL A : ASL A : TAY     ; 24 (type - 4)
+    LDX ac_g0
+    TXA : CLC : ADC #8 : STA end
+.vertex
+    FOR k = 0..2
+        STY at
+        LDA ac_pyr_rec + k,Y : TAY
+        LDA rec,Y : CLC : ADC ac_lo + k : STA gv_x + k * N_GV,X
+        LDY at
+    NEXT
+    INY : INY : INY
+    INX : CPX end : BNE vertex
+    \ bit f: side f's apex edge, from vertex 4 + f, is a point
+    STZ shrunk
+    LDX ac_g0
+    FOR f = 0..3
+        FOR k = 0..2
+            LDA gv_x + k * N_GV + 4 + f,X : CMP gv_x + k * N_GV + 4 + (f + 1) MOD 4,X : BNE apart
+        NEXT
+        LDA #1 << f : TSB shrunk
+    .apart
+    NEXT
+    FOR f = 0..3
+        LDA ac_c + f : BEQ skip
+        LDA shrunk : AND #1 << f : BEQ whole
+        LDA #LP_TRI[f] : LDX #3
+        BRA side
+    .whole
+        LDA #LP_SIDE[f] : LDX #4
+    .side
+        LDY ac_c + f : JSR ac_plane_face
+    .skip
+    NEXT
+    LDA ac_c + 4 : BEQ no_base
+    TAY : LDA #LP_BASE : LDX #4 : JSR ac_plane_face
+.no_base
+    LDA ac_c + 5 : BEQ no_apex
+    LDA shrunk : BNE no_apex
+    LDY ac_c + 5 : LDA #LP_APEX : LDX #4 : JSR ac_plane_face
+.no_apex
+    LDA #8 : STA ac_nv
+    LDA #K_GENERIC : STA ac_kind
+    JMP ac_generic
+}
+
+\ ac_polygon: an n-gon (types 11-14, n = type - 8): its colour 0 seen from
+\ the side its vertices wind clockwise (its loop backward), colour 1 from
+\ the other.
+.ac_polygon
+{
+    ZA_AUTO1 left
+    TXA : SEC : SBC #8 : STA ac_nv : STA left
+    LDX ac_g0
+    LDY #0
+.vertex
+    FOR k = 0..2
+        LDA rec + REC_VERTS + k,Y : STA gv_x + k * N_GV,X
+    NEXT
+    INY : INY : INY
+    INX : DEC left : BNE vertex
+    LDA ac_c : BEQ no_back
+    TAY
+    LDA #LP_BACK + 6 : SEC : SBC ac_nv
+    LDX ac_nv : JSR ac_plane_face
+.no_back
+    LDY ac_c + 1 : BEQ no_fore
+    LDA #LP_FWD : LDX ac_nv : JSR ac_plane_face
+.no_fore
+    LDA #K_GENERIC : STA ac_kind
+    JMP ac_generic
+}
+
+\ ac_generic: a generic object's vertices (ac_nv of them at ac_g0) kept,
+\ and taken into its bounds; then its slot.
+.ac_generic
+{
+    ZA_AUTO1 end
+    LDA ac_g0 : TAX : CLC : ADC ac_nv : STA end : STA ac_next + 3
+.vertex
+    FOR k = 0..2
+        LDA gv_x + k * N_GV,X
+        CMP ac_bl + k : BCS not_below
+        STA ac_bl + k
+    .not_below
+        CMP ac_bh + k : BCC not_above
+        STA ac_bh + k
+    .not_above
+    NEXT
+    INX : CPX end : BNE vertex
+    LDA ac_g0 : STA ac_aux
+    \ (on into ac_slot)
+}
+
+\ ac_slot: the object's slot, if it has a face; if not, the vertices it
+\ took given back.
+.ac_slot
+{
+    LDA ac_next + 1 : SEC : SBC ac_f0 : BEQ none
+    LDX ac_next + 0
+    INC ac_next + 0
+    STA ob_nf,X
+    LDA rec : AND #F_HIDDEN : ORA ac_kind : STA ob_flags,X
+    LDA rec + REC_ID : STA ob_id,X
+    FOR k = 0..2
+        LDA ac_bl + k : STA ob_blx + k * N_OBJ,X
+        LDA ac_bh + k : STA ob_bhx + k * N_OBJ,X
+        LDA ac_lo + k : STA ob_lx + k * N_OBJ,X
+        LDA ac_hi + k : STA ob_hx + k * N_OBJ,X
+    NEXT
+    LDA ac_f0 : STA ob_f0,X
+    LDA ac_nv : STA ob_nv,X
+    LDA ac_aux : STA ob_aux,X
+    LDA ac_i : STA ob_ix,X
+    RTS
+.none
+    LDA ac_g0 : STA ac_next + 3
+    RTS
+}
+
+\ ac_face: a face, colour A, from ac_ft .. ac_fm, at the next face. Keeps X.
+.ac_face
+{
+    LDY ac_next + 1
+    INC ac_next + 1
+    STA fa_col,Y
+    LDA ac_ft : STA fa_test,Y
+    LDA ac_fv : STA fa_tval,Y
+    LDA ac_fl : STA fa_loop,Y
+    LDA ac_fn : STA fa_nv,Y
+    LDA ac_fm : STA fa_vmask,Y
+    RTS
+}
+
+\ ac_plane_face: a face of a generic object, colour Y, its loop at lp_table
+\ + A, X long, its vertices from ac_g0: its plane from the cross product
+\ n = (v1 - v0) x (v2 - v1) of its loop's first three. None if n is 0; an
+\ axis test if one component isn't; else a plane test, n reduced.
+.ac_plane_face
+{
+    ZA_AUTO1 colour, i1, i2, left, nonzero, axis, pa, pb
+    ZA_AUTO 3, u, w
+    STA ac_fl : STX ac_fn : STY colour
+    \ the vertices it uses
+    TAY
+    STX left
+    STZ ac_fm
+.mask
+    LDX lp_table,Y : LDA ac_bits,X : TSB ac_fm
+    INY : DEC left : BNE mask
+    \ its first three: v0 kept, u = v1 - v0 and w = v2 - v1, signed bytes
+    \ (tools/mkareas.py asserts they are)
+    LDY ac_fl
+    LDA lp_table + 1,Y : CLC : ADC ac_g0 : STA i1
+    LDA lp_table + 2,Y : CLC : ADC ac_g0 : STA i2
+    LDA lp_table,Y : CLC : ADC ac_g0 : TAX
+    LDY i1
+    FOR k = 0..2
+        LDA gv_x + k * N_GV,X : STA ac_v0 + k
+        LDA gv_x + k * N_GV,Y : SEC : SBC ac_v0 + k : STA u + k
+    NEXT
+    LDX i2
+    FOR k = 0..2
+        LDA gv_x + k * N_GV,X : SEC : SBC gv_x + k * N_GV,Y : STA w + k
+    NEXT
+    \ n_k = u_a w_b - u_b w_a, (k, a, b) a turn of (0, 1, 2); the last
+    \ non-zero component's axis kept
+    STZ nonzero
+    FOR k = 0..2
+        LDA u + (k + 1) MOD 3 : LDX w + (k + 2) MOD 3 : JSR ac_mul
+        LDA ac_mul.p : STA ac_nn + 2 * k
+        LDA ac_mul.p + 1 : STA ac_nn + 2 * k + 1
+        LDA u + (k + 2) MOD 3 : LDX w + (k + 1) MOD 3 : JSR ac_mul
+        LDA ac_nn + 2 * k : SEC : SBC ac_mul.p : STA ac_nn + 2 * k
+        LDA ac_nn + 2 * k + 1 : SBC ac_mul.p + 1 : STA ac_nn + 2 * k + 1
+        ORA ac_nn + 2 * k : BEQ zero
+        INC nonzero
+        LDA #k : STA axis
+    .zero
+    NEXT
+    LDA nonzero : CMP #1 : BEQ axis_test
+    CMP #2 : BEQ plane_test
+    RTS                                     ; (none: n is 0)
+.axis_test
+    \ on axis k: from above (T_AXHI + 2 k, 255 - v0's cell) if n_k > 0, else
+    \ from below (T_AXLO + 2 k, the cell)
+    LDA axis : ASL A : STA ac_ft : TAY
+    LDX axis : LDA ac_v0,X
+    LDX ac_nn + 1,Y : BMI below
+    EOR #&FF
+    INC ac_ft
+.below
+    STA ac_fv
+    BRA add
+.plane_test
+    \ the two non-zero axes, a < b
+    LDA ac_nn + 0 : ORA ac_nn + 1 : BEQ a_is_1
+    STZ pa
+    LDA ac_nn + 2 : ORA ac_nn + 3 : BEQ b_is_2
+    LDA #1 : STA pb
+    BRA reduce
+.b_is_2
+    LDA #2 : STA pb
+    BRA reduce
+.a_is_1
+    LDA #1 : STA pa
+    LDA #2 : STA pb
+.reduce
+    LDA pa : ASL A : TAX
+    LDA pb : ASL A : TAY
+    JSR ac_reduce
+    \ the plane: its axes, n_a and n_b reduced, and v0's cells on them, 64 v
+    \ (v >> 2 high, v << 6 low)
+    LDY ac_next + 2
+    INC ac_next + 2
+    STY ac_fv
+    LDA #T_PLANE : STA ac_ft
+    LDA pa : STA pl_a,Y
+    LDA pb : STA pl_b,Y
+    LDA ac_reduce.na : STA pl_na,Y
+    LDA ac_reduce.nb : STA pl_nb,Y
+    LDX pa
+    LDA ac_v0,X : LSR A : LSR A : STA pl_rah,Y
+    LDA ac_v0,X : LSR A : ROR A : ROR A : AND #&C0 : STA pl_ral,Y
+    LDX pb
+    LDA ac_v0,X : LSR A : LSR A : STA pl_rbh,Y
+    LDA ac_v0,X : LSR A : ROR A : ROR A : AND #&C0 : STA pl_rbl,Y
+.add
+    LDA colour
+    JMP ac_face
+}
+
+\ ac_mul: p = A X, signed bytes, to 16 bits. Keeps Y.
+.ac_mul
+{
+    ZA_AUTO1 fa, fb, sign
+    ZA_AUTO2 p
+    STZ p : STZ p+1
+    STA fa : STX fb
+    CMP #0 : BEQ done
+    CPX #0 : BEQ done
+    EOR fb : STA sign
+    LDA fa : BPL a_plus
+    EOR #&FF : INC A : STA fa
+.a_plus
+    LDA fb : BPL b_plus
+    EOR #&FF : INC A : STA fb
+.b_plus
+    \ |fa| |fb|, a bit of |fa| at a time, the product shifted down through A
+    \ and fa
+    LDA #0
+    LDX #8
+    LSR fa
+.bit
+    BCC no_add
+    CLC : ADC fb
+.no_add
+    ROR A : ROR fa
+    DEX : BNE bit
+    STA p+1
+    LDA fa : STA p
+    BIT sign : BPL done
+    LDA #0 : SEC : SBC p : STA p
+    LDA #0 : SBC p+1 : STA p+1
+.done
+    RTS
+}
+
+\ ac_reduce: n_a = ac_nn + X and n_b = ac_nn + Y (16-bit signed, neither
+\ 0) over their greatest common divisor, in na and nb (signed bytes:
+\ tools/mkareas.py asserts they fit).
+.ac_reduce
+{
+    ZA_AUTO1 na, nb, sa, sb
+    ZA_AUTO2 ma, mb, ga, gb
+    \ their magnitudes, and signs
+    LDA ac_nn + 1,X : STA sa : STA ma+1
+    LDA ac_nn,X : STA ma
+    LDA ac_nn + 1,Y : STA sb : STA mb+1
+    LDA ac_nn,Y : STA mb
+    BIT sa : BPL a_plus
+    LDA #0 : SEC : SBC ma : STA ma
+    LDA #0 : SBC ma+1 : STA ma+1
+.a_plus
+    BIT sb : BPL b_plus
+    LDA #0 : SEC : SBC mb : STA mb
+    LDA #0 : SBC mb+1 : STA mb+1
+.b_plus
+    \ ga = their greatest common divisor, by Stein's way: the twos they share
+    \ counted off (in X), then the odd parts
+    LDA ma : STA ga : LDA ma+1 : STA ga+1
+    LDA mb : STA gb : LDA mb+1 : STA gb+1
+    LDX #0
+.twos
+    LDA ga : ORA gb : LSR A : BCS odd
+    LSR ga+1 : ROR ga
+    LSR gb+1 : ROR gb
+    INX
+    BRA twos
+.odd
+    LDA ga : LSR A : BCS loop
+    LSR ga+1 : ROR ga
+    BRA odd
+.loop
+    \ ga odd: gb's twos off, the smaller from the larger, until they're one
+    LDA gb : LSR A : BCS both_odd
+    LSR gb+1 : ROR gb
+    BRA loop
+.both_odd
+    LDA gb : CMP ga : LDA gb+1 : SBC ga+1 : BCS take    ; (gb at least ga)
+    LDA ga : LDY gb : STA gb : STY ga
+    LDA ga+1 : LDY gb+1 : STA gb+1 : STY ga+1
+.take
+    LDA gb : SEC : SBC ga : STA gb
+    LDA gb+1 : SBC ga+1 : STA gb+1
+    ORA gb : BNE loop
+.twos_back
+    DEX : BMI divide
+    ASL ga : ROL ga+1
+    BRA twos_back
+.divide
+    LDA ma : LDX ma+1 : JSR quotient
+    BIT sa : JSR signed : STA na
+    LDA mb : LDX mb+1 : JSR quotient
+    BIT sb : JSR signed : STA nb
+    RTS
+\ signed: A negated if N is set.
+.signed
+    BPL plus
+    EOR #&FF : INC A
+.plus
+    RTS
+\ quotient: A = (A, X) / ga, which ga divides, the quotient under 128: ga
+\ doubled past the dividend, then halved back, a quotient's bit each time.
+\ The dividend is under &8000, so the doubling can't pass 16 bits.
+.quotient
+{
+    ZA_AUTO2 r, d
+    ZA_AUTO1 q, bits
+    STA r : STX r+1
+    LDA ga : STA d : LDA ga+1 : STA d+1
+    STZ bits
+.up
+    LDA r : CMP d : LDA r+1 : SBC d+1 : BCC down        ; (d past r)
+    ASL d : ROL d+1
+    INC bits
+    BRA up
+.down
+    STZ q
+.bit
+    DEC bits : BMI done
+    LSR d+1 : ROR d
+    ASL q
+    LDA r : CMP d : LDA r+1 : SBC d+1 : BCC bit
+    STA r+1
+    LDA r : SBC d : STA r                   ; (C set)
+    INC q
+    BRA bit
+.done
+    LDA q
+    RTS
+}
+}
+
+\ The conversion's tables.
+.ac_bits        EQUB 1 << (0..7)            ; a vertex's bit in a face's mask
+.ac_colours     EQUB AC_COLOURS             ; colour bytes a record takes, by type
+.ac_gix         EQUB G_IX                   ; the globals' places in the logic's index
+.ac_pyr_rec     EQUB PYR_REC                ; a pyramid's vertices, by type from 4
+ASSERT LEN(AC_COLOURS) = 15 AND LEN(G_IX) = G_OBJ AND LEN(PYR_REC) = 6 * 24
+\ What the conversion writes, never in sideways RAM, which it pages: the
+\ working copy from its first array to its counts, and ObjWork's part.
+FUNCTION ac_unpaged(a) = a < &8000 OR a >= &C000
+ASSERT ac_unpaged(ob_flags) AND ac_unpaged(ar_counts + NSPACES - 1)
+ASSERT ac_unpaged(ob_n) AND ac_unpaged(ac_nn + 5)
 
 ENDSECTION

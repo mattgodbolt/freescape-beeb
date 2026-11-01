@@ -12,8 +12,9 @@
 #                   numbers from 0), on an RGB monitor and through PAL
 #                   (tools/pal.py), into shots/
 #
-# The disc's data derive from the originals (make data, make colours), so
-# they're built, never committed (decision 6).
+# The disc's data derive from the originals (make data, make colours, and
+# the logic's database bank, build/logic6502's LOGIC), so they're built,
+# never committed (decision 6).
 
 LIVE_DIR     = build/live
 LIVE_DISC    = build/live.ssd
@@ -24,11 +25,13 @@ LIVE_SOURCES = src/live.6502 src/text.6502 src/defs.6502 src/zp.6502 src/macros.
                src/area.6502 src/matrix.6502 src/transform.6502 src/objects.6502 src/clip.6502 \
                src/order.6502 src/maths.6502 src/project.6502
 LIVE_SHOTS  ?= 0 18 26 40 57
-# mk/maths.mk and mk/objects.mk name these too, but are read after this file.
+# mk/maths.mk, mk/objects.mk and mk/logic6502.mk name these too, but are
+# read after this file.
 MATHS_GEN   ?= build/maths/consts.6502 build/maths/tables.6502
 AREAS_GEN   ?= build/gen/areas.6502
 AREAS_JSON  ?= build/gen/areas.json
 MODEL_PY    ?= $(wildcard tools/model/*.py tools/model/standin/*.py)
+L6_DIR      ?= build/logic6502
 
 ALL    += $(LIVE_DISC)
 CHECKS += live
@@ -36,7 +39,7 @@ CHECKS += live
 $(LIVE_GEN) &: tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(MODEL_PY) $(COLOUR_MODEL)
 	$(PYTHON) -I tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(LIVE_DIR)
 
-$(LIVE_DISC) $(LIVE_SYMBOLS) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) | build
+$(LIVE_DISC) $(LIVE_SYMBOLS) &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(L6_DIR)/LOGIC | build
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -o $(LIVE_DISC) --title DRILLER --opt 3 --warn 2 \
 	    --symbols $(LIVE_SYMBOLS) src/live.6502
 
