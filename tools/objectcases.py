@@ -15,7 +15,11 @@ directory, the camera, and from the model (tools/model/):
   faces it draws, each a colour and a polygon in view coordinates
   (stages 4-6);
 - order: the drawn objects' slots, farthest first (stage 7);
-- out: the faces as the rasteriser takes them, nearest first.
+- out: the faces as the rasteriser takes them, nearest first;
+- work: the lines the cone made (each edge_line), and the vertices projected
+  (each vertex_shared: a polygon object's once each, a line's or a point's
+  ends as each is drawn), which no output shows when what they'd change is
+  cut away.
 
 This is tools/model/render.py's render() up to the rasteriser, called
 through the same functions, so the two can't drift: render_geometry()
@@ -41,7 +45,9 @@ from tools.model import camera as cam
 from tools.model import clip, matrix, objects, order, parts, render, transform
 
 def render_geometry(db, area, camera, state=None):
-    """render.render()'s stages 1-7, with what each stage made."""
+    """render.render()'s stages 1-7, with what each stage made, and the work:
+    the lines the cone made, and the vertices projected (vertex_shared's
+    calls)."""
     m = matrix.rotation(camera, db["tables"])
     c = camera.position
     tally = {k: 0 for k in render.counts.KEYS}
@@ -58,14 +64,15 @@ def render_geometry(db, area, camera, state=None):
     out = []
     for cand, faces in reversed(ordered):
         out.extend(faces)
-    return m, cands, per, ordered, out
+    work = {"lines": tally.get("cone_lines", 0), "projected": tally.get("vertices_numbered", 0)}
+    return m, cands, per, ordered, out, work
 
 
 def check_render(db):
     """render_geometry agrees with render() on every entrance view."""
     for area, _, camera in cam.entrance_views(db):
         v = render.render(db, area, camera)
-        _, _, _, ordered, out = render_geometry(db, area, camera)
+        _, _, _, ordered, out, _ = render_geometry(db, area, camera)
         assert [d[0].shape.id for d in ordered] == v.order
         assert [(f.colour, f.poly) for f in out] == [(f.colour, f.poly) for f in v.faces]
 
@@ -82,7 +89,7 @@ def slot_map(layout, a_index, n_area):
 
 
 def case(db, layout, a_index, area, camera, name):
-    m, cands, per, ordered, out = render_geometry(db, area, camera)
+    m, cands, per, ordered, out, work = render_geometry(db, area, camera)
     slots = slot_map(layout, a_index, len(area["objects"]))
     c = camera.position
     rows = []
@@ -119,6 +126,7 @@ def case(db, layout, a_index, area, camera, name):
         "cands": rows,
         "order": [slots[d[0].index] for d in ordered],
         "out": [[f.colour, [list(p) for p in f.poly]] for f in out],
+        "work": work,
     }
 
 

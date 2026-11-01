@@ -260,6 +260,22 @@ M, below). A polygon object's vertices go first, then its faces:
     common), so a pass's f at a vertex (`cone_eval`) is a corner's own, a
     side's corner f plus one product (A x along the top and bottom, B y down
     the sides), or two products inside; every way gives the same f.
+  - An edge with both ends at or behind the eye (z <= 0) has no line: the
+    face's image is what's in front of the eye, a convex region whose
+    boundary is the images of its edges' parts in front, so it's inside
+    such an edge's plane already (`render.BEHIND_EDGES`).
+  - Each vertex also carries the label of its edge to the next (`pa_lb`):
+    a side of the rectangle, or the kept line it runs along, so a crossing
+    knows what it's on. **On a side** it's the line's own crossing with that
+    side (`side_cut`, the model's `side_crossing`): from the side's corner
+    inside the line, f there over |A| (or |B| down the sides), rounded half
+    up, by an eleven-step division, the same point whatever piece of the
+    side is being cut. **Along a line** whose edge shares a vertex with the
+    cutting line's edge, the two lines meet at that vertex's image: if the
+    projection takes the vertex, its projected position, clamped to the
+    rectangle (projected then if the vertex pass hadn't), the point a face
+    projected whole has there too (`clip.JOINS`). Any other crossing is the
+    model's crossing from the inside end, as before.
 - **A line's face, or a point's** (`draw_segment`): with an end off the
   band, a point isn't drawn and a line is clipped in 3D to `ZNEAR` and the
   planes x = ±z, 2y = ±z, by crossings from the inside end (`seg_clip`, the
@@ -361,8 +377,11 @@ round: before it, 2,485 cameras). The checker runs each through
 `objects_frame` headless
 and compares the matrix, the candidates and their masks, every candidate's
 camera-space vertices (read as `transform_object` returns), every
-candidate's drawn faces, the order and the output, exactly; and that
-nothing outside the pipeline's memory was written. It reports each stage's
+candidate's drawn faces, the order and the output, exactly; the work no
+output need show, because what it would change can be cut away later (the
+lines the cone makes, `edge_line`'s calls, and the vertices projected,
+`vertex_shared`'s); and that nothing outside the pipeline's memory was
+written. It reports each stage's
 cycles (each instruction's to the innermost stage routine running) and the
 arithmetic's calls; `--profile` gives cycles by routine.
 

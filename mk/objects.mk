@@ -119,11 +119,11 @@ ENDSECTION
 \ area_init and area_enter page the banks, so their code is never in one.
 SECTION AreaCode, org = &5000, guard = &5100, filename = "OAREA", cmos = TRUE
 ENDSECTION
-SECTION ObjConst, org = &5100, guard = &5C00, filename = "OCONST"
+SECTION ObjConst, org = &5100, guard = &5800, filename = "OCONST"
 ENDSECTION
-SECTION ObjArea, org = &5C00, guard = &6600, virtual = TRUE
+SECTION ObjArea, org = &5800, guard = &6200, virtual = TRUE
 ENDSECTION
-SECTION ObjWork, org = &6600, guard = &7000, virtual = TRUE
+SECTION ObjWork, org = &6200, guard = &6C00, virtual = TRUE
 ENDSECTION
 SECTION ObjMaths, org = &C000, guard = &D300, filename = "OMATHS"
 INCLUDE "../maths/tables.6502"
@@ -132,12 +132,12 @@ SECTION ObjCache, org = &D300, guard = &DC00, virtual = TRUE
 ENDSECTION
 SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
 ENDSECTION
-SECTION ObjOut, org = &7000, guard = &7600, virtual = TRUE
+SECTION ObjOut, org = &6C00, guard = &7200, virtual = TRUE
 ENDSECTION
-SECTION ObjMemo, org = &7600, guard = &7C00, virtual = TRUE
+SECTION ObjMemo, org = &7200, guard = &7800, virtual = TRUE
 ENDSECTION
 \ ObjMore: the pipeline's code outside its bank (the live disc's main RAM).
-SECTION ObjMore, org = &7C00, guard = &8000, filename = "OMORE", cmos = TRUE
+SECTION ObjMore, org = &7800, guard = &8000, filename = "OMORE", cmos = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION

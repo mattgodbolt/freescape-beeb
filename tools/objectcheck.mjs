@@ -20,6 +20,8 @@
 //     - stages 4-6: each candidate's drawn faces, colour and polygon;
 //     - stage 7: the drawn objects' order;
 //     - the output, the faces nearest first, as the rasteriser reads them;
+//     - the work no output need show (a clip's step later cut away): the
+//       lines the cone made, and the polygon objects' vertices projected;
 //   - that nothing outside the pipeline's own memory was written.
 // A build that takes what's hidden from the logic's flags (OBJ_LOGIC) gets
 // them in ix_flags as the logic would have them at the area's start (from
@@ -370,6 +372,13 @@ for (const view of views) {
         counts.out += on;
         if (JSON.stringify(out) !== JSON.stringify(view.out))
             fail(`${name}: output ${JSON.stringify(out)} want ${JSON.stringify(view.out)}`);
+        // the work no output need show: the cone's lines, and the polygon
+        // objects' vertices projected
+        const lines = made.edge_line || 0;
+        const projected = made.vertex_shared || 0;
+        if (lines !== view.work.lines) fail(`${name}: the cone made ${lines} lines, want ${view.work.lines}`);
+        if (projected !== view.work.projected)
+            fail(`${name}: ${projected} vertices projected, want ${view.work.projected}`);
     }
     if (verbose) console.log(name, total, JSON.stringify(stages));
     results.push({ name, total, stages, calls: made, floor, entrance: /^a\d+-e\d+$/.test(name) });
