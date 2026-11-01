@@ -382,10 +382,11 @@ turn's from 236,918 to 216,847, against the projection track's pipeline
 
 What it found:
 
-- **The vertex pass and the faces projected whole pay.** The faces' own
-  work, the projection and the 2D clip fell by about two thirds; the
-  vertex pass costs about what the faces' own loops did, and the shared
-  entries take about half the projections.
+- **The vertex pass and the faces projected whole pay.** At a median
+  step [measured], the faces' own work went from 48.8K to 12.9K, with
+  18.4K more for the vertex pass; the projection from 17.5K to 10.6K, the
+  shared entries taking about half the projections; the 2D clip from
+  36.1K to 14.7K.
 - **The cone doesn't pay yet.** Its picture is exact, and it needs no near
   plane or guard band, but at the median it costs about what the near
   clip, the guard band and their share of the 2D clip did: a view has
