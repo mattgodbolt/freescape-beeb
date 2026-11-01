@@ -20,33 +20,34 @@ jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
 
 ## Where it's up to
 
-*2026-10-31.* **The disc draws Driller's views on the BBC, but only the
-last step of the pipeline runs there yet.** It's a slideshow of all 65 of
-Driller's entrance views. The Python model works out each view's faces
-ahead of time, on the PC: the visible objects, the rotation, the
-projection and the clipping. The Master's own rasteriser and row writer
-then fill them into MODE 2 every frame, double-buffered, byte for byte as
-the model does. SPACE or the cursor keys step between views.
+*2026-10-31.* **The disc runs the whole engine on the BBC, live, and it's
+slow.** Every frame the Master works out Driller's view from the camera
+alone (the visible objects, the rotation, the projection, the clipping and
+the order) and fills it into MODE 2, double-buffered, flipping as soon as
+the beam leaves the view. Nothing is precomputed. Every frame it draws
+matches the Python model's render of the same camera, byte for byte.
 
-**The frame rate on the screen is that drawing step alone, not the
-engine's.** The steps before it are built in 6502 too, and match the model
-exactly, but they aren't on the disc yet and they're slow: put together
-today, a median view takes roughly eleven fields, about four or five
-frames a second. Both halves are being made fast, and the next disc runs
-the whole pipeline on the BBC, so the figure it shows is the real one.
+The camera is free for now: the cursor keys (or Q and W) turn and O and K
+walk, through anything; P and L look up and down, N and M roll; SPACE goes
+to the next of Driller's 65 entrances, across all its areas. Leave it
+alone and it turns on the spot by itself.
 
-![The disc: the Master drawing three of Driller's views, through PAL](docs/images/disc_slides.png)
+![The live disc: the Master working out and drawing three of Driller's views, through PAL](docs/images/disc_live.png)
 
-*The disc in jsbeeb through PAL: the Master filling in three of Driller's
-entrance views, whose faces the model worked out on the PC. Its "frames/sec"
-is the fill alone. Driller is Incentive Software's.*
+*The live disc in jsbeeb through PAL. The figures on the screen are the
+BBC's own timing of the whole frame, and of its two halves: stages 1-7
+(objects to clipped polygons) and stages 8-10 (the fill). Driller is
+Incentive Software's.*
 
-Measured on the jsbeeb disc check (journal, 2026-10-31), the drawing
-step alone takes a median of about three fields; the object pass,
-transform, projection and clips about seven more. Driller's own ZX code runs
-headless as the oracle, and Driller's player logic is transcribed and
-checked pass by pass against it, with its 6502 version under way.
-`docs/journal.md` has the story as it goes.
+**How fast:** measured on the disc's check (journal, 2026-10-31), a frame
+takes a median of 13 fields, about four frames a second, of which about
+seven fields are stages 1-7 and five the fill. The original redrew about
+once every two-thirds of a second on the Spectrum. Every stage now matches
+the model exactly, so the work from here is speed: the front end is being
+restructured, the fill is in optimisation rounds, and the projection has
+already halved. Driller's player logic is built in 6502 and checked pass by
+pass against the original's, and comes next, so you walk with Driller's own
+collision. `docs/journal.md` has the story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
 
