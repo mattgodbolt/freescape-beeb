@@ -665,3 +665,12 @@ under a thousandth of its cycles each), reached through trampolines in
 main RAM, so the front end's own bank has room for faster code on its hot
 paths. Matt chose it over the area conversion's home and over keeping it
 in reserve.
+
+## 53. Candidates beyond the view's sides are passed over (2026-11-05, proposed for Matt; amends 16)
+
+A candidate with every vertex where one of 3x + 2z, 2z - 3x or z - 3y
+(camera space) is negative can't be seen, so its faces aren't tried
+(`render.OBJECT_CULL`; `docs/research/objects.md`, "The eighth round"). No
+pixel changes in the entrance views, their walks or against the ZX oracle;
+over the check's views a few lose a sliver of a cone face made from an
+object wholly beyond the view (journal, 2026-11-05).

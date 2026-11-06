@@ -858,6 +858,53 @@ The figures (the bank's room before and after, ANDY's, what a frame pays on
 the check and on both discs, the boot) are in the journal's entry for track
 AB.
 
+## The eighth round (track AB)
+
+With the room ANDY freed, track AB took the seventh round's first lever, the
+candidates that draw nothing, profiled as before (`--profile-walks`,
+`--compare`, and `--candidates`, new: each candidate's cycles from its turn
+in `objects_frame`'s loop to the next's, those that draw nothing apart). The
+figures, before and after, by stage, step and turn, and the live discs', are
+in the journal's entry for track AB.
+
+Kept:
+
+- **A candidate beyond the view's sides passed over** before its transform
+  (the transform's bounds, above; proposed below). Studied first in the
+  model against the 6502's own cycles a candidate: of the walks' candidates
+  that draw nothing, every vertex in one of code3's half-spaces (x = ±z, 2y =
+  ±z) caught a minority of their cycles, the view's own side planes (x =
+  ±(XC / FX) z, y = ±(YC / FY) z) nearly all, and the planes of small
+  coefficients just outside those (3x + 2z, 2z − 3x, z − 3y, z + 3y) as many
+  at the median; the side planes most of it, the bottom least. The bounds
+  are a box's corner plus the edges that raise them, or a generic object's
+  vertices' greatest, kept with the cache: a step pays three compares a
+  candidate; a turn pays them as each object is filled, which views with
+  nothing to pass over feel (the journal's entry has the figures).
+- **A level camera's fill_point** by its known zeros, and **a generic
+  object's repeated vertex** (a pointed pyramid's apex, three times over:
+  most of Driller's eight-vertex objects) by a copy of the slot before,
+  which the bounds' cost on a turn made worth doing.
+
+Measured and not kept:
+
+- **The bounds in a pass of their own** after the fill (each slot read back
+  from the cache): slower than making them from the fill's own vector as it
+  comes.
+- **The bottom of the view** (z + 3y): it caught the fewest candidates that
+  draw nothing, for a large share of the bounds' cost on a turn.
+
+What's left:
+
+- **A turn's fills**: every candidate is filled afresh on a turn, and its
+  bounds with it, so a turn of a busy view with nothing beyond its sides
+  (a tilted camera's most: no level fast path) pays for them; a pyramid's
+  base as a box's corner and edges, and a level camera's y edge as a shift,
+  would take some back.
+- **The lines** (C's two products of sixteen bits by sixteen, `im_term`),
+  the cone's passes' products, and **the projection's overheads**, as the
+  seventh round left them; and **the floor**, still the largest face.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -967,13 +1014,28 @@ ways over the views `render.py --diff` takes, and over all the check's):
    entry for track W. `IMAGE_BITS` of 12, 13 or 15 changes them by a few
    pixels at most.
 
+From the eighth round (track AB; `render.OBJECT_CULL` against the model
+without it, by `render.py --diff` and by a run of the check's views both
+ways):
+
+7. **A candidate beyond the view's sides passed over** (amending decision
+   16 with a second test, an object's, after the coarse cull's): a
+   candidate with every vertex of its shape where one of 3x + 2z, 2z − 3x
+   or z − 3y is negative (camera space; each zero on a plane through the eye
+   just beyond the view's left, right or top, so that nothing there can be
+   seen) draws none of its faces, which aren't tried. It changes no pixel
+   of the entrance views or their walks, nor the ZX oracle's agreement;
+   over all the check's views, a few lose a sliver the cone made from an
+   object wholly beyond the view. The figures are in the journal's entry
+   for track AB.
+
 ## What's left
 
-- **The target** (under 100K at a step's median, track W's brief) is still
-  off: the seventh round's what's left, above, has the largest parts (the
-  candidates that draw nothing, the cone's lines and passes, the
-  projection's overheads, the floor). Then the transform's adds (a 16-bit
-  space with a block exponent is picture-free, above).
+- **The target** (under 100K at a step's median, track W's brief) is met by
+  the eighth round (the journal's entry for track AB); its what's left,
+  above, has the largest parts (a turn's fills, the cone's lines and
+  passes, the projection's overheads, the floor). Then the transform's adds
+  (a 16-bit space with a block exponent is picture-free, above).
 - **Size**: since ANDY took the cold code ("ANDY", above), the bank has
   room for the hot paths, and ANDY a little more (the build's guards say
   when either doesn't fit); `dedupe` and `stage_pa` could follow if a

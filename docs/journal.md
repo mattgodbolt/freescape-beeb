@@ -719,3 +719,31 @@ for code like that, or the area conversion's place, which would free its
 (`docs/research/live.md`, "Decisions to record"). Nothing else was worth
 keeping packed until needed: the area conversion has no buffer to unpack
 into, and the rest is small or packed already.
+
+## 2026-11-05: ANDY, and objects beyond the view (track AB)
+
+ANDY (decision 52) now holds the front end's rarely run code: the lines and
+points, the planes' own lines, the matrix's build, `sensor_watching`,
+`frac16` and the slow fill, reached by trampolines in `ObjMore`
+(`docs/research/objects.md`, "ANDY"). The loader puts it in from `!BOOT`
+once the OS is gone. The front end's bank went from 119 bytes free to 4,022
+on the logic's disc (ANDY holds 3,909 bytes, 187 free). Cost, stages 1-7 a
+frame matched by camera: the logic's disc +18 cycles at the median (+0.04%),
+the free disc +122 (+0.12%). The check build now has the live disc's map, and
+fails a view that runs sideways RAM other than its own code.
+
+The room went to the first lever of the seventh round: a candidate with
+every vertex beyond the view's left, right or top (three planes through the
+eye, kept with the transform's cache as each object's greatest values) is
+passed over before it is transformed (decision 53, proposed). `make objects`
+(median / p90 / max): a step from 112,933 / 150,093 / 173,804 cycles to
+94,004 / 140,680 / 174,867, under the 100K aim; a turn from 152,665 /
+201,634 / 271,048 to 142,269 / 211,387 / 292,496. On the live disc, stages
+1-7 in fields a frame (median / p90 / max): walking 0.96 / 2.86 / 5.29 to
+0.75 / 1.99 / 4.95, turning 2.28 / 4.03 / 5.83 to 2.02 / 3.52 / 5.49,
+entrances 3.84 / 5.24 / 6.86 to 3.08 / 5.52 / 7.36. On the free disc's tour
+walking improves and turning gets 1.3% dearer, as a turn pays for the bounds
+in every fill. Four of the check's 3,265 views lose a sliver of a cone face
+made from an object wholly beyond the view; no entrance view, walk or ZX
+comparison changes. The cone's products, the projection's inlining and the
+floor were not reached.
