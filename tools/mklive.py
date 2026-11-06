@@ -89,12 +89,21 @@ def generate(db, layout, out):
         "",
         "SECTION LiveData",
     ]
-    pats = []
+    # Each area's patterns (the sky's, then colours 1 to 15's: four bytes
+    # each) are named by index into a pool of the distinct ones, kept a
+    # byte plane at a time so that an index reaches all four (live_patterns).
+    pool, ix = [], []
     for a in areas:
-        pats += list(parts.sky(a))
-        for c in range(1, 16):
-            pats += list(parts.pattern(a, c))
-    L += equb("ld_pats", pats)
+        for p in [parts.sky(a)] + [parts.pattern(a, c) for c in range(1, 16)]:
+            p = tuple(p)
+            assert len(p) == 4
+            if p not in pool:
+                pool.append(p)
+            ix.append(pool.index(p))
+    assert len(pool) <= 256, len(pool)
+    L += equb("ld_pat_ix", ix)
+    for plane in range(4):
+        L += equb(f"ld_pool{plane}", (p[plane] for p in pool))
     # Each area id's index in that order, &FF for none: the logic names an
     # area by its id (AreaId).
     of = [0xFF] * AREA_IDS

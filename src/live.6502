@@ -583,21 +583,10 @@ REGIONS = P% - regions
 \ text. Returns with BANK_GLUE paged.
 .lv_enter_area
 {
-    ZA_AUTO2 p
     STA lv_area
     INC lv_entered
     PAGE_IN BANK_DATA
-    \ the area's patterns: ld_pats + 4 LIVE_PATTERNS area
-    ASSERT LIVE_PATTERNS * 4 = 64
-    LDA lv_area
-    STZ p+1
-    ASL A : ASL A : ASL A : ASL A : ROL p+1 : ASL A : ROL p+1 : ASL A : ROL p+1
-    CLC : ADC #LO(ld_pats) : STA p
-    LDA p+1 : ADC #HI(ld_pats) : STA p+1
-    LDY #LIVE_PATTERNS * 4 - 1
-.pattern
-    LDA (p),Y : STA rs_pat,Y
-    DEY : BPL pattern
+    JSR live_patterns
     \ the lines of text, and with the logic the panel's values, before the
     \ conversion, which draws the panel's cells as the beam allows
     \ (src/area.6502's AREA_PANEL), so that the name and message are mostly
@@ -984,6 +973,33 @@ SECTION LiveData
     STZ vw_view
     LDA #&80 : STA lv_bview : STA lv_bview+1
     JMP panel_blank
+
+\ live_patterns: lv_area's patterns into rs_pat, each of the LIVE_PATTERNS
+\ named by a byte of ld_pat_ix (16 an area) into the pool of the distinct
+\ ones (tools/mklive.py), whose four bytes are a plane apiece.
+.live_patterns
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 t
+    ASSERT LIVE_PATTERNS = 16
+    LDA lv_area
+    STZ p+1
+    ASL A : ROL p+1 : ASL A : ROL p+1 : ASL A : ROL p+1 : ASL A : ROL p+1
+    CLC : ADC #LO(ld_pat_ix) : STA p
+    LDA p+1 : ADC #HI(ld_pat_ix) : STA p+1
+    LDY #LIVE_PATTERNS - 1
+.pattern
+    LDA (p),Y : STA t
+    TYA : ASL A : ASL A : TAX
+    LDY t
+    LDA ld_pool0,Y : STA rs_pat,X
+    LDA ld_pool1,Y : STA rs_pat + 1,X
+    LDA ld_pool2,Y : STA rs_pat + 2,X
+    LDA ld_pool3,Y : STA rs_pat + 3,X
+    TXA : LSR A : LSR A : TAY
+    DEY : BPL pattern
+    RTS
+}
 
 \ live_lines: the area whose name the panel shows (lv_area's), and with the
 \ logic whether the game's over (its message then says so); drawn, with
