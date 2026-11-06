@@ -8,7 +8,7 @@
 //
 //   node tools/livecheck.mjs [--disc build/live.ssd] [--live build/live/live.json]
 //                            --trace build/live/trace.json [--json OUT] [--verbose]
-//                            [--profile-rest [--fine] [--top N]]
+//                            [--profile-rest | --profile-all [--fine] [--top N]]
 //   node tools/livecheck.mjs --free [--disc build/live-free.ssd] [--live ...]
 //                            [--walks 0,18,26,40,57] [--json OUT] [--verbose]
 //
@@ -137,8 +137,10 @@ const jsonOut = opt("json");
 const verbose = args.includes("--verbose");
 // --profile-rest: the cycles of each frame's "the rest" (its loop but its two
 // halves) by routine, the last label at or below each instruction that isn't
-// inside a scope (--fine: every label), summed by what the frame did; --top N
-const profileRest = args.includes("--profile-rest");
+// inside a scope (--fine: every label), summed by what the frame did; --top N.
+// --profile-all: the same over the whole loop, its halves too
+const profileAll = args.includes("--profile-all");
+const profileRest = args.includes("--profile-rest") || profileAll;
 const fineRest = args.includes("--fine");
 const CLOCK_SLACK = 8; // cycles: T2 counts microseconds, from its own phase
 const NAME = FREE ? "live-free" : "live";
@@ -325,7 +327,7 @@ cpu.debugInstruction.add((addr, opcode) => {
     const bank = cpu.isBankPagedAt(cpu.romsel & 15, addr) ? cpu.romsel & 15 : -1;
     if (profileRest) {
         const t = now();
-        if (restLastKey >= 0 && !restInHalf) {
+        if (restLastKey >= 0 && (!restInHalf || profileAll)) {
             const r = restRoutineOf(restLastKey);
             restAcc.set(r, (restAcc.get(r) || 0) + (t - restLastT));
         }
@@ -1505,7 +1507,8 @@ if (profileRest)
         const sum = new Map();
         for (const f of fs_) for (const [r, c] of f.restProf) sum.set(r, (sum.get(r) || 0) + c);
         const total = [...sum.values()].reduce((a, b) => a + b, 0);
-        console.log(`${NAME}: the rest by routine, ${k} (${fs_.length} frames, ${Math.round(total / fs_.length)} cycles a frame):`);
+        console.log(`${NAME}: ${profileAll ? "the whole loop" : "the rest"} by routine, ${k} (${fs_.length} frames, ` +
+            `${Math.round(total / fs_.length)} cycles a frame):`);
         for (const [r, c] of [...sum.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("top", 25))))
             console.log(`  ${r.padEnd(28)} ${String(Math.round(c / fs_.length)).padStart(8)} ${(100 * c / total).toFixed(1).padStart(5)}%`);
     }
