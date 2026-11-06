@@ -276,6 +276,17 @@ ENDSECTION
 RASTER_IN_END = &0D00                   ; (&0D00 on is the NMI's and the MOS's)
 RASTER_IN_HEAD = 11                     ; rs_nfaces .. rs_overflow
 RASTER_IN_ORG = RASTER_IN_END - 5 * 256 - 3 * RS_FACES - RASTER_IN_HEAD
+\ The patterns: 0 the sky, then the colour indices', so out_fc is rs_fc.
+\ rs_pat, the last page of RasterIn, has room for RS_PATTERNS (the
+\ slideshow's); the disc's LIVE_PATTERNS fill its start, and from
+\ RASTER_SPARE to RASTER_IN_END the page is room in the OS's pages, which
+\ the fill's line heads and scratch bytes take (RASTER_HEAD,
+\ RASTER_SCRATCH: src/raster.6502, src/writer.6502) out of the fill's bank.
+LIVE_PATTERNS = 16
+RASTER_SPARE = RASTER_IN_END - 256 + 4 * LIVE_PATTERNS
+RASTER_HEAD = RASTER_SPARE
+RASTER_SCRATCH = RASTER_HEAD + VIEW_H
+ASSERT RASTER_SCRATCH + 8 <= RASTER_IN_END
 SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
 \ The globals' records their slots were built from (src/area.6502), after
@@ -326,8 +337,7 @@ ASSERT out_vxl = rs_vxl AND out_vxh = rs_vxh AND out_vyl = rs_vyl AND out_vyh = 
 ASSERT OUT_FACES = RS_FACES AND OUT_VERTS = RS_VERTICES
 ASSERT out_nf > rs_horizon AND out_nf <> rs_overflow AND out_vn < rs_fn
 ASSERT rs_fn - rs_nfaces = RASTER_IN_HEAD
-\ The patterns: 0 the sky, then the colour indices', so out_fc is rs_fc.
-LIVE_PATTERNS = 16
+ASSERT RASTER_SPARE = rs_pat + 4 * LIVE_PATTERNS AND rs_pat + 4 * RS_PATTERNS = RASTER_IN_END
 ASSERT LIVE_PATTERNS <= RS_PATTERNS
 
 \ ---------------------------------------------------------------------------

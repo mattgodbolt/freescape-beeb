@@ -66,9 +66,13 @@ FOR r = 0..<RR_ROWS
 NEXT
 ENDSECTION
 
+IF DEFINED(RASTER_SCRATCH)
+    rr_scratch = RASTER_SCRATCH     ; (8 bytes: raster.6502's note)
+ELSE
 SECTION RasterWork
 .rr_scratch SKIP 8                  ; what the extra slot stores into
 ENDSECTION
+ENDIF
 
 SECTION RasterCode
 

@@ -42,6 +42,10 @@
 \ page, already in memory whenever the rasteriser runs (the maths' proj_bl2,
 \ which the live disc names), to read instead of building its own (bl2, in
 \ RasterWork).
+\
+\ And RASTER_HEAD (VIEW_H bytes, any address the rasteriser can always
+\ read and write) for the lines' heads, which RasterWork would hold; the
+\ live disc puts them in the OS's pages. (writer.6502 likewise: RASTER_SCRATCH.)
 \ ***************************************************************************
 
 RS_FACES    = 128                   ; faces in one frame, at most
@@ -117,7 +121,9 @@ ENDSECTION
 \ The span buffer: each line's first gap (0: the line is full), the
 \ background's split on each line, and the pools.
 SECTION RasterWork
+IF NOT(DEFINED(RASTER_HEAD))
 .head       SKIP VIEW_H
+ENDIF
 IF RASTER_HORIZON
 .hsplit     SKIP VIEW_H
 ENDIF
@@ -145,6 +151,9 @@ IF DEFINED(RASTER_SQUARES)
 ENDIF
 IF DEFINED(RASTER_BL2)
     bl2 = RASTER_BL2
+ENDIF
+IF DEFINED(RASTER_HEAD)
+    head = RASTER_HEAD
 ENDIF
 ASSERT LO(bl2) = 0                  ; (edge_setup's index is the byte alone)
 
