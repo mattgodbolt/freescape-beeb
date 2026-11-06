@@ -1020,3 +1020,42 @@ the stretch's four copies each and the background's gaps; the globals
 compared by a checksum (inexact); the vertical sync's byte loop unrolled
 (under a hundred cycles a field); `drawable`'s products decided by bit
 lengths first (little of a few hundred cycles a step).
+
+## 2026-11-06: the rooms emptied
+
+Memory is the limit on speed now: the first and last runs of a line (raster.md,
+round 5) need 832 bytes of records in the fill's bank and the trimming in
+four copies of INSERT and the stretch, against 1,272 free. The coordinator
+asked for bytes in the fill's bank, `AreaConv`'s, `LiveGlue`'s, HAZEL's
+`ObjWork` and the OS's pages, at no cost in cycles, each commit
+passing the checks. What came out (`docs/research/raster.md`, "Round 6"):
+
+| region | free before | after | by |
+|---|---|---|---|
+| the fill's bank (`raster_work_end` to `&C000`) | 1,272 | 3,072 | `bl2` is HAZEL's `proj_bl2` (256); no horizon on the live disc (1,133 of code, 104 of splits: decision 71); `rr_en` is `rr_pl` a byte on (104); the line heads and scratch bytes in the OS's pages (112); the work then starting on the next page after the code |
+| `AreaConv`'s bank (`area_conv_end` to `&C000`) | 684 | 1,316 | the areas' patterns by index into the 172 distinct of 464 (`ld_pat_ix`, `ld_pool0`-`3`: 1,856 bytes to 1,152 and `live_patterns`) |
+| the OS's pages | 52 (and page `&0D`'s 12) | 132 (and 12) | the unused tail of `rs_pat`'s page, less the line heads and scratch bytes it now holds |
+| main RAM below `&3000` | | about 35 more | the pattern copy out of `lv_enter_area` (a `JSR` now) |
+| `ObjWork` (`obj_work_end` to `&E000`), `LiveGlue` | 92, 11 | 92, 11 | nothing found that costs no cycles (below) |
+
+Cycles. `tools/rastercheck.mjs`'s Driller views (the check build, which keeps
+the horizon, so only the table changes show): 7,820,772 for the 65 to
+7,813,661, every view the model's; `bl2` costs a wide edge 2 and saves a tall
+edge 4, and the rest is where the tables fall against their pages. On the
+logic disc the fill's fields a frame (median / p90 / max), before and after:
+walking 0.78 / 2.44 / 8.15 to 0.74 / 2.4 / 8.15, turning 0.79 / 2.72 / 7.35
+to 0.78 / 2.67 / 7.31, standing 0 / 1.74 / 5.22 to 0 / 1.69 / 5.17; flip to
+flip, walking 1.87 to 1.82, turning 2.35 to 2.29. The horizon's removal is
+most of it: a gap is filled with nine cycles less, and a line of background
+alone no longer loads its split.
+
+Looked at and left: `ObjWork`'s arrays that are never live together would
+want each stage's use traced (the transform's `tf_fn`/`tf_fv`/`tf_fc` 384
+bytes and `lfc` 128 are the largest candidates); `LiveGlue` is code that
+runs (`live_figures`, `fig_divide`, the camera's glue) and moves only
+with a bank's paging; `ld_area_of` is 128 bytes for 29 ids (1 to 32, and
+127), about 95 to be had by trimming it and testing 127; the row runs'
+pages each have 96 free bytes after their 160, twelve gaps for routines of
+that size (`swap_chains`, `product`, `fill_split` are 92, 92, 95) or per-row
+records indexed by `(r_rr),Y` (raster.md, round 6). `bnd_ofs` has an
+entry for every pixel and reads only the odd ones.

@@ -335,9 +335,10 @@ don't run.
   either side fails the build rather than the picture.
 - **Patterns by colour index** (decision 8b): `rs_pat`'s pattern 0 is the
   area's sky and patterns 1-15 its colour indices', so `out_fc` is `rs_fc`.
-  `lv_enter_area` copies an area's `LIVE_PATTERNS` (`ld_pats`, from
-  `tools/model/colours.py`'s table for the build's display) in on entry and
-  calls `raster_forget`. The sky is the background; there's no horizon.
+  `lv_enter_area` copies an area's `LIVE_PATTERNS` in on entry
+  (`live_patterns`: `ld_pat_ix` names each of an area's by its place in
+  `ld_pool0`-`ld_pool3`, the distinct ones, from `tools/model/colours.py`'s
+  table for the build's display) and calls `raster_forget`. The sky is the background; there's no horizon.
   The logic names an area by its id: `ld_area_of` gives its index.
 - **Paging**: `PAGE_IN bank` sets `romsel` and `ROMSEL_COPY` together. Code
   in main RAM pages; nothing in a bank pages another. The logic's entries
@@ -469,7 +470,12 @@ below the bytes (2026-11-01).
 - **The fill**: its bank from `raster_work_end` to `&C000`. It reads the
   maths' quarter squares in HAZEL (`RASTER_SQUARES`), as the logic does,
   rather than building its own there (the slideshow, which has no maths,
-  still builds them).
+  still builds them), and the maths' doubled bit lengths (`RASTER_BL2`).
+  The live build has no horizon (`RASTER_NO_HORIZON`, decision 71), and
+  keeps the lines' heads and scratch bytes in the OS's pages
+  (`RASTER_HEAD`, `RASTER_SCRATCH`). Besides, the 96 bytes after each of the
+  row runs but the last, in their pages, are room (`docs/research/raster.md`,
+  "Round 6").
 - **The front end's bank holds the front end alone**, so it gains room only
   as the front end's own code goes elsewhere it can reach: `ObjMore` (any X,
   any bank), main RAM's `&3000` room (with X clear, as it runs; code there
@@ -494,7 +500,9 @@ below the bytes (2026-11-01).
   not ANDY, is in view there (`tools/livecheck.mjs`, jsbeeb's
   `isBankPagedAt`; `tools/run6502.mjs`'s `paged`).
 - **Not used yet**, measured on jsbeeb with the OS gone (below):
-  - the OS's pages: from `area_keep_end` to `RASTER_IN_ORG`; page `&0D` from
+  - the OS's pages: from `area_keep_end` to `RASTER_IN_ORG`, and from the
+    end of the fill's scratch bytes (`RASTER_SCRATCH` + 8) to
+    `RASTER_IN_END` (the tail of `rs_pat`'s page); page `&0D` from
     `live_boot_end` to `&0D9F` (a soft BREAK reads the Master's extended
     vectors from `&0D9F` on, and pages 2 and 3, so those stay the MOS's),
     and below it once `start` is done; page 1 below the stack's deepest;

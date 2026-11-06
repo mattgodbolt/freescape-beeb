@@ -458,6 +458,52 @@ one is known: two sets for each screen, about 1K besides `ln_v`, against
 the bank's room, for an estimated 3K cycles a frame less the trimming's
 test on every piece. Not built.
 
+### Round 6: the fill's bank, emptied for that (2026-11-06)
+
+The first and last runs' records are blocked by room (the bank's free bytes,
+`raster_work_end` to `&C000`, against the records and the trimming in four
+copies of INSERT and the stretch), so the bank was gone through for bytes
+that cost no cycles. What came out, each its own commit, none changing a
+view (`tools/rastercheck.mjs` and `tools/livecheck.mjs` pass):
+
+- **`bl2`, twice the bit length of a byte, is the maths' `proj_bl2`** in
+  HAZEL on the live disc (`RASTER_BL2`, as `RASTER_SQUARES` is the quarter
+  squares): `k8` goes, a page. The jump into the gradient's shifts wants the
+  shift doubled, so `e_sh` is kept doubled and a tall edge's jump loses
+  an `ASL` and a `TAX` (4 cycles); an edge of 256 sixteenths or more pays 2
+  for halving the table's entry for its loop, and the two rare adjustments
+  of `e_sh` (+ 2 or - 2) a second `INC` or `DEC`; a short edge's `shr24`
+  count costs nothing (an even number's `LSR` clears C, as the `CLC` did).
+  Driller's 65 views 7,820,772 to 7,820,340 cycles.
+- **No horizon on the live disc** (`RASTER_NO_HORIZON`; decision 71).
+  `rs_horizon` is written once, to 0, so `horizon_split` (level and
+  sloping), `slope` with its 32-bit arithmetic (`sext32`, `mul32s8`,
+  `div32`), `fill_split`, `put_run`, `put_bnd` and `hsplit` are never run.
+  Without them a gap is filled whole with no split test (nine cycles a gap),
+  and a line of background alone is compared with the right edge, not its
+  split. The check builds and the slideshow keep the horizon.
+- **`rr_en` is `rr_pl` a byte on** (`3 * ((p + 1) DIV 2)` is `rr_pl`'s
+  next entry), 105 bytes.
+- **The line heads and the row runs' scratch bytes** (`head`, `rr_scratch`:
+  `RASTER_HEAD`, `RASTER_SCRATCH`) are in the tail of `rs_pat`'s page in the
+  OS's pages, which the 16 patterns of the live disc leave unused
+  (`RASTER_SPARE`); the check builds keep them in `RasterWork`. Their
+  addresses cost the same, and `RasterWork` then starts on the page after the
+  code's end with nothing in front of its first aligned table.
+
+Measured on the discs, the fill in fields a frame (median / p90 / max),
+before and after: walking 0.78 / 2.44 / 8.15 to 0.74 / 2.4 / 8.16, turning
+0.79 / 2.72 / 7.35 to 0.79 / 2.68 / 7.31, standing 0 / 1.74 / 5.22 to 0 /
+1.7 / 5.18, entrances 2.78 / 4.7 / 8.2 to 2.75 / 4.7 / 8.21. The bank's
+free bytes (`raster_work_end` to `&C000`) went from 1,272 to 3,072: the
+journal, 2026-11-06, "the rooms emptied", has each region's.
+
+Not done, since the bank has the room now: the 96 bytes after each of the
+row runs' 160 in all but the last page (twelve gaps), which routines of that
+size could fill (`swap_chains`, `product` and `fill_split` are 92, 92 and
+95), or per-row records, written by `(r_rr),Y` from `Y` = 160 + the line's
+low three bits, which is a cycle more than an array indexed by line.
+
 ### Measured and not built
 
 - **Faces' lines already full** when the face comes, which its line loop
@@ -511,7 +557,8 @@ spans over Driller's 65 views unless it says the profile; a view's mean):
   over the two): 3 cycles on about 150 face-lines, against patching both
   chains' BRAs at every edge; a loss once the patches are counted.
 - **The background without a horizon** (the gaps' split test patched out a
-  frame): about 500 cycles against eight patches; not built.
+  frame): about 500 cycles against eight patches; not built that way, but the
+  live disc's build leaves the test out (round 6).
 - **X the line and Y the node through the insertion**, the row runs by
   `STA abs,X`: saves the walk's `TAX` and the unlink's `LDY r_y`, about 5
   cycles a face-line, but the runs' lookups need X, the shared bytes Y and

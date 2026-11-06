@@ -688,3 +688,21 @@ fill's bank, and the slideshow's `RasterState` moves to main RAM to make
 room in its bank. Lines of more than one run stay written whole (their
 records would need room the memory hasn't). Figures: journal, 2026-11-06,
 "the fill's fifth round".
+
+## 71. The live disc's fill has no horizon (2026-11-06, autonomous, proposed for Matt; amends 8a)
+
+Decision 8a left the rasteriser's horizon unused for Driller but in the
+code: the level and sloping splits, the sloping one's 32-bit arithmetic,
+the filling of a gap that a split cuts, and a split for each line. On the
+live disc `live_init` writes `rs_horizon` once, to 0, and nothing writes it
+after, so none of that has run since. The live build names
+`RASTER_NO_HORIZON` and leaves it out, together with the writer's two
+routines (`put_run`, `put_bnd`) that only it called: the fill's bank gains
+the code and a page of lines' splits, a gap is filled whole without
+the split test (nine cycles a gap), and a line of background alone is
+compared with the right edge. Every frame is the model's byte for byte (the
+live check), and the check builds and the slideshow keep the horizon, so a
+game that needs one builds with it (the model and `tools/rastercheck.mjs`
+still test it). Figures: `docs/research/raster.md`, "Round 6", and the
+journal, 2026-11-06. If a later version of the game draws a horizon, the
+flag comes off and the room goes (about 1,200 bytes of the fill's bank).
