@@ -1575,39 +1575,38 @@ CROSS_RIGHT = mode2_byte(0, 7)
     LDA #CROSS_LEFT
 .right
     STA mask
+    \ at, and top: the byte column before bc's, VIEW_ADDR + 8 (bc DIV 2 - 1)
+    \ (bc is under 128, so bc DIV 2 - 1 is pixel bc - 2's column, and bc +
+    \ 2's is 16 on); line A's byte of the column k on is then at + (A DIV 8)
+    \ SCREEN_ROW (at's high byte) and A MOD 8 + 8 k (Y)
+    STZ top
+    LDA bc : AND #&FE : ASL A : ASL A : ROL top
+    CLC : ADC #LO(VIEW_ADDR - 8) : STA at
+    LDA top : ADC #HI(VIEW_ADDR - 8) : STA top
     \ the arms across, on line r: pixels bc - 2 and bc + 2
     LDA r : CMP #VIEW_H : BCS up_down
-    LDA bc : SEC : SBC #2 : CMP #VIEW_W : BCS no_left
-    JSR column : LDA r : JSR pixel
-.no_left
-    LDA bc : CLC : ADC #2 : CMP #VIEW_W : BCS up_down
-    JSR column : LDA r : JSR pixel
-.up_down
-    \ the arms up and down, in bc's column: lines r + CROSS_DY
-    LDA bc : CMP #VIEW_W : BCS done
-    JSR column
-    LDX #LEN(CROSS_DY) - 1
-.line
-    LDA r : CLC : ADC cross_dy,X : CMP #VIEW_H : BCS next
-    JSR pixel
-.next
-    DEX : BPL line
-.done
-    RTS
-\ column: at, and top, for pixel A's byte column: VIEW_ADDR + 8 (A DIV 2)
-.column
-    STZ top
-    AND #&FE : ASL A : ASL A : ROL top
-    CLC : ADC #LO(VIEW_ADDR) : STA at
-    LDA top : ADC #HI(VIEW_ADDR) : STA top
-    RTS
-\ pixel: line A of the column EORed with mask: at + (A DIV 8)
-\ SCREEN_ROW + A MOD 8. Keeps X.
-.pixel
     TAY
     LSR A : LSR A : AND #&FE : CLC : ADC top : STA at+1
     TYA : AND #7 : TAY
+    LDA bc : SEC : SBC #2 : CMP #VIEW_W : BCS no_left
     LDA (at),Y : EOR mask : STA (at),Y
+.no_left
+    LDA bc : CLC : ADC #2 : CMP #VIEW_W : BCS up_down
+    TYA : ORA #16 : TAY
+    LDA (at),Y : EOR mask : STA (at),Y
+.up_down
+    \ the arms up and down, in bc's column: lines r + CROSS_DY
+    LDA bc : CMP #VIEW_W : BCS done
+    LDX #LEN(CROSS_DY) - 1
+.line
+    LDA r : CLC : ADC cross_dy,X : CMP #VIEW_H : BCS next
+    TAY
+    LSR A : LSR A : AND #&FE : CLC : ADC top : STA at+1
+    TYA : AND #7 : ORA #8 : TAY
+    LDA (at),Y : EOR mask : STA (at),Y
+.next
+    DEX : BPL line
+.done
     RTS
 .cross_dy   EQUB CROSS_DY AND &FF
 }
