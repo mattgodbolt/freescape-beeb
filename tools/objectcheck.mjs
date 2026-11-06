@@ -185,9 +185,11 @@ const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
 // --fine: by every label, scoped ones too; --top N: the N largest.
 const walksOnly = args.includes("--profile-walks");
 // --profile-turns: over the entrance views alone (each a turn: the cache
-// refilled)
+// refilled); --profile-views RE: over the views whose names RE matches
+// (-y[1-9]: the yaw sweeps' first turns)
 const turnsOnly = args.includes("--profile-turns");
-const profile = args.includes("--profile") || walksOnly || turnsOnly ? new Map() : null;
+const viewsRe = opt("--profile-views") ? new RegExp(opt("--profile-views")) : null;
+const profile = args.includes("--profile") || walksOnly || turnsOnly || viewsRe ? new Map() : null;
 const fine = args.includes("--fine");
 let profiling = false;
 const routines = [];
@@ -388,7 +390,7 @@ for (const view of views) {
     strayRuns.length = 0;
     floorSlot = view.floor ?? null;
     profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name)) &&
-        (!turnsOnly || /^a\d+-e\d+$/.test(view.name));
+        (!turnsOnly || /^a\d+-e\d+$/.test(view.name)) && (!viewsRe || viewsRe.test(view.name));
     fillsOn = /^a\d+-e\d+$/.test(view.name);
     const { total, stages, calls: made, floor, cands: drawing } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
@@ -578,7 +580,8 @@ console.log(
 if (profile) {
     const total = [...profile.values()].reduce((a, b) => a + b, 0);
     const n = walksOnly ? results.filter((r) => /-w\d+$/.test(r.name)).length
-        : turnsOnly ? results.filter((r) => r.entrance).length : results.length;
+        : turnsOnly ? results.filter((r) => r.entrance).length
+        : viewsRe ? results.filter((r) => viewsRe.test(r.name)).length : results.length;
     console.log(`profile: cycles by routine over ${n} ${walksOnly ? "walk steps" : turnsOnly ? "turns" : "views"}`);
     for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("--top") ?? 40)))
         console.log(`  ${r.padEnd(20)} ${String(Math.round(c / n)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);

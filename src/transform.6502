@@ -106,6 +106,7 @@ SECTION ObjWork
 .bb_lo      SKIP 3                  ; bound_box's box, its low cells ...
 .bb_hi      SKIP 3                  ; ... and its high
 .ob_bstamp  SKIP N_OBJ              ; an object's bounds are good when this is cache_gen
+.bp_level   SKIP 1                  ; non-zero when bound_patch last patched a level camera's M
 ENDSECTION
 
 \ Each object's bounds, as the orientation sets them (bound_object): bound p

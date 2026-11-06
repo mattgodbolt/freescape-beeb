@@ -118,10 +118,14 @@ ENDMACRO
     OBJ_IN
     LDA check_area
     JMP area_enter
+\ (the build alone: matrix_update's patches for it aren't made, so the next
+\ frame builds its matrix afresh, whatever its angles)
 .check_matrix
     ZA_ENTRY
     OBJ_IN
-    JMP andy_matrix_build
+    JSR andy_matrix_build
+    STZ mat_valid
+    RTS
 .check_pass
     ZA_ENTRY
     OBJ_IN

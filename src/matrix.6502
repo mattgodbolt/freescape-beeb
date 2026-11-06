@@ -147,7 +147,9 @@ SECTION ObjAndy
     LDA sy : STA M20
     STZ M01 : STZ M10 : STZ M12 : STZ M21
     LDA #64 : STA M11
-    JMP built
+    \ and so a level camera's, every entry within -64..64
+    STZ mat_big : STZ mat_tilt
+    JMP im_cols.im_level
 .composed
     \ Rpitch Ryaw's middle row (its first is cy, 0, -sy) and its last,
     \ which is M's
@@ -174,7 +176,6 @@ SECTION ObjAndy
     MMUL sr, nsy
     LDA acc : SEC : SBC mp : STA mp : LDA acc+1 : SBC mp+1 : STA mp+1
     MROUND : STA M12
-.built
     JSR im_cols
     \ mat_big: an entry beyond 64 either way (src/transform.6502's fills)
     STZ mat_big
@@ -223,12 +224,29 @@ SECTION ObjAndy
     LDA im_t+2 : STA im_fy2,X
     DEX : BPL column
     RTS
+\ im_level: the same for a level camera's M, whose y row and column are
+\ (0, 64, 0): FY 64 down the middle, FX M00 and FX M02 across the top
+.im_level
+    STZ im_fx0+1 : STZ im_fx1+1 : STZ im_fx2+1
+    STZ im_fy0 : STZ im_fy1 : STZ im_fy2
+    STZ im_fy0+2 : STZ im_fy1+2 : STZ im_fy2+2
+    LDA #LO(VIEW_FY * 64) : STA im_fy0+1
+    LDA #HI(VIEW_FY * 64) : STA im_fy1+1
+    LDA #(VIEW_FY * 64) >> 16 : STA im_fy2+1
+    LDX #0
+.level_column
+    STX k
+    LDA mat,X : JSR im_317
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    ASL im_t : ROL im_t+1 : ROL im_t+2
+    LDX k
+    LDA im_t : STA im_fx0,X
+    LDA im_t+1 : STA im_fx1,X
+    LDA im_t+2 : STA im_fx2,X
+    INX : INX : CPX #4 : BNE level_column
+    RTS
 \ im_317: im_t (24-bit) = 317 A, A an entry of M
 .im_317
-    TAY : BNE im_nonzero
-    STZ im_t : STZ im_t+1 : STZ im_t+2
-    RTS
-.im_nonzero
     PHA
     LDY #61 : JSR mmul                  ; (|A| + 61 within msq's 128)
     PLA : CLC : ADC mp+1 : STA im_t+1
@@ -302,6 +320,16 @@ ENDMACRO
     LDA #&20 : STA bb_bias : STA bb_bias+1 : STA bb_bias+2
     ASSERT BD_N = 3
     FOR k = 0..2
+        IF k = 1
+            \ a level camera's middle column, (0, 64, 0): L's and R's terms
+            \ 0, skipped, and T's -192, as the last level camera's patch
+            \ left them (bp_level)
+            LDA mat_tilt : BNE column
+            LDA bp_level : BEQ column
+            LDA bb_bias + BD_T : CLC : ADC #&20 : STA bb_bias + BD_T
+            JMP column_done
+        .column
+        ENDIF
         LDA mat + k : JSR times3 : STA a3 : STY a3+1
         LDA mat + 3 + k : JSR times3 : STA b3 : STY b3+1
         LDA mat + 6 + k : JSR widen : STA c1 : STY c1+1
@@ -319,7 +347,12 @@ ENDMACRO
         LDA c1 : SEC : SBC b3 : STA bp_p
         LDA c1+1 : SBC b3+1 : STA bp_p+1
         BP_SITE WHERE(k = 0, bb_t20, WHERE(k = 1, bb_t21, bb_t22)), BD_T, k
+        IF k = 1
+        .column_done
+        ENDIF
     NEXT
+    \ (whether the middle column's terms are a level camera's)
+    LDA mat_tilt : EOR #&FF : STA bp_level
     RTS
 \ widen: A, Y = the signed byte A as 16 bits (low, high)
 .widen
