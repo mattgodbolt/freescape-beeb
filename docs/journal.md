@@ -804,3 +804,66 @@ point's polar form, it's good to a pixel, and the cone needs camera
 space); log products (no fewer reads, and inexact). The front end's bank,
 which ANDY had freed, has less room: the bounds' and the level fills' code
 took most of what it had.
+
+## 2026-11-06: the rest of the frame (the tenth round)
+
+The coordinator asked for the front end's remaining costs outside the cone,
+the projection and the fill, which other tracks had: the floor, the sort,
+the 2D clip and the live disc's "the rest" (a frame's loop but its two
+halves). `livecheck.mjs --profile-rest` (new) put the rest by routine. At
+an entrance, of 197,098 cycles a frame, the area's conversion took about
+113K (the slanted faces' products, greatest common divisors and divisions
+about 75K, nearly all of it the globals', which every entry builds again
+with the logic), the sort's memory cleared 17K, and the area's name and
+message drawn 35K. A standing frame (the crosshair moved) ran both halves
+again for the same view, 5.4 fields of them. Walking (15,530 cycles) and
+turning (17,745), the panel's scan of its cells, the camera's fractions and
+the inputs' compare were the largest parts.
+
+What went in (`docs/research/objects.md`, "The tenth round"; nothing any
+stage outputs changes, so no picture changes):
+
+- the globals' slanted faces kept from their last build by their edge
+  vectors (a memo in `ObjMemo`, main RAM's `&3000` on);
+- the conversion's products by the maths' quarter squares, none with a
+  factor 0;
+- the sort's memory forgotten on entry by a new generation, not cleared;
+- `panel_sync` scanning from where it left off;
+- `lv_camera`'s fractions by quarter squares, none for 0;
+- the objects' flags compared only after `logic_go_shown`;
+- a frame of the crosshair alone when the buffer it draws already holds its
+  view (`live_cross_only`, `docs/research/live.md`, "The crosshair").
+
+`areacheck` (median / most, cycles): `area_enter` with the logic 138,893 /
+242,897 to 81,062 / 171,245; without, 70,078 / 174,072 to 48,940 /
+139,141. The live disc's check, fields a frame, median / p90 / max (mean),
+before and after:
+
+| | flip to flip, before | after | the rest, before | after |
+|---|---|---|---|---|
+| entrance (75) | 10.77 / 15.87 / 22.92 (11.20) | 9.35 / 14 / 20.94 (9.79) | 4.74 / 5.97 / 9.82 | 3.44 / 4.56 / 7.64 |
+| standing (669) | 5.65 / 5.94 / 10.42 (5.23) | 0.52 / 2.62 / 9.44 (1.12) | 0.26 / 0.44 / 4.58 | 0.22 / 0.33 / 3.58 |
+| walking | 2.41 / 5.03 / 13.82 (2.80) | 2.18 / 5 / 13.69 (2.67) | 0.27 / 0.68 / 7.14 | 0.12 / 0.58 / 5.02 |
+| turning | 2.97 / 6.33 / 14.9 (3.50) | 2.87 / 5.99 / 12.92 (3.35) | 0.22 / 0.57 / 7.06 | 0.11 / 0.49 / 5.05 |
+
+557 of the 669 standing frames were the crosshair alone. The rest by the
+profile, cycles a frame: entrance 140,241, standing 11,940, walking 10,915,
+turning 11,695. An idle loop went from 1,816 / 3,083 / 81,432 cycles to 741
+/ 1,163 / 79,766, so a key pressed with nothing to draw shows its first
+changed view sooner: walking 5.52 to 5.29 fields at the median, turning
+5.61 to 5.55, the crosshair and the rest 3.77 to 1.96. On the free disc a
+walking frame's rest went from 13,661 cycles to 10,165. `make check`
+passes.
+
+Measured and not kept: the sort's memory forgotten slot by slot as a
+ceiling cell moves (each changed slot's row and column cleared, a new
+generation past four): over the check's walks the sort's mean step went
+from 1,800 cycles to 1,516 and its worst from 32,792 to 18,138, but the 90th
+percentile rose from 1,976 to 2,386 and it took about 140 bytes of the
+front end's bank. Not reached: the floor (the guard band's and the cone's,
+another track's) and the 2D clip, whose cost is spread over its passes;
+counted and not built, a level cuboid's fill written out, `bp_site`'s
+unchanged pages, the crosshair's EOR and the panel's numbers, each a few
+hundred cycles. The room: `AreaConv` took 273 bytes of its bank's (705
+left); `ObjMemo` 363 bytes, leaving 41 of main RAM's `&3000` up to
+`SCREEN`; `LiveGlue` 54; the front end's bank is unchanged.
