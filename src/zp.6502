@@ -34,6 +34,8 @@ SECTION Work, org = &0400, guard = &0800, virtual = TRUE
 .keys_made      SKIP KEYS_BYTES     ; the keys that went down since key_take last took them
 .keys_scan      SKIP KEYS_BYTES     ; the interrupt's own: the keys as it reads them
 .keys_any       SKIP 1      ; non-zero while any key was held at the last read
+.keys_col       SKIP 1      ; the interrupt's own: the column it reads, and its first key
+.keys_first     SKIP 1
     \ the OS's IRQ1V, which the engine's handler passes on what isn't its own
 .os_irq1v       SKIP 2
 ENDSECTION

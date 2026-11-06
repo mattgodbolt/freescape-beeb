@@ -85,9 +85,21 @@ ASSERT MAX(KEY_MAP[.., 1]) < KEYS_BYTES * 8
 ASSERT MAX(KEY_MAP[.., 1] AND 7) < 5                    ; five keys a half-row
 ASSERT MIN(KEY_MAP[.., 0] AND &F0) >= &10               ; none on row 0, which auto-scan leaves out
 
-.key_number EQUB KEY_MAP[.., 0]
-.key_byte   EQUB KEY_MAP[.., 1] DIV 8
-.key_mask   EQUB 1 << (KEY_MAP[.., 1] AND 7)
+\ The keys by the keyboard's column (an internal key number's low nibble),
+\ and where each column's start in that order: key_first + c, the last's
+\ end after it.
+KEY_SORTED  = SORT(ZIP(KEY_MAP[.., 0] AND 15, KEY_MAP[.., 0], KEY_MAP[.., 1]), 0)
+KEY_COLUMN  = KEY_SORTED[.., 0]
+KEY_COLUMNS = MAX(KEY_COLUMN) + 1
+KEY_NONE    = &0F           ; a column the keyboard hasn't (its decoder's ten): no key, CA2 low
+ASSERT KEY_COLUMNS <= 10 AND KEY_COLUMNS < 128
+.key_number EQUB KEY_SORTED[.., 1]
+.key_byte   EQUB KEY_SORTED[.., 2] DIV 8
+.key_mask   EQUB 1 << (KEY_SORTED[.., 2] AND 7)
+.key_first
+    FOR c = 0..KEY_COLUMNS
+        EQUB SUM(WHERE(KEY_COLUMN < c, 1, 0))
+    NEXT
 
 \ input_irq (the vertical sync's): the keys read, if one may have changed,
 \ into keys, and those gone down since the last read into keys_made.
@@ -97,23 +109,43 @@ CA2 = 1                     ; sysvia_ifr's bit: the keyboard's auto-scan found a
 {
     \ The keys are read only when one may have changed: one was held at
     \ the last read, or since then auto-scan has found one down (its CA2,
-    \ as the OS's keyboard interrupt has it). The flag is cleared first, so
-    \ a key made during the read sets it again.
-    LDA sysvia_ifr : AND #CA2 : ORA keys_any : BEQ done
-    LDA #CA2 : STA sysvia_ifr
+    \ as the OS's keyboard interrupt has it).
+    LDA sysvia_ifr : AND #CA2 : ORA keys_any : BNE read
+    RTS
+.read
     LDA #&7F : STA sysvia_ddra                  ; bits 0-6 the key, bit 7 its state
     LDA #3 : STA sysvia_orb                     ; auto-scan off: the matrix is ours
     FOR i = 0..KEYS_BYTES - 1
         STZ keys_scan + i
     NEXT
-    LDY #KEY_COUNT - 1
+    \ A column's keys read only when it has one down: with auto-scan off,
+    \ CA2 is high while the column on port A has a key down (rows 1-7, as
+    \ the OS's own scan reads it), so from CA2 low (a column with none, or
+    \ KEY_NONE) and its flag clear, the flag says whether this one has. A
+    \ key made after its column is looked at sets CA2 again by auto-scan,
+    \ for the next read.
+    LDA #KEY_NONE : STA sysvia_ora_nh
+    LDA #CA2 : STA sysvia_ifr
+    LDX #KEY_COLUMNS - 1
+.column
+    STX sysvia_ora_nh                           ; (row 0: the column alone)
+    LDA sysvia_ifr : LSR A : BCC column_next    ; (CA2 is bit 0)
+    STX keys_col
+    LDA key_first,X : STA keys_first
+    LDY key_first + 1,X
 .key
+    DEY
     LDA key_number,Y : STA sysvia_ora_nh
     LDA sysvia_ora_nh : BPL up                  ; (bit 7 set: held)
     LDX key_byte,Y
     LDA key_mask,Y : ORA keys_scan,X : STA keys_scan,X
 .up
-    DEY : BPL key
+    CPY keys_first : BNE key
+    LDA #KEY_NONE : STA sysvia_ora_nh           ; (CA2 low again, and its flag clear)
+    LDA #CA2 : STA sysvia_ifr
+    LDX keys_col
+.column_next
+    DEX : BPL column
     LDA #&0B : STA sysvia_orb                   ; auto-scan back
     LDA #&FF : STA sysvia_ddra
     \ made: held now and not at the last read, kept until taken
