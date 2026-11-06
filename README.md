@@ -47,10 +47,11 @@ step and turn, position, vehicle, area and messages, driven by Driller's
 logic; the frames a second beside "tech demo" are the BBC's own timing of
 the whole frame. Driller is Incentive Software's.*
 
-**How fast:** measured on the disc's check (journal, 2026-10-31), walking
-through Driller's areas a frame takes a median of about 3 fields (about
-16 frames a second) and turning about 4.4 (about 11); wide open views,
-like the entrances, take longer, up to about 12 fields. Standing still
+**How fast:** measured on the disc's check (journal, 2026-11-05), the
+whole frame, flip to flip, walking through Driller's areas takes a median
+of about 2.4 fields (about 21 frames a second) and turning about 3.5
+(about 14); wide open views, like the entrances, take longer, about 11
+fields at the median. Standing still
 draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
