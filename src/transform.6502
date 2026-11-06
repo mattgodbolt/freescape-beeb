@@ -596,14 +596,30 @@ SECTION ObjCode
     LDA slot_next : STA slot : STA ob_slot,X
     CLC : ADC n : STA slot_next
     LDA cache_gen : STA ob_stamp,X
-    LDA ob_flags,X : AND #K_MASK : CMP #K_GENERIC : BEQ generic
+    LDA ob_flags,X : AND #K_MASK : CMP #K_GENERIC : BNE box
+    JMP generic
+.box
     \ a box's corner, or a sensor's point
     LDA ob_lx,X : STA fill_point.px
     LDA ob_ly,X : STA fill_point.py
     LDA ob_lz,X : STA fill_point.pz
     LDY slot : JSR fill_point
     LDX obj
-    LDA ob_flags,X : AND #K_MASK : CMP #K_SENSOR : BEQ done
+    LDA ob_flags,X : AND #K_MASK : BNE not_cuboid
+    LDA mat_tilt : ORA mat_big : BNE edges
+    \ a level camera's cuboid: its three edges straight into the level
+    \ fills, x, y and z in the slots after the corner's
+    LDA ob_hx,X : SEC : SBC ob_lx,X
+    LDY slot : INY : JSR fill_edge.along_x
+    LDX obj
+    LDA ob_hy,X : SEC : SBC ob_ly,X
+    LDY slot : INY : INY : JSR fill_edge.up
+    LDX obj
+    LDA ob_hz,X : SEC : SBC ob_lz,X
+    LDY slot : INY : INY : INY : JMP fill_edge.along_z
+.not_cuboid
+    CMP #K_SENSOR : BEQ done
+.edges
     \ the box's edges: each axis but a rectangle's zero one, in order
     STZ k
 .edge
