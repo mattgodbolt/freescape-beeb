@@ -211,6 +211,9 @@ BOUNDS = (
     lambda x, y, z: z - 3 * y,          # top
 )
 BOUND_BITS = 22                         # (an object's greatest values fit 23 signed bits: the 6502's)
+# Each function of M's columns, which the 6502 multiplies cells by from
+# its quarter squares (src/transform.6502's bound_box), is within this.
+BOUND_PHI = 255
 
 
 def beyond_view(s, m, c):
@@ -218,6 +221,8 @@ def beyond_view(s, m, c):
     (OBJECT_CULL), so that none of its faces can be seen."""
     from tools.model.view import FX, FY, XC, YC
     assert 3 * XC < 2 * FX and 3 * YC < FY
+    for f in BOUNDS:
+        assert all(abs(f(m[0][k], m[1][k], m[2][k])) <= BOUND_PHI for k in range(3))
     for v in s.vertices:
         mv = transform.mul(m, v)
         assert all(abs(f(*mv)) < 1 << BOUND_BITS for f in BOUNDS)

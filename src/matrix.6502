@@ -66,6 +66,8 @@ SECTION ObjCode
     LDA cam_roll : STA mat_angles+2
     LDA #1 : STA mat_valid
     JSR andy_matrix_build
+    JSR bound_patch
+    JSR fill_patch
     JSR cache_empty
     SEC
     RTS
@@ -136,6 +138,17 @@ SECTION ObjAndy
     LDX mat_angles+1 : LDA sin_table,X : STA sp : LDA cos_table,X : STA cp
     LDX mat_angles+2 : LDA sin_table,X : STA sr : LDA cos_table,X : STA cr
     LDA #0 : SEC : SBC sy : STA nsy
+    LDA mat_angles+1 : ORA mat_angles+2 : BNE composed
+    \ pitch and roll 0, whose rotations are 64 times the identity (the
+    \ table's sine and cosine of 0 are 0 and 64), which the rounding gives
+    \ back: M is the yaw's own (the matrix check has every yaw so)
+    LDA cy : STA M00 : STA M22
+    LDA nsy : STA M02
+    LDA sy : STA M20
+    STZ M01 : STZ M10 : STZ M12 : STZ M21
+    LDA #64 : STA M11
+    JMP built
+.composed
     \ Rpitch Ryaw's middle row (its first is cy, 0, -sy) and its last,
     \ which is M's
     MMUL sp, sy : MROUND : STA py10
@@ -161,8 +174,8 @@ SECTION ObjAndy
     MMUL sr, nsy
     LDA acc : SEC : SBC mp : STA mp : LDA acc+1 : SBC mp+1 : STA mp+1
     MROUND : STA M12
+.built
     JSR im_cols
-    JSR bound_sel
     \ mat_big: an entry beyond 64 either way (src/transform.6502's fills)
     STZ mat_big
     LDX #8
@@ -212,6 +225,10 @@ SECTION ObjAndy
     RTS
 \ im_317: im_t (24-bit) = 317 A, A an entry of M
 .im_317
+    TAY : BNE im_nonzero
+    STZ im_t : STZ im_t+1 : STZ im_t+2
+    RTS
+.im_nonzero
     PHA
     LDY #61 : JSR mmul                  ; (|A| + 61 within msq's 128)
     PLA : CLC : ADC mp+1 : STA im_t+1
@@ -229,50 +246,80 @@ ASSERT im_fx1 = im_fx0 + 3 AND im_fx2 = im_fx1 + 3 AND im_fy1 = im_fy0 + 3 AND i
 ENDSECTION
 SECTION ObjCode
 
-\ BD_POS p: (a 16-bit value: Y its low byte, A its high) bit k (bound_sel's)
-\ of bd_sel + p if it's positive
-MACRO BD_POS p
-    BMI no
-    BNE yes
-    CPY #0 : BEQ no
-.yes
-    LDX bound_sel.k : LDA bit8,X : TSB bd_sel + p
-.no
+\ BP_SITE site, f, k: bound_box's term for bound f on axis k, at site,
+\ patched for the coefficient bp_p: its products' bases (f(u + phi) from sq
+\ at phi when phi >= 0, else from ng, f(j - 255), at 255 + phi; f(u - phi)
+\ likewise at -phi, a base of ng's at 255 serving for 0), the cell it reads
+\ (the box's high one on axis k when phi is positive, else its low), and for
+\ a term past the bound's first, whether it's skipped (a phi of 0) or
+\ counted in bb_bias.
+MACRO BP_SITE site, f, k
+    LDA bp_p+1 : BMI neg
+    LDA bp_p
+    STA site + BB_A0 : STA site + BB_A0 + BB_HI
+    EOR #&FF                                        ; 255 - phi
+    STA site + BB_B0 : STA site + BB_B0 + BB_HI
+    LDA #HI(sq_lo) : STA site + BB_A0 + 1
+    LDA #HI(sq_hi) : STA site + BB_A0 + BB_HI + 1
+    LDA #HI(ng_lo) : STA site + BB_B0 + 1
+    LDA #HI(ng_hi) : STA site + BB_B0 + BB_HI + 1
+    LDA #LO(bb_lo + k)
+    LDY bp_p : BEQ cell
+    LDA #LO(bb_hi + k)
+    BRA cell
+.neg
+    LDA bp_p : DEC A                                ; 255 + phi
+    STA site + BB_A0 : STA site + BB_A0 + BB_HI
+    EOR #&FF                                        ; -phi
+    STA site + BB_B0 : STA site + BB_B0 + BB_HI
+    LDA #HI(ng_lo) : STA site + BB_A0 + 1
+    LDA #HI(ng_hi) : STA site + BB_A0 + BB_HI + 1
+    LDA #HI(sq_lo) : STA site + BB_B0 + 1
+    LDA #HI(sq_hi) : STA site + BB_B0 + BB_HI + 1
+    LDA #LO(bb_lo + k)
+.cell
+    STA site + BB_UX
+    IF k > 0
+        LDA bp_p : ORA bp_p+1 : BEQ skip
+        LDA bb_bias + f : CLC : ADC #&20 : STA bb_bias + f
+        LDA #0
+        BRA put
+    .skip
+        LDA #BB_SKIP
+    .put
+        STA site + BB_SK
+    ENDIF
 ENDMACRO
 
-\ bound_sel: each bound's edges (src/transform.6502's "The bounds"): bit k
-\ of bd_sel + p if bound p's function of M's column k is positive, which an
-\ edge along world axis k then adds to: L 3 M0k + 2 M2k, R 2 M2k - 3 M0k, T
-\ M2k - 3 M1k, in 16 bits.
-.bound_sel
+\ bound_patch: bound_box's terms (src/transform.6502's "The bounds") for M,
+\ as it's built: term k of bound f takes f's coefficient on M's column k,
+\ L 3 M0k + 2 M2k, R 2 M2k - 3 M0k, T M2k - 3 M1k, in 16 bits (each within
+\ 255 either way: the model asserts, render.BOUND_PHI).
+.bound_patch
 {
     ZA_AUTO2 a3, b3, c1, c2
-    ZA_AUTO1 k
-    STZ bd_sel : STZ bd_sel+1 : STZ bd_sel+2
+    \ each bound's bias: 64 times &8000 a term, the top byte's &20
+    LDA #&20 : STA bb_bias : STA bb_bias+1 : STA bb_bias+2
     ASSERT BD_N = 3
-    LDX #2
-.column
-    STX k
-    LDA mat,X : JSR times3 : STA a3 : STY a3+1
-    LDX k : LDA mat+3,X : JSR times3 : STA b3 : STY b3+1
-    LDX k : LDA mat+6,X : JSR widen : STA c1 : STY c1+1
-    ASL A : STA c2
-    TYA : ROL A : STA c2+1
-    \ L: c2 + a3
-    LDA c2 : CLC : ADC a3 : TAY
-    LDA c2+1 : ADC a3+1
-    BD_POS BD_L
-    \ R: c2 - a3
-    LDA c2 : SEC : SBC a3 : TAY
-    LDA c2+1 : SBC a3+1
-    BD_POS BD_R
-    \ T: c1 - b3
-    LDA c1 : SEC : SBC b3 : TAY
-    LDA c1+1 : SBC b3+1
-    BD_POS BD_T
-    LDX k : DEX : BMI done
-    JMP column
-.done
+    FOR k = 0..2
+        LDA mat + k : JSR times3 : STA a3 : STY a3+1
+        LDA mat + 3 + k : JSR times3 : STA b3 : STY b3+1
+        LDA mat + 6 + k : JSR widen : STA c1 : STY c1+1
+        ASL A : STA c2
+        TYA : ROL A : STA c2+1
+        \ L: c2 + a3
+        LDA c2 : CLC : ADC a3 : STA bp_p
+        LDA c2+1 : ADC a3+1 : STA bp_p+1
+        BP_SITE WHERE(k = 0, bb_t00, WHERE(k = 1, bb_t01, bb_t02)), BD_L, k
+        \ R: c2 - a3
+        LDA c2 : SEC : SBC a3 : STA bp_p
+        LDA c2+1 : SBC a3+1 : STA bp_p+1
+        BP_SITE WHERE(k = 0, bb_t10, WHERE(k = 1, bb_t11, bb_t12)), BD_R, k
+        \ T: c1 - b3
+        LDA c1 : SEC : SBC b3 : STA bp_p
+        LDA c1+1 : SBC b3+1 : STA bp_p+1
+        BP_SITE WHERE(k = 0, bb_t20, WHERE(k = 1, bb_t21, bb_t22)), BD_T, k
+    NEXT
     RTS
 \ widen: A, Y = the signed byte A as 16 bits (low, high)
 .widen
@@ -292,11 +339,12 @@ ENDMACRO
     PLA
     RTS
 }
-ZA_AUTO2 b_t, b_u
+ZA_AUTO2 b_t, b_u, bp_p
+ASSERT BD_L = 0 AND BD_R = 1 AND BD_T = 2
+ASSERT HI(bb_lo) = HI(bb_hi + 2)                ; (only a cell's low byte is patched)
 
 ENDSECTION
 ASSERT mmul >= obj_andy_reach AND mround >= obj_andy_reach   ; (matrix_build's, from ANDY)
-ASSERT bound_sel >= obj_andy_reach
 
 SECTION ObjConst
 \ Quarter squares for MMUL: n * n DIV 4, n = 0..128.

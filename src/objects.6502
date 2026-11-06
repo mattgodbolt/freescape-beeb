@@ -314,13 +314,14 @@ SECTION ObjCode
 \ ---------------------------------------------------------------------------
 \ objects_frame: stages 1 to 7, the camera (cam_*) to the faces nearest
 \ first in out_* (src/clip.6502). Needs the maths' tables readable. A
-\ candidate whose cache isn't good is filled first, and one with a bound
-\ below M c's (src/transform.6502's "The bounds") is passed over: every
-\ vertex is beyond a side of the view.
+\ candidate whose bounds aren't good has them made first, and one with a
+\ bound below M c's (src/transform.6502's "The bounds") is passed over:
+\ every vertex is beyond a side of the view; any other whose cache isn't
+\ good is filled.
 \
 \ BD_BEYOND p: on to of_next if candidate slot X's bound p is below M c's
-\ (signed 24-bit, each top byte kept with its sign bit flipped, so that
-\ their order is unsigned): mostly the top bytes decide, else the low two
+\ (24-bit, both biased so that their order is unsigned): mostly the top
+\ bytes decide, else the low two
 MACRO BD_BEYOND p
     LDA bd_k2 + p * N_OBJ,X : CMP bd_mc + 3 * p + 2 : BCC beyond
     BNE done
@@ -349,14 +350,23 @@ ENDMACRO
     STX of_cand
     LDA cd_obj,X : STA of_slot
     TAX
-    LDA ob_stamp,X : CMP cache_gen : BEQ filled
-    JSR transform_fill
-    LDX of_slot
-.filled
+    \ (a good cache has good bounds: they're made first)
+    LDA ob_stamp,X : CMP cache_gen : BNE unfilled
+    BD_BEYOND BD_L
+    BD_BEYOND BD_R
+    BD_BEYOND BD_T
+    BRA filled
+.unfilled
+    LDA ob_bstamp,X : CMP cache_gen : BEQ bounded
+    JSR bound_object
+.bounded
     BD_BEYOND BD_L
     BD_BEYOND BD_R
     BD_BEYOND BD_T
     ASSERT BD_N = 3
+    JSR transform_fill
+    LDX of_slot
+.filled
     LDY of_cand : LDA cd_vmask,Y
     JSR transform_object
 .of_transformed                     ; (tools/objectcheck.mjs reads the vertices here)

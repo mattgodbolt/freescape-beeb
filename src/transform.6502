@@ -101,14 +101,16 @@ SECTION ObjWork
 .vz1        SKIP VALL
 .vz2        SKIP VALL
 \ the bounds (below, "The bounds")
-.bd_sel     SKIP 3                  ; each bound's edges: bit k if M's column k raises it (bound_sel)
-.bd_mc      SKIP 3 * 3              ; each bound of M c, 24-bit signed, saturated, its top bit flipped (bound_frame)
+.bd_mc      SKIP 3 * 3              ; each bound of M c, as bound_frame keeps it
+.bb_bias    SKIP 3                  ; each bound's bias, &20 a term bound_box takes (bound_patch's)
+.bb_lo      SKIP 3                  ; bound_box's box, its low cells ...
+.bb_hi      SKIP 3                  ; ... and its high
+.ob_bstamp  SKIP N_OBJ              ; an object's bounds are good when this is cache_gen
 ENDSECTION
 
-\ Each object's bounds, as its cache's orientation sets them (transform_fill):
-\ bound p of object X is at bd_k0 + p N_OBJ + X, its middle and top bytes
-\ likewise in bd_k1 and bd_k2, the top with its sign bit flipped (as
-\ bd_mc's is), so that objects_frame orders them unsigned.
+\ Each object's bounds, as the orientation sets them (bound_object): bound p
+\ of object X is at bd_k0 + p N_OBJ + X, its middle and top bytes likewise
+\ in bd_k1 and bd_k2, unsigned (biased, as bd_mc's are).
 SECTION ObjBound
 .bd_k0      SKIP 3 * N_OBJ
 .bd_k1      SKIP 3 * N_OBJ
@@ -139,7 +141,8 @@ SECTION ObjCode
 .cache_reset
     ZA_ENTRY
     JSR sort_forget
-\ cache_empty: no object's cache is good (a new orientation, or no room).
+\ cache_empty: no object's cache is good, nor its bounds (a new orientation,
+\ or no room, after which the bounds are made again too).
 .cache_empty
 {
     ZA_ENTRY
@@ -150,6 +153,7 @@ SECTION ObjCode
     LDX #N_OBJ - 1
 .clear
     STZ ob_stamp,X
+    STZ ob_bstamp,X
     DEX : BPL clear
 .done
     RTS
@@ -200,6 +204,35 @@ SECTION ObjCode
     DEX : BPL term
     JMP moved
 .full
+    LDA mat_tilt : BEQ level
+    JMP rows
+.level
+    \ a level camera's: y is 64 cy, x and z two products each (as the fills
+    \ have them)
+    FOR q = 0..1
+        r = 2 * q
+        LDA mat + 3 * r : JSR mul_set
+        LDA cam_x : STA mv0 : LDA cam_x+1 : STA mv0+1
+        JSR mul
+        LDA macc : STA mc + 3 * r
+        LDA macc+1 : STA mc + 3 * r + 1
+        LDA macc+2 : STA mc + 3 * r + 2
+        LDA mat + 3 * r + 2 : JSR mul_set
+        LDA cam_z : STA mv0 : LDA cam_z+1 : STA mv0+1
+        JSR mul
+        LDA mc + 3 * r : CLC : ADC macc : STA mc + 3 * r
+        LDA mc + 3 * r + 1 : ADC macc+1 : STA mc + 3 * r + 1
+        LDA mc + 3 * r + 2 : ADC macc+2 : STA mc + 3 * r + 2
+    NEXT
+    \ 64 cy: (cy << 8) >> 2, cy below &8000
+    STZ mc+3
+    LDA cam_y : STA mc+4
+    LDA cam_y+1
+    LSR A : ROR mc+4 : ROR mc+3
+    LSR A : ROR mc+4 : ROR mc+3
+    STA mc+5
+    JMP valid
+.rows
     FOR r = 0..2
         LDA mat + 3 * r + 0 : STA mrow+0
         LDA mat + 3 * r + 1 : STA mrow+1
@@ -216,6 +249,7 @@ SECTION ObjCode
         LDA macc+1 : STA mc + 3 * r + 1
         LDA macc+2 : STA mc + 3 * r + 2
     NEXT
+.valid
     LDA #1 : STA mc_valid
 .moved
     FOR k = 0..5
@@ -255,27 +289,76 @@ MACRO FP_ADD acc
     LDA acc+2 : SBC fq2,Y : STA acc+2
 ENDMACRO
 
-\ LEVEL_SET m, acc: acc = 64 u m (u64 = u + 64), 0 for a zero m;
-\ LEVEL_ADD m, acc: acc plus it
-MACRO LEVEL_SET m, acc
-    LDA m : BNE product
-    STZ acc : STZ acc+1 : STZ acc+2
-    BRA done
-.product
-    FP_INDEX m
-    FP_SET acc
-.done
+\ A level camera's fills (mat_tilt 0: M's y row and column (0, 64, 0), every
+\ entry within -64..64): a point's y is 4096 py, its x and z two products
+\ each, of px by M00 and pz by M02, and of px by M20 and pz by M22; an
+\ edge's one each, or none along y. The product 64 u m (X = u) is read from
+\ f64's tables at bases fill_patch sets for m, at u + 64 + m and u + 64 - m
+\ (the table's page, as 64 + m is 0..128 and u below 128), into the cache.
+\ Each macro's operands are at fixed offsets from its start: the bases for
+\ + m at LV_*A0, A1, A2 and those for - m at LV_*B0, B1, B2.
+\ LV_SET_ZP d: d (zero page, 3 bytes) = 64 u m
+MACRO LV_SET_ZP d
+.a0 LDA fq0,X
+    SEC
+.b0 SBC fq0,X
+    STA d
+.a1 LDA fq1,X
+.b1 SBC fq1,X
+    STA d+1
+.a2 LDA fq2,X
+.b2 SBC fq2,X
+    STA d+2
+    ASSERT a0 + 1 - a0 = LVZ_A0 AND a1 + 1 - a0 = LVZ_A1 AND a2 + 1 - a0 = LVZ_A2
+    ASSERT b0 + 1 - a0 = LVZ_B0 AND b1 + 1 - a0 = LVZ_B1 AND b2 + 1 - a0 = LVZ_B2
 ENDMACRO
-MACRO LEVEL_ADD m, acc
-    LDA m : BEQ done
-    FP_INDEX m
-    FP_ADD acc
-.done
+LVZ_A0 = 1 : LVZ_A1 = 10 : LVZ_A2 = 18 : LVZ_B0 = 5 : LVZ_B1 = 13 : LVZ_B2 = 21
+\ LV_SET_CA c0, c1, c2: cache slot Y's coordinate (c0,Y c1,Y c2,Y) = 64 u m
+MACRO LV_SET_CA c0, c1, c2
+.a0 LDA fq0,X
+    SEC
+.b0 SBC fq0,X
+    STA c0,Y
+.a1 LDA fq1,X
+.b1 SBC fq1,X
+    STA c1,Y
+.a2 LDA fq2,X
+.b2 SBC fq2,X
+    STA c2,Y
+    ASSERT a0 + 1 - a0 = LVC_A0 AND a1 + 1 - a0 = LVC_A1 AND a2 + 1 - a0 = LVC_A2
+    ASSERT b0 + 1 - a0 = LVC_B0 AND b1 + 1 - a0 = LVC_B1 AND b2 + 1 - a0 = LVC_B2
 ENDMACRO
+LVC_A0 = 1 : LVC_A1 = 11 : LVC_A2 = 20 : LVC_B0 = 5 : LVC_B1 = 14 : LVC_B2 = 23
+\ LV_ADD_CA s, c0, c1, c2: cache slot Y's coordinate = s (zero page) + 64 u m
+MACRO LV_ADD_CA s, c0, c1, c2
+.st LDA s
+    CLC
+.a0 ADC fq0,X
+    STA s
+    LDA s+1
+.a1 ADC fq1,X
+    STA s+1
+    LDA s+2
+.a2 ADC fq2,X
+    STA s+2
+    LDA s
+    SEC
+.b0 SBC fq0,X
+    STA c0,Y
+    LDA s+1
+.b1 SBC fq1,X
+    STA c1,Y
+    LDA s+2
+.b2 SBC fq2,X
+    STA c2,Y
+    ASSERT a0 + 1 - st = LVA_A0 AND a1 + 1 - st = LVA_A1 AND a2 + 1 - st = LVA_A2
+    ASSERT b0 + 1 - st = LVA_B0 AND b1 + 1 - st = LVA_B1 AND b2 + 1 - st = LVA_B2
+ENDMACRO
+LVA_A0 = 4 : LVA_A1 = 11 : LVA_A2 = 18 : LVA_B0 = 26 : LVA_B1 = 34 : LVA_B2 = 42
 ASSERT 4096 * 127 < &800000             ; (a level camera's y: 4096 py)
+ASSERT fq1 = fq0 + &100 AND fq2 = fq1 + &100
 
-\ fill_point: cache slot Y = M (64 p), p = (px, py, pz) in cells; the
-\ vector left in fill_acc too (fill_edge's likewise), for the bounds.
+\ fill_point: cache slot Y = M (64 p), p = (px, py, pz) in cells.
 ZA_AUTO 9, fill_acc
 .fill_point
 {
@@ -291,29 +374,21 @@ ZA_AUTO 9, fill_acc
     LDA mat_tilt : BEQ level
     JMP tilted
 .level
-    \ a level camera's M: its y row and column (0, 64, 0), so y is 4096 py,
-    \ and x and z take two entries each of px's column and pz's
-    STZ acc+3
-    LDA py : ASL A : ASL A : ASL A : ASL A : STA acc+4
-    LDA py : LSR A : LSR A : LSR A : LSR A : STA acc+5
-    LDA px : BNE level_x
-    STZ acc+0 : STZ acc+1 : STZ acc+2
-    STZ acc+6 : STZ acc+7 : STZ acc+8
-    BRA level_z
-.level_x
-    CLC : ADC #64 : STA u64
-    LEVEL_SET M00, acc+0
-    LEVEL_SET M20, acc+6
-.level_z
-    LDA pz : BNE level_pz
-    JMP level_done
-.level_pz
-    CLC : ADC #64 : STA u64
-    LEVEL_ADD M02, acc+0
-    LEVEL_ADD M22, acc+6
-.level_done
-    LDY slot
-    JMP store
+    \ a level camera's (above, "A level camera's fills"), into slot Y
+    LDX px
+.lv_x0
+    LV_SET_ZP acc                       ; M00 px
+.lv_z0
+    LV_SET_ZP acc+6                     ; M20 px
+    LDX pz
+.lv_x1
+    LV_ADD_CA acc, ca_x0, ca_x1, ca_x2  ; plus M02 pz
+.lv_z1
+    LV_ADD_CA acc+6, ca_z0, ca_z1, ca_z2    ; plus M22 pz
+    LDA #0 : STA ca_y0,Y
+    LDA py : ASL A : ASL A : ASL A : ASL A : STA ca_y1,Y
+    LDA py : LSR A : LSR A : LSR A : LSR A : STA ca_y2,Y
+    RTS
 .tilted
     \ a column at a time, past a zero cell or a zero entry of M
     FOR k = 0..8
@@ -360,6 +435,40 @@ ZA_AUTO 9, fill_acc
     JSR andy_fill_slow_point            ; (Y kept)
     JMP fill_point.store
 .fast
+    LDY mat_tilt : BEQ level
+    JMP tilted
+.level
+    \ a level camera's (above, "A level camera's fills"), into slot Y
+    LDY slot
+    CPX #1 : BEQ up : BCC along_x
+    JMP along_z
+.along_x
+    TAX
+.lv_xx
+    LV_SET_CA ca_x0, ca_x1, ca_x2       ; M00 A
+.lv_xz
+    LV_SET_CA ca_z0, ca_z1, ca_z2       ; M20 A
+    LDA #0 : STA ca_y0,Y : STA ca_y1,Y : STA ca_y2,Y
+    RTS
+.up
+    \ 4096 A
+    TAX
+    LDA #0
+    STA ca_x0,Y : STA ca_x1,Y : STA ca_x2,Y
+    STA ca_z0,Y : STA ca_z1,Y : STA ca_z2,Y
+    STA ca_y0,Y
+    TXA : ASL A : ASL A : ASL A : ASL A : STA ca_y1,Y
+    TXA : LSR A : LSR A : LSR A : LSR A : STA ca_y2,Y
+    RTS
+.along_z
+    TAX
+.lv_zx
+    LV_SET_CA ca_x0, ca_x1, ca_x2       ; M02 A
+.lv_zz
+    LV_SET_CA ca_z0, ca_z1, ca_z2       ; M22 A
+    LDA #0 : STA ca_y0,Y : STA ca_y1,Y : STA ca_y2,Y
+    RTS
+.tilted
     CLC : ADC #64 : STA u64
     LDA mat + 0,X : STA col
     LDA mat + 3,X : STA col+1
@@ -377,6 +486,30 @@ ZA_AUTO 9, fill_acc
     NEXT
     LDY slot
     JMP fill_point.store
+}
+
+\ fill_patch: a level camera's fills' bases (above, "A level camera's
+\ fills") for M, as it's built: + m's 64 + m, - m's 64 - m.
+MACRO LV_PATCH site, m, a0, a1, a2, b0, b1, b2
+    LDA m : CLC : ADC #64
+    STA site + a0 : STA site + a1 : STA site + a2
+    LDA #64 : SEC : SBC m
+    STA site + b0 : STA site + b1 : STA site + b2
+ENDMACRO
+.fill_patch
+{
+    LDA mat_tilt : BEQ level
+    RTS
+.level
+    LV_PATCH fill_point.lv_x0, M00, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
+    LV_PATCH fill_point.lv_z0, M20, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
+    LV_PATCH fill_point.lv_x1, M02, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
+    LV_PATCH fill_point.lv_z1, M22, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
+    LV_PATCH fill_edge.lv_xx, M00, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH fill_edge.lv_xz, M20, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH fill_edge.lv_zx, M02, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH fill_edge.lv_zz, M22, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    RTS
 }
 
 \ An entry of M can be 65 (rounding), and then f64's indices can run off
@@ -440,8 +573,7 @@ SECTION ObjAndy
 ENDSECTION
 SECTION ObjCode
 
-\ transform_fill: object X's cache, from fresh slots, and its bounds
-\ (bound_fill).
+\ transform_fill: object X's cache, from fresh slots.
 .transform_fill
 {
     ZA_AUTO1 obj, slot, n, k, j
@@ -459,13 +591,11 @@ SECTION ObjCode
     CLC : ADC n : STA slot_next
     LDA cache_gen : STA ob_stamp,X
     LDA ob_flags,X : AND #K_MASK : CMP #K_GENERIC : BEQ generic
-    \ a box's corner, or a sensor's point: its bounds, a box's raised by
-    \ its edges' as they come
+    \ a box's corner, or a sensor's point
     LDA ob_lx,X : STA fill_point.px
     LDA ob_ly,X : STA fill_point.py
     LDA ob_lz,X : STA fill_point.pz
     LDY slot : JSR fill_point
-    JSR bd_eval
     LDX obj
     LDA ob_flags,X : AND #K_MASK : CMP #K_SENSOR : BEQ done
     \ the box's edges: each axis but a rectangle's zero one, in order
@@ -487,20 +617,15 @@ SECTION ObjCode
     LDX k
     INC slot : LDY slot
     JSR fill_edge
-    LDY k : JSR bd_edge                 ; (added to the bounds it raises)
 .edge_next
     INC k : LDA k : CMP #3 : BNE edge
 .done
-    LDX obj
-    JMP bd_put
+    RTS
 .generic
-    \ each vertex's slot, and the bounds the greatest of theirs; a vertex
-    \ the one before it again (a pointed pyramid's apex, three times over)
-    \ takes that one's slot's vector, and can't raise them
+    \ each vertex's slot; a vertex the one before it again (a pointed
+    \ pyramid's apex, three times over) takes that one's slot's vector
     LDA ob_aux,X : STA j
     LDX j : JSR gen_fill
-    JSR bd_eval
-    LDX obj : JSR bd_put
     BRA kept
 .vertex
     LDX j
@@ -520,7 +645,6 @@ SECTION ObjCode
     BRA kept
 .fresh
     JSR gen_fill
-    LDX obj : JSR bd_max
 .kept
     INC slot : INC j
     DEC n : BNE vertex
@@ -541,175 +665,211 @@ SECTION ObjCode
 \ functions of a camera-space point, L 3x + 2z, R 2z - 3x and T z - 3y, is
 \ zero on a plane through the eye beyond one of the view's sides, so an
 \ object with every vertex where one is negative can't be seen, and
-\ objects_frame passes it over. A vertex's value is the function of M v less
-\ its value of M c, so an object's greatest, over its vertices, of M v's is
-\ kept with its cache, which the orientation alone sets, made by
-\ transform_fill as it fills each slot, from fill_acc (into bd_k), and the
-\ frame's of M c is made once (bound_frame, into bd_mc): an object with a
-\ bound below M c's is beyond the view. A box's greatest is at its corner
-\ plus each edge that raises it, by the edge's axis (bd_sel, from M:
-\ src/matrix.6502's bound_sel): bd_eval, each edge by bd_edge, then
-\ bd_put; any other object's is the greatest of its vertices' (bd_eval and
-\ bd_put, then bd_max). An object's bounds fit 23 bits signed (the model
-\ asserts: BOUND_BITS), so 24-bit arithmetic is exact for them and their
-\ edges' terms, and M c's, made in 32 bits, are saturated to 24, which keeps
-\ their order with every object's.
+\ objects_frame passes it over. Such a function F of a vertex is F(M v)
+\ less F(M c), and F(M v) is linear in v's cells u: 64 (phi . u), phi F
+\ of M's columns. So an object's greatest F(M v) over its vertices is 64
+\ times its greatest phi . u, which over a box's corners is phi's terms
+\ each with the box's high cell where phi is positive, else its low: three
+\ products of a cell by a coefficient (bound_box, which bound_patch patches
+\ for M), from the cells alone, so an object passed over is never filled.
+\ A cuboid, a rectangle and a sensor are a box each, a pyramid two (its
+\ base's and its apex's rectangles, each from two opposite corners), and
+\ any other object a box a vertex (bound_object). Each of bound_box's
+\ products is biased by &8000, so that its sums are unsigned, and an object
+\ keeps 64 times its greatest sum, B. The frame's F(M c) is made once
+\ (bound_frame); 64 S < F(M c) exactly when 64 S < 64 ceil(F(M c) / 64), so
+\ it keeps that plus 64 times the same bias: an object whose B is below the
+\ frame's is beyond the view.
 BD_L = 0 : BD_R = 1 : BD_T = 2
 BD_N = 3
 ASSERT 3 * PROJ_XC < 2 * VIEW_FX AND 3 * PROJ_YC < VIEW_FY     ; (each plane beyond the view's side)
 
-\ bd_eval: bd_f's three (L, R, T, 24-bit each, their top bytes' sign bits
-\ flipped, which adding to them keeps) of fill_acc's vector, from u = 3x, w
-\ = 2z and t = 3y: L w + u, R w - u, T z - t. X kept.
-bd_v = fill_acc
-.bd_eval
-{
-    ZA_AUTO 3, u, w, t
-    LDA bd_v : ASL A : STA u
-    LDA bd_v+1 : ROL A : STA u+1
-    LDA bd_v+2 : ROL A : STA u+2
-    LDA u : CLC : ADC bd_v : STA u
-    LDA u+1 : ADC bd_v+1 : STA u+1
-    LDA u+2 : ADC bd_v+2 : STA u+2
-    LDA bd_v+3 : ASL A : STA t
-    LDA bd_v+4 : ROL A : STA t+1
-    LDA bd_v+5 : ROL A : STA t+2
-    LDA t : CLC : ADC bd_v+3 : STA t
-    LDA t+1 : ADC bd_v+4 : STA t+1
-    LDA t+2 : ADC bd_v+5 : STA t+2
-    LDA bd_v+6 : ASL A : STA w
-    LDA bd_v+7 : ROL A : STA w+1
-    LDA bd_v+8 : ROL A : STA w+2
-    CLC
-    LDA w : ADC u : STA bd_f + 3 * BD_L
-    LDA w+1 : ADC u+1 : STA bd_f + 3 * BD_L + 1
-    LDA w+2 : ADC u+2 : EOR #&80 : STA bd_f + 3 * BD_L + 2
+\ bound_box's terms. BB_FIRST f, k: bound f of bb_s = u phi + &8000; BB_ADD
+\ f, k: plus that, or nothing (bound_patch's skip, for a phi of 0). u is
+\ cell k of bb_lo, or of bb_hi (bound_patch picks, by phi's sign), phi
+\ bound f's coefficient on axis k, and u phi = f(u + phi) - f(u - phi) by the
+\ maths' quarter squares, f(n) = n * n DIV 4, from bases bound_patch sets.
+\ Each term has the same layout from its start: the skip's operand (BB_ADD's
+\ alone) at BB_SK, the cell's at BB_UX, the low bytes' bases at BB_A0 and
+\ BB_B0, and the high bytes' BB_HI on from each.
+BB_SK = 1 : BB_UX = 3 : BB_A0 = 7 : BB_B0 = 10 : BB_HI = 8
+MACRO BB_FIRST f, k
+.sk STZ bb_s + 3 * f + 2
+.ux LDX bb_lo + k
     SEC
-    LDA w : SBC u : STA bd_f + 3 * BD_R
-    LDA w+1 : SBC u+1 : STA bd_f + 3 * BD_R + 1
-    LDA w+2 : SBC u+2 : EOR #&80 : STA bd_f + 3 * BD_R + 2
+.a0 LDA sq_lo,X
+.b0 SBC sq_lo,X
+    STA bb_s + 3 * f
+.a1 LDA sq_hi,X
+.b1 SBC sq_hi,X
+    EOR #&80
+    STA bb_s + 3 * f + 1
+    ASSERT ux + 1 - sk = BB_UX AND a0 + 1 - sk = BB_A0 AND b0 + 1 - sk = BB_B0
+    ASSERT a1 - a0 = BB_HI AND b1 - b0 = BB_HI
+ENDMACRO
+MACRO BB_ADD f, k
+.sk BRA site                            ; patched: past the term
+    ZA_CANJUMP site, done
+.site
+.ux LDX bb_lo + k
     SEC
-    LDA bd_v+6 : SBC t : STA bd_f + 3 * BD_T
-    LDA bd_v+7 : SBC t+1 : STA bd_f + 3 * BD_T + 1
-    LDA bd_v+8 : SBC t+2 : EOR #&80 : STA bd_f + 3 * BD_T + 2
+.a0 LDA sq_lo,X
+.b0 SBC sq_lo,X
+    STA bb_t
+.a1 LDA sq_hi,X
+.b1 SBC sq_hi,X
+    EOR #&80
+    TAY
+    LDA bb_t : CLC : ADC bb_s + 3 * f : STA bb_s + 3 * f
+    TYA : ADC bb_s + 3 * f + 1 : STA bb_s + 3 * f + 1
+    BCC done
+    INC bb_s + 3 * f + 2
+.done
+    ASSERT sk + 1 - sk = BB_SK AND ux + 1 - sk = BB_UX AND a0 + 1 - sk = BB_A0 AND b0 + 1 - sk = BB_B0
+    ASSERT a1 - a0 = BB_HI AND b1 - b0 = BB_HI AND done - site = BB_SKIP
+ENDMACRO
+BB_SKIP = 37
+ZA_AUTO 3 * BD_N, bb_s
+ZA_AUTO1 bb_t
+
+\ bound_box: bb_s = the three bounds of the box bb_lo to bb_hi, in cells,
+\ each the sum of its terms (BB_FIRST's and BB_ADD's not skipped: bb_bias)
+\ biased by &8000 a term. Clobbers A, X, Y.
+.bound_box
+.bb_t00 BB_FIRST BD_L, 0
+.bb_t01 BB_ADD BD_L, 1
+.bb_t02 BB_ADD BD_L, 2
+.bb_t10 BB_FIRST BD_R, 0
+.bb_t11 BB_ADD BD_R, 1
+.bb_t12 BB_ADD BD_R, 2
+.bb_t20 BB_FIRST BD_T, 0
+.bb_t21 BB_ADD BD_T, 1
+.bb_t22 BB_ADD BD_T, 2
     RTS
-}
-ZA_AUTO 3 * BD_N, bd_f
 ASSERT BD_L = 0 AND BD_R = 1 AND BD_T = 2 AND BD_N = 3
 
-\ bd_put: object X's bounds = bd_f. X kept.
-.bd_put
+\ BD_STORE s: object X's bounds = 64 times s's three (each below 2^18, so
+\ the product fits 24 bits); s clobbered
+MACRO BD_STORE s
     FOR p = 0..BD_N - 1
-        LDA bd_f + 3 * p : STA bd_k0 + p * N_OBJ,X
-        LDA bd_f + 3 * p + 1 : STA bd_k1 + p * N_OBJ,X
-        LDA bd_f + 3 * p + 2 : STA bd_k2 + p * N_OBJ,X
+        LDA #0
+        LSR s + 3 * p + 2 : ROR s + 3 * p + 1 : ROR s + 3 * p : ROR A
+        LSR s + 3 * p + 2 : ROR s + 3 * p + 1 : ROR s + 3 * p : ROR A
+        STA bd_k0 + p * N_OBJ,X
+        LDA s + 3 * p : STA bd_k1 + p * N_OBJ,X
+        LDA s + 3 * p + 1 : STA bd_k2 + p * N_OBJ,X
+    NEXT
+ENDMACRO
+
+\ bound_object: object X's bounds (bd_k), as its kind takes them; X kept.
+.bound_object
+{
+    ZA_AUTO1 obj, j, end
+    STX obj
+    LDA cache_gen : STA ob_bstamp,X
+    LDA ob_flags,X : AND #K_MASK : CMP #K_GENERIC : BNE box
+    JMP generic
+.box
+    \ a box: a cuboid's, a rectangle's (its size on its axis 0), a sensor's
+    \ point (its high corner its low)
+    FOR k = 0..2
+        LDA ob_lx + k * N_OBJ,X : STA bb_lo + k
+        LDA ob_hx + k * N_OBJ,X : STA bb_hi + k
+    NEXT
+    JSR bound_box
+    LDX obj
+    BD_STORE bb_s
+    RTS
+.generic
+    LDY ob_aux,X : STY j
+    LDA ob_nv,X : CMP #8 : BNE vertices
+    \ a pyramid: its base's rectangle, vertices 0 to 3, from 0 and 2, and its
+    \ apex's, 4 to 7, from 4 and 6 (tools/model/objects.py's order: each
+    \ rectangle's corners in turn round it)
+    JSR rect
+    JSR bound_box
+    JSR bm_put
+    LDA j : CLC : ADC #4 : TAY
+    JSR rect
+    JSR bound_box
+    JSR bm_max
+    BRA done
+.vertices
+    \ any other generic object: a box a vertex
+    TYA : CLC : ADC ob_nv,X : STA end
+    JSR vertex
+    JSR bound_box
+    JSR bm_put
+.next
+    INC j
+    LDY j : CPY end : BEQ done
+    JSR vertex
+    JSR bound_box
+    JSR bm_max
+    BRA next
+.done
+    LDX obj
+    BD_STORE bm
+    RTS
+\ vertex: the box generic vertex Y alone
+.vertex
+    FOR k = 0..2
+        LDA gv_x + k * N_GV,Y : STA bb_lo + k : STA bb_hi + k
     NEXT
     RTS
-
-\ bd_max: object X's bounds the greater of theirs and fill_acc's (a generic
-\ object's later vertices), by the flipped top bytes' unsigned order. X
-\ kept.
-.bd_max
-    JSR bd_eval
+\ rect: the box from generic vertex Y to Y + 2, on each axis the lesser and
+\ the greater
+.rect
+    FOR k = 0..2
+        LDA gv_x + k * N_GV,Y : CMP gv_x + k * N_GV + 2,Y : BCC ordered
+        STA bb_hi + k
+        LDA gv_x + k * N_GV + 2,Y : STA bb_lo + k
+        BRA rect_next
+    .ordered
+        STA bb_lo + k
+        LDA gv_x + k * N_GV + 2,Y : STA bb_hi + k
+    .rect_next
+    NEXT
+    RTS
+\ bm_put: bm = bb_s; bm_max: bm the greater of the two, each bound
+.bm_put
+    FOR i = 0..3 * BD_N - 1
+        LDA bb_s + i : STA bm + i
+    NEXT
+    RTS
+.bm_max
     FOR p = 0..BD_N - 1
-        LDA bd_k0 + p * N_OBJ,X : CMP bd_f + 3 * p
-        LDA bd_k1 + p * N_OBJ,X : SBC bd_f + 3 * p + 1
-        LDA bd_k2 + p * N_OBJ,X : SBC bd_f + 3 * p + 2
+        LDA bm + 3 * p : CMP bb_s + 3 * p
+        LDA bm + 3 * p + 1 : SBC bb_s + 3 * p + 1
+        LDA bm + 3 * p + 2 : SBC bb_s + 3 * p + 2
         BCS kept
-        LDA bd_f + 3 * p : STA bd_k0 + p * N_OBJ,X
-        LDA bd_f + 3 * p + 1 : STA bd_k1 + p * N_OBJ,X
-        LDA bd_f + 3 * p + 2 : STA bd_k2 + p * N_OBJ,X
+        LDA bb_s + 3 * p : STA bm + 3 * p
+        LDA bb_s + 3 * p + 1 : STA bm + 3 * p + 1
+        LDA bb_s + 3 * p + 2 : STA bm + 3 * p + 2
     .kept
     NEXT
     RTS
-
-\ BD_ADD p, s: bd_f's bound p plus s (24-bit, zero page)
-MACRO BD_ADD p, s
-    CLC
-    LDA bd_f + 3 * p : ADC s : STA bd_f + 3 * p
-    LDA bd_f + 3 * p + 1 : ADC s+1 : STA bd_f + 3 * p + 1
-    LDA bd_f + 3 * p + 2 : ADC s+2 : STA bd_f + 3 * p + 2
-ENDMACRO
-
-\ bd_edge: fill_acc's vector, a box's edge along axis Y, added to each of
-\ bd_f's bounds it raises (bd_sel's bit for the axis): L and R from u = 3x
-\ and w = 2z, T from z and t = 3y, which under a level camera (mat_tilt 0)
-\ is 0 along x or z (as transform_object's copies have it), and along y
-\ raises none of them. X kept.
-.bd_edge
-{
-    ZA_AUTO1 bit
-    ZA_AUTO 3, u, w, s
-    LDA bit8,Y : STA bit
-    LDA bd_sel + BD_L : ORA bd_sel + BD_R : AND bit : BNE lr
-    JMP no_lr
-.lr
-    LDA bd_v : ASL A : STA u
-    LDA bd_v+1 : ROL A : STA u+1
-    LDA bd_v+2 : ROL A : STA u+2
-    LDA u : CLC : ADC bd_v : STA u
-    LDA u+1 : ADC bd_v+1 : STA u+1
-    LDA u+2 : ADC bd_v+2 : STA u+2
-    LDA bd_v+6 : ASL A : STA w
-    LDA bd_v+7 : ROL A : STA w+1
-    LDA bd_v+8 : ROL A : STA w+2
-    LDA bd_sel + BD_L : AND bit : BEQ no_l
-    CLC
-    LDA w : ADC u : STA s
-    LDA w+1 : ADC u+1 : STA s+1
-    LDA w+2 : ADC u+2 : STA s+2
-    BD_ADD BD_L, s
-.no_l
-    LDA bd_sel + BD_R : AND bit : BEQ no_lr
-    SEC
-    LDA w : SBC u : STA s
-    LDA w+1 : SBC u+1 : STA s+1
-    LDA w+2 : SBC u+2 : STA s+2
-    BD_ADD BD_R, s
-.no_lr
-    LDA bd_sel + BD_T : AND bit : BEQ done
-    \ T: z less t = 3y (into u: w is done with), or z alone when t is 0
-    LDA mat_tilt : BNE tilted
-    BD_ADD BD_T, bd_v+6
-.done
-    RTS
-.tilted
-    LDA bd_v+3 : ASL A : STA u
-    LDA bd_v+4 : ROL A : STA u+1
-    LDA bd_v+5 : ROL A : STA u+2
-    LDA u : CLC : ADC bd_v+3 : STA u
-    LDA u+1 : ADC bd_v+4 : STA u+1
-    LDA u+2 : ADC bd_v+5 : STA u+2
-    SEC
-    LDA bd_v+6 : SBC u : STA s
-    LDA bd_v+7 : SBC u+1 : STA s+1
-    LDA bd_v+8 : SBC u+2 : STA s+2
-    BD_ADD BD_T, s
-    RTS
 }
+ZA_AUTO 3 * BD_N, bm
 
-\ BD_SAT p, v: bd_mc's bound p = v (32-bit), saturated to 24 bits, its top
-\ byte's sign bit flipped
-MACRO BD_SAT p, v
-    LDA v+2 : ASL A : LDA #0 : ADC #&FF : EOR #&FF  ; (byte 2's sign, extended)
-    CMP v+3 : BEQ fits
-    LDA v+3 : BMI low
-    LDA #&FF : STA bd_mc + 3 * p : STA bd_mc + 3 * p + 1
-    STA bd_mc + 3 * p + 2                           ; (&7FFFFF)
+\ BD_CEIL p, v: bd_mc's bound p from v (32-bit signed), M c's bound p: 64
+\ ceil(v / 64), plus 64 times bound p's bias (bb_bias), saturated to 24
+\ bits unsigned
+MACRO BD_CEIL p, v
+    LDA v : CLC : ADC #63 : AND #&C0 : STA bd_mc + 3 * p
+    LDA v+1 : ADC #0 : STA bd_mc + 3 * p + 1
+    LDA v+2 : ADC bb_bias + p : STA bd_mc + 3 * p + 2
+    LDA v+3 : ADC #0 : BEQ done
+    BMI low
+    LDA #&FF : STA bd_mc + 3 * p : STA bd_mc + 3 * p + 1 : STA bd_mc + 3 * p + 2
     BRA done
 .low
-    STZ bd_mc + 3 * p : STZ bd_mc + 3 * p + 1
-    STZ bd_mc + 3 * p + 2                           ; (&800000)
-    BRA done
-.fits
-    LDA v : STA bd_mc + 3 * p
-    LDA v+1 : STA bd_mc + 3 * p + 1
-    LDA v+2 : EOR #&80 : STA bd_mc + 3 * p + 2
+    STZ bd_mc + 3 * p : STZ bd_mc + 3 * p + 1 : STZ bd_mc + 3 * p + 2
 .done
 ENDMACRO
 
-\ bound_frame: bd_mc = the three bounds of M c (bd_eval's, in 32 bits: M c
-\ isn't an object's), each saturated to 24 bits.
+\ bound_frame: bd_mc = the three bounds of M c, made in 32 bits (M c isn't
+\ an object's), each as BD_CEIL keeps it.
 .bound_frame
 {
     ZA_AUTO 4, u, w, t, f
@@ -740,21 +900,21 @@ ENDMACRO
     LDA w+1 : ADC u+1 : STA f+1
     LDA w+2 : ADC u+2 : STA f+2
     LDA w+3 : ADC u+3 : STA f+3
-    BD_SAT BD_L, f
+    BD_CEIL BD_L, f
     \ R = w - u
     SEC
     LDA w : SBC u : STA f
     LDA w+1 : SBC u+1 : STA f+1
     LDA w+2 : SBC u+2 : STA f+2
     LDA w+3 : SBC u+3 : STA f+3
-    BD_SAT BD_R, f
+    BD_CEIL BD_R, f
     \ T = z - t
     SEC
     LDA mc+6 : SBC t : STA f
     LDA mc+7 : SBC t+1 : STA f+1
     LDA mc+8 : SBC t+2 : STA f+2
     LDA zs : SBC t+3 : STA f+3
-    BD_SAT BD_T, f
+    BD_CEIL BD_T, f
     RTS
 }
 

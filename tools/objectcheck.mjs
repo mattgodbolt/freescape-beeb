@@ -6,7 +6,7 @@
 //   node tools/objectcheck.mjs BUILD [--db build/logic6502/LOGIC] [--cases CASES.json]
 //                              [--areas build/gen/areas.json] [--entrance]
 //                              [--view TEXT] [--verbose] [--json OUT]
-//                              [--profile | --profile-walks] [--floor] [--candidates]
+//                              [--profile | --profile-walks | --profile-turns] [--floor] [--candidates]
 //
 // BUILD holds the check build (OCODE, into the front end's bank, OANDY, into
 // ANDY, OMORE, OCHECK, OAREA, OCONST, OMATHS, OTABLES, ACONV, symbols.json)
@@ -158,6 +158,7 @@ const STAGES = [
     ["transform_setup", "transform"],
     ["transform_object", "transform"],
     ["transform_fill", "transform"],
+    ["bound_object", "transform"],
     ["near_clip", "near"],
     ["guard_clip", "guard"],
     ["project", "project"],
@@ -183,7 +184,10 @@ const STAGE_NAMES = [...new Set(STAGES.map(([, s]) => s)), "frame"];
 // --profile-walks, over the walks' steps alone (the frames that only move).
 // --fine: by every label, scoped ones too; --top N: the N largest.
 const walksOnly = args.includes("--profile-walks");
-const profile = args.includes("--profile") || walksOnly ? new Map() : null;
+// --profile-turns: over the entrance views alone (each a turn: the cache
+// refilled)
+const turnsOnly = args.includes("--profile-turns");
+const profile = args.includes("--profile") || walksOnly || turnsOnly ? new Map() : null;
 const fine = args.includes("--fine");
 let profiling = false;
 const routines = [];
@@ -224,6 +228,14 @@ m.tm.processor.debugInstruction.add((at) => {
         strayRuns.push(`&${at.toString(16)} (${m.paged(at) === "andy" ? "ANDY" : `bank ${m.paged(at)}`})`);
     if (lastPc >= 0) {
         tally[current] = (tally[current] || 0) + (now - lastCycles);
+        if (fill) {
+            if (cpu.s > fill.sp) {
+                fills[fill.kind] = fills[fill.kind] || { n: 0, cycles: 0 };
+                fills[fill.kind].n++;
+                fills[fill.kind].cycles += now - fill.t;
+                fill = null;
+            }
+        }
         if (inFloor) floorTally[current] = (floorTally[current] || 0) + (now - lastCycles);
         if (profiling) {
             const r = routineOf(lastPc);
@@ -238,6 +250,10 @@ m.tm.processor.debugInstruction.add((at) => {
     current = stack.length ? stack[stack.length - 1].stage : "frame";
     const w = watches.get(pc);
     if (w) w();
+    if (fillsWanted && fillsOn && pc === fillAt && !fill) {
+        const kind = ["cuboid", "rectangle", "generic", "sensor"][arr("ob_flags", cpu.x) & 3];
+        fill = { kind: kind === "generic" ? `generic, ${arr("ob_nv", cpu.x)} vertices` : kind, t: now, sp: cpu.s };
+    }
     const k = callees.get(pc);
     if (k) calls[k] = (calls[k] || 0) + 1;
     // each candidate's cycles, from its turn in objects_frame's loop to the
@@ -251,6 +267,13 @@ m.tm.processor.debugInstruction.add((at) => {
     else if (pc === sortAt) inFloor = false;
     return false;
 });
+// --fills: each transform_fill's cycles (its bounds' too), by the object's
+// kind, over the entrance views (each a turn)
+const fillsWanted = args.includes("--fills");
+const fillAt = has("transform_fill") ? K("transform_fill") : -1;
+let fill = null;
+let fillsOn = false;
+const fills = {};
 let inFloor = false;
 let floorTally = {};
 let floorSlot = null;
@@ -364,7 +387,9 @@ for (const view of views) {
     badWrites.length = 0;
     strayRuns.length = 0;
     floorSlot = view.floor ?? null;
-    profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name));
+    profiling = profile !== null && (!walksOnly || /-w\d+$/.test(view.name)) &&
+        (!turnsOnly || /^a\d+-e\d+$/.test(view.name));
+    fillsOn = /^a\d+-e\d+$/.test(view.name);
     const { total, stages, calls: made, floor, cands: drawing } = await counted(S(full ? "check_frame" : "check_pass"));
     const name = view.name;
     if (badWrites.length) fail(`${name}: wrote outside its memory at ${badWrites.map((a) => "&" + a.toString(16)).join(" ")}`);
@@ -548,10 +573,18 @@ console.log(
 );
 if (profile) {
     const total = [...profile.values()].reduce((a, b) => a + b, 0);
-    const n = walksOnly ? results.filter((r) => /-w\d+$/.test(r.name)).length : results.length;
-    console.log(`profile: cycles by routine over ${n} ${walksOnly ? "walk steps" : "views"}`);
+    const n = walksOnly ? results.filter((r) => /-w\d+$/.test(r.name)).length
+        : turnsOnly ? results.filter((r) => r.entrance).length : results.length;
+    console.log(`profile: cycles by routine over ${n} ${walksOnly ? "walk steps" : turnsOnly ? "turns" : "views"}`);
     for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("--top") ?? 40)))
         console.log(`  ${r.padEnd(20)} ${String(Math.round(c / n)).padStart(9)} a view  ${((100 * c) / total).toFixed(1)}%`);
+}
+if (fillsWanted) {
+    const turns = results.filter((r) => r.entrance).length;
+    console.log(`fills over ${turns} turns: by kind, fills and cycles a turn, and cycles a fill`);
+    for (const [k, f] of Object.entries(fills).sort((a, b) => b[1].cycles - a[1].cycles))
+        console.log(`  ${k.padEnd(22)} ${(f.n / turns).toFixed(2).padStart(6)} ${String(Math.round(f.cycles / turns)).padStart(7)}` +
+            ` ${String(Math.round(f.cycles / f.n)).padStart(6)}`);
 }
 if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify(results, null, 1) + "\n");
 if (failures) {
