@@ -89,7 +89,7 @@ PLANE, ALWAYS = 6, 7
 # The working copy's arrays: (name, index space).
 SPACES = ["obj", "face", "plane", "gv", "sensor"]
 ARRAYS = [
-    ("ob_flags", "obj"), ("ob_id", "obj"),
+    ("ob_flags", "obj"),
     ("ob_blx", "obj"), ("ob_bly", "obj"), ("ob_blz", "obj"),
     ("ob_bhx", "obj"), ("ob_bhy", "obj"), ("ob_bhz", "obj"),
     ("ob_lx", "obj"), ("ob_ly", "obj"), ("ob_lz", "obj"),
@@ -338,7 +338,7 @@ def add_object(rec, loops, index, obj):
     nf = rec.count("face") - f0
     assert 1 <= nf <= 8
     vals = {
-        "ob_flags": flags, "ob_id": obj["id"],
+        "ob_flags": flags,
         "ob_blx": bounds[0][0], "ob_bly": bounds[0][1], "ob_blz": bounds[0][2],
         "ob_bhx": bounds[1][0], "ob_bhy": bounds[1][1], "ob_bhz": bounds[1][2],
         "ob_lx": box[0][0], "ob_ly": box[0][1], "ob_lz": box[0][2],
@@ -552,11 +552,14 @@ def emit(db, loops, globals_rec, areas, gbytes, out6502, outjson):
     w(".lp_table")
     L.extend(equb_lines(loops.table))
     w("\\ The original's sine table (tables.sin, tables.cos): 72 steps of 5")
-    w("\\ degrees, signed bytes, 1.0 = 64.")
+    w("\\ degrees, signed bytes, 1.0 = 64. The cosine is the sine a quarter turn")
+    w("\\ on, so one table serves both: the sine's first quarter again at its end.")
+    sin, cos = db["tables"]["sin"], db["tables"]["cos"]
+    quarter = len(sin) // 4
+    assert len(sin) == 72 and cos == sin[quarter:] + sin[:quarter]
     w(".sin_table")
-    w("    EQUB " + ", ".join(str(v & 255) for v in db["tables"]["sin"]))
-    w(".cos_table")
-    w("    EQUB " + ", ".join(str(v & 255) for v in db["tables"]["cos"]))
+    w("    EQUB " + ", ".join(str(v & 255) for v in sin + sin[:quarter]))
+    w("cos_table = sin_table + %d" % quarter)
     w("ENDSECTION")
     w("")
     w("SECTION AreaConv")

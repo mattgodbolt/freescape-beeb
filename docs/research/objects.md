@@ -468,7 +468,7 @@ Faces nearest first, in the rasteriser's input's shape
   `&3000-&7FFF` while the screen's X bit is set, nor in sideways RAM.
 - **The logic** hides and shows by `ob_state`'s bit 7, or, with
   `OBJ_LOGIC`, by its own `ix_flags` at each slot's `ob_ix`; it finds slots
-  by `ob_id`, and must call `area_enter` again after loading an area (the
+  by `ob_ix` (the working copy keeps no object id), and must call `area_enter` again after loading an area (the
   rig's parts move) and `cache_reset` if it moves an object otherwise.
 - **Sections** (each placed by the build's memory map; the check build's
   in `mk/objects.mk`, where the live disc has the code): `ObjCode` (this

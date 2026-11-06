@@ -42,7 +42,7 @@
 \   OBJ_LOGIC       the logic is there: the object pass takes what's hidden
 \                   from its ix_flags (bit 6 invisible, bit 5 destroyed), by
 \                   ob_ix; without it, from ob_state's bit 7, which the logic
-\                   would set and clear by slot (ob_id gives each slot's id)
+\                   would set and clear by slot
 \
 \ The conversion's code (AreaConv) can be in any bank: it reads a record by
 \ area_record (the area's header by area_fetch), which is in main RAM with
@@ -658,7 +658,6 @@ SECTION AreaConv
     INC ac_next + 0
     STA ob_nf,X
     LDA rec : AND #F_HIDDEN : ORA ac_kind : STA ob_flags,X
-    LDA rec + REC_ID : STA ob_id,X
     FOR k = 0..2
         LDA ac_bl + k : STA ob_blx + k * N_OBJ,X
         LDA ac_bh + k : STA ob_bhx + k * N_OBJ,X

@@ -93,8 +93,8 @@ SECTION ObjCode
     EOR #&FF : INC A
 .diff_pos
     TAY
-    LDA msq_lo,X : SEC : SBC msq_lo,Y : STA mp
-    LDA msq_hi,X : SBC msq_hi,Y : STA mp+1
+    LDA sq_lo,X : SEC : SBC sq_lo,Y : STA mp
+    LDA sq_hi,X : SBC sq_hi,Y : STA mp+1
     RTS
 }
 ZA_AUTO1 mm_a, mm_b
@@ -482,11 +482,3 @@ ASSERT HI(bb_lo) = HI(bb_hi + 2)                ; (only a cell's low byte is pat
 
 ENDSECTION
 ASSERT mmul >= obj_andy_reach AND mround >= obj_andy_reach   ; (matrix_build's, from ANDY)
-
-SECTION ObjConst
-\ Quarter squares for MMUL: n * n DIV 4, n = 0..128.
-.msq_lo
-    EQUB LO((0..128) * (0..128) DIV 4)
-.msq_hi
-    EQUB HI((0..128) * (0..128) DIV 4)
-ENDSECTION
