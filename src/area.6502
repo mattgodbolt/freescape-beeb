@@ -37,6 +37,8 @@
 \   AREA_GLOBALS    where the globals' records are, in main RAM: the
 \                   logic's (src/logic/vars.6502's Globals, which it moves);
 \                   without it, the tape's, in AreaConv
+\   AREA_PANEL      the panel's there, its code (panel_sync) in AreaConv's
+\                   bank: drawn as the beam allows after each record
 \   OBJ_LOGIC       the logic is there: the object pass takes what's hidden
 \                   from its ix_flags (bit 6 invisible, bit 5 destroyed), by
 \                   ob_ix; without it, from ob_state's bit 7, which the logic
@@ -293,6 +295,12 @@ SECTION AreaConv
     INC ac_src+1
 .read
     JSR ac_object
+    IF DEFINED(AREA_PANEL)
+        \ the panel's cells as the beam allows (src/panel.6502, in this
+        \ bank): an area's entry runs for fields, and its name and message,
+        \ wanted before it, would otherwise wait for the beam after the frame
+        JSR panel_sync
+    ENDIF
     INC ac_i
     DEC ac_n : BNE record
 .done

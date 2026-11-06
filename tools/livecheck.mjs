@@ -228,7 +228,12 @@ let idles = 0, idlesOk = 0, idlesAtEnd = 0; // (idlesAtEnd: idles when the last 
 // camera standing for a field, and the loop that ends them may draw.
 let idleSeen = false;
 const AN_ON = syms.an_on;
-const JSR = 0x20;
+const JSR = 0x20, RTI = 0x40;
+// the interrupt's cycles, from irq_handler to its RTI (the vertical sync's
+// apart from T1's): a panel cell's are left out of its own
+let irqFrom = null, irqSync = false, irqCycles = 0;
+const syncIrqCycles = [], t1IrqCycles = [];
+const SCAN_MIN = 200; // the vertical sync's cycles past which it read the keys (input_irq)
 const s16 = (v) => (v & 0x8000 ? v - 0x10000 : v);
 const camera = () => {
     const b = ram.subarray(LV_CAM, LV_CAM + 9);
@@ -354,17 +359,32 @@ cpu.debugInstruction.add((addr, opcode) => {
         if (valuesFrom !== null) valuesCycles.push(now() - valuesFrom);
         valuesFrom = null;
         onValued();
+    } else if (addr === IRQ_HANDLER) {
+        irqFrom = now();
+        irqSync = false;
+    } else if (addr === IRQ_SYNC) {
+        irqSync = true;
+    } else if (opcode === RTI && irqFrom !== null) {
+        const c = now() - irqFrom;
+        irqCycles += c;
+        irqFrom = null;
+        (irqSync ? syncIrqCycles : t1IrqCycles).push(c);
     } else if (addr === PANEL_DRAW && bank === BANK_DATA) {
-        drawFrom = { t: now(), tile: cpu.x >= PANEL_GLYPHS, line: beamLine(), field: word(FIELDS_AT) };
+        drawFrom = { t: now(), irq: irqCycles, tile: cpu.x >= PANEL_GLYPHS, line: beamLine() };
     } else if (addr === PANEL_DRAWN && bank === BANK_DATA && drawFrom) {
-        (drawFrom.tile ? tileCycles : glyphCycles).push(now() - drawFrom.t);
-        // each cell drawn wholly in the beam's window: begun and done in one
-        // field, before the flip's line, so neither a flip nor the beam
-        // finds it half drawn
+        // (its own cycles: the interrupts' it met left out, as the vertical
+        // sync's may come in the window, far from its end)
+        (drawFrom.tile ? tileCycles : glyphCycles).push(now() - drawFrom.t - (irqCycles - drawFrom.irq));
+        // each cell drawn wholly in the beam's window: begun once the beam
+        // has passed the screen's last line, or in the view's lines, and
+        // done before the flip's line comes (lines to go to it no more than
+        // when it began, and within a field: drawMost), so neither a flip nor
+        // the beam finds it half drawn
         const line = beamLine();
-        const later = drawFrom.field !== word(FIELDS_AT);
-        if (later || drawFrom.line >= FLIP_LINE_ || line >= FLIP_LINE_)
-            fail(`a cell of the panel drawn from line ${drawFrom.line} to ${line}${later ? " of a later field" : ""}, not inside the window before line ${FLIP_LINE_}`);
+        const toFlip = (l) => (FLIP_LINE_ - l + FIELD_LINES_) % FIELD_LINES_;
+        const inWindow = (l) => l >= SCREEN_LINES_ || l < FLIP_LINE_;
+        if (!inWindow(drawFrom.line) || !inWindow(line) || toFlip(line) > toFlip(drawFrom.line) || toFlip(line) === 0)
+            fail(`a cell of the panel drawn from line ${drawFrom.line} to ${line}, not inside the window before line ${FLIP_LINE_}`);
         else cellsInWindow++;
         drawFrom = null;
     } else if (addr === IDLE) {
@@ -463,10 +483,12 @@ const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALU
 // what the panel costs: each panel_values (from its call to .valued), and
 // each cell's draw (panel_draw, from its call to panel_sync's .drawn)
 const PANEL_VALUES = sym("panel_values"), PANEL_DRAW = sym("panel_draw"), PANEL_DRAWN = sym("panel_sync.drawn");
+const IRQ_HANDLER = sym("irq_handler"), IRQ_SYNC = sym("irq_handler.sync");
 const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_CELL_US = sym("PANEL_CELL_US");
 const valuesCycles = [], glyphCycles = [], tileCycles = [];
 let valuesFrom = null, drawFrom = null, cellsInWindow = 0;
 const FLIP_LINE_ = sym("FLIP_LINE"), FIELDS_AT = sym("fields");
+const FIELD_LINES_ = sym("FIELD_LINES"), SCREEN_LINES_ = sym("SCREEN_ROWS") * (sym("CRTC_R9") + 1);
 const PF = (f) => [sym(`PF_${f}`), sym(`PN_${f}`)];
 const [PF_NAME, PN_NAME] = PF("NAME"), [PF_MESSAGE, PN_MESSAGE] = PF("MESSAGE"), [PF_FPS, PN_FPS] = PF("FPS");
 const panelBuild = JSON.parse(fs.readFileSync(path.join(root, "build/panel/panel.json"), "utf8"));
@@ -596,8 +618,10 @@ cpu.debugWrite.add((addr, value) => {
             if (x === d) fail(`a write to the view (${hex(addr, 4)}) of the buffer shown`);
         } else {
             textWrites++;
+            // (past the screen's last line the beam meets the row again only
+            // in the next field)
             const row = Math.floor((addr - SCREEN) / SCREEN_ROW) * (R9 + 1);
-            if (x === d && beamLine() >= row)
+            if (x === d && beamLine() >= row && beamLine() < SCREEN_LINES_)
                 fail(`a write (${hex(addr, 4)}) to the buffer shown with the beam on line ${beamLine()}, at or past its row's top, ${row}`);
         }
     }
@@ -1389,6 +1413,9 @@ console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} set
 console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${cyc(valuesCycles)} (${valuesCycles.length}); ` +
     `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length}); ` +
     `${cellsInWindow} cells drawn inside the beam's window`);
+console.log(`${NAME}: the interrupt's cycles (median / p90 / most), irq_handler to its RTI: the vertical sync's ` +
+    `${cyc(syncIrqCycles)} (${syncIrqCycles.length}, ${syncIrqCycles.filter((c) => c > SCAN_MIN).length} reading the keys), ` +
+    `T1's ${cyc(t1IrqCycles)} (${t1IrqCycles.length})`);
 
 // --- The figures, by what each frame did: an area's first frame, the
 // angles changed (the transform's cache refilled), the camera moved (the

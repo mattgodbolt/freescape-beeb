@@ -131,11 +131,24 @@ differ: below), and names the vehicle under them in its font.
 - **Drawing**, as the text was: `panel_set` marks a cell wanted, and
   `panel_sync`, every loop, draws each cell not shown as wanted into both
   buffers, a cell begun only while User VIA T1's high byte says the beam
-  is in the view's lines with `PANEL_CELL_US` to spare before
-  `FLIP_LINE` and the panel's top row: so no flip finds a cell half drawn
-  and the beam reaches the shown buffer's copy only whole. A new area's
-  name and message are drawn before its first frame is handed over
-  (`panel_wait`).
+  is past the screen's last line or in the view's lines (`PANEL_T1_TOP`)
+  with `PANEL_CELL_US` to spare before `FLIP_LINE` and the panel's top
+  row: so no flip finds a cell half drawn and the beam reaches the shown
+  buffer's copy only whole. A new area's name and message are drawn
+  before its first frame is handed over (`panel_wait`); the panel's
+  values are set before the area's conversion, which draws cells as the
+  beam allows between its records (`src/area.6502`'s `AREA_PANEL`), so
+  little is left to wait for by then.
+- **The window, widened** (2026-11-06, the eleventh round): it was the
+  view's lines alone, about a third of a field; past the screen's last line
+  the beam meets the panel's rows again only after `FLIP_LINE`, so the
+  window now opens there, about two thirds of a field. The vertical sync's
+  interrupt comes inside it, far from its end, so it only delays a cell
+  begun well before (`tools/livecheck.mjs` leaves the interrupt's cycles
+  out of a cell's own, and holds the window as begun and done before
+  `FLIP_LINE` without passing it). A glyph cell writes the buffer selected
+  as it makes each line and copies the lines into the other, counting
+  down.
 
 ## The check
 

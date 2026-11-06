@@ -23,12 +23,12 @@
 \ the figures). The flip comes mid-field (decision 21), so what's outside
 \ the view must be the same in both buffers at every flip, and a change to
 \ the buffer shown shows at once (docs/engine.md, section 1). So each cell
-\ goes into both buffers, begun only while the beam is in the view's lines
-\ or just above them (User VIA T1's high byte from PANEL_T1_MIN to
-\ HI(SAFE_T1)) with time to finish before FLIP_LINE, and every cell is
-\ below the view (ASSERTed): so no flip that waits for T1 comes while a
-\ cell is half drawn, and the beam reaches the shown buffer's copy only
-\ once it's whole. panel_sync draws what the beam allows, anywhere once
+\ goes into both buffers, begun only while the beam is past the screen's
+\ last line or in the view's lines (User VIA T1's high byte from
+\ PANEL_T1_MIN up to HI(PANEL_T1_TOP)) with time to finish before
+\ FLIP_LINE, and every cell is below the view (ASSERTed): so no flip that
+\ waits for T1 comes while a cell is half drawn, and the beam reaches the
+\ shown buffer's copy only once it's whole. panel_sync draws what the beam allows, anywhere once
 \ the interrupt is on; panel_catch_up waits for the beam once the panel has
 \ been behind for PANEL_PATIENCE calls; panel_wait until a range of cells
 \ is drawn; panel_flush draws everything, beam or not, before the
@@ -53,8 +53,14 @@ INCLUDE "../build/panel/panel.6502"
 \ at or past its character row, and a flip with the buffers different
 \ outside the view), so one begun PANEL_T1_MIN pages of T1 before
 \ FLIP_LINE is done by then, and before the beam reaches the panel's top
-\ row where that comes sooner (PANEL_LEAD_US). No interrupt comes in the
-\ window: T1's is at its end, the vertical sync's far below.
+\ row where that comes sooner (PANEL_LEAD_US). The window opens once the
+\ beam has passed the screen's last line (PANEL_T1_TOP: the count from
+\ there to FLIP_LINE, a high byte under its own), so no cell's row is
+\ scanned while it's drawn: the beam meets the panel again only past
+\ FLIP_LINE (2026-11-06, the journal's entry for the eleventh round; the
+\ window was the view's lines alone before). T1's interrupt comes at the
+\ window's end; the vertical sync's comes inside it, but further from its
+\ end than a cell takes, so it only delays a cell begun well before.
 PANEL_TOP_LINE = ((PANEL_LOWEST - SCREEN) DIV SCREEN_ROW) * (CRTC_R9 + 1)
 PANEL_CELL_US  = 600
 IF PANEL_TOP_LINE < FLIP_LINE
@@ -63,10 +69,15 @@ ELSE
     PANEL_LEAD_US = 0
 ENDIF
 PANEL_T1_MIN   = CEIL((PANEL_CELL_US + PANEL_LEAD_US) / 256)
+PANEL_T1_TOP   = (FIELD_LINES - SCREEN_ROWS * (CRTC_R9 + 1) + FLIP_LINE) * LINE_US
 PANEL_PATIENCE = 4                          ; panel_catch_up's calls behind before it waits
 ASSERT NOT(FLIP_AT_VSYNC)                   ; (T1 times the window)
 ASSERT PANEL_TOP_LINE >= VIEW_END_LINE      ; (every cell is below the view)
 ASSERT PANEL_T1_MIN < HI(SAFE_T1) AND FLIP_LINE < FLAG_LINE
+ASSERT HI(SAFE_T1) < HI(PANEL_T1_TOP) AND HI(PANEL_T1_TOP) < HI(T1_PERIOD)
+\ (the vertical sync's flag, inside the window, is more than a cell's time
+\ and the lead before its end)
+ASSERT (FLIP_LINE + FIELD_LINES - FLAG_LINE) * LINE_US > PANEL_T1_MIN * 256 + PANEL_CELL_US
 ASSERT PANEL_CELLS < 128 AND PANEL_GLYPHS <= PANEL_CELLS
 ASSERT PANEL_MAX_H <= 8
 
@@ -186,7 +197,7 @@ ASSERT LO(SCREEN) = 0
     LDA panel_free : BNE draw
     LDA usrvia_t1ch                             ; (its high byte only: the low acknowledges)
     CMP #PANEL_T1_MIN : BCC stop
-    CMP #HI(SAFE_T1) + 1 : BCS stop
+    CMP #HI(PANEL_T1_TOP) : BCS stop
 .draw
     PHX
     JSR panel_draw
@@ -249,7 +260,7 @@ ASSERT LO(SCREEN) = 0
 .panel_draw
 {
     ZA_AUTO2 at, right, g, diff, paper
-    ZA_AUTO1 h, was, d, v
+    ZA_AUTO1 h, was, v
     LDA pc_lo,X : STA at
     LDA pc_hi,X : STA at+1
     LDA panel_want,X : STA v
@@ -264,7 +275,10 @@ ASSERT LO(SCREEN) = 0
     JSR tile
     LDA #ACCCON_X : TRB acccon
     JSR tile
-    BRA done
+    LDA was : BEQ main
+    TSB acccon
+.main
+    RTS
 .glyph
     LDY pc_kind,X
     LDA pk_h,Y : STA h
@@ -278,35 +292,40 @@ ASSERT LO(SCREEN) = 0
     INC g+1
 .next_stride
     DEX : BNE stride
-    \ the cell's lines, left column then right
-    LDY #0
-.line
-    LDA (diff),Y : STA d
-    LDA (g),Y : TAX
-    LDA d : AND mask_left,X : EOR (paper),Y : STA panel_lines,Y
-    LDA d : AND mask_right,X : EOR (paper),Y : STA panel_lines + PANEL_MAX_H,Y
-    INY : CPY h : BNE line
     \ the right column's address
     LDA at : CLC : ADC #8 : STA right
     LDA at+1 : ADC #0 : STA right+1
-    LDA #ACCCON_X : TSB acccon
+    \ the cell's lines, the last first: each line's two bytes into the
+    \ buffer X selects now, and kept for the other's
+    LDY h : DEY
+.line
+    LDA (g),Y : TAX
+    LDA (diff),Y : AND mask_left,X : EOR (paper),Y
+    STA (at),Y : STA panel_lines,Y
+    LDA (diff),Y : AND mask_right,X : EOR (paper),Y
+    STA (right),Y : STA panel_lines + PANEL_MAX_H,Y
+    DEY : BPL line
+    \ then into the other buffer, and X back as it was
+    LDA #ACCCON_X
+    BIT was : BNE was_set
+    TSB acccon
     JSR put
     LDA #ACCCON_X : TRB acccon
+    RTS
+.was_set
+    TRB acccon
     JSR put
-.done
-    LDA was : BEQ main
-    TSB acccon
-.main
+    LDA #ACCCON_X : TSB acccon
     RTS
 \ put: the cell's lines at at and right, down their byte columns, into the
 \ buffer X selects (every cell is inside a character row: tools/mkpanel.py
 \ checks).
 .put
-    LDY #0
+    LDY h : DEY
 .put_line
     LDA panel_lines,Y : STA (at),Y
     LDA panel_lines + PANEL_MAX_H,Y : STA (right),Y
-    INY : CPY h : BNE put_line
+    DEY : BPL put_line
     RTS
 \ tile: the tile's eight bytes down its byte column, into the buffer X selects
 .tile

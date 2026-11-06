@@ -139,6 +139,7 @@ BANK_OBJ    = OBJ_BANK          ; (src/defs.6502's: the check build's too)
 BANK_GLUE   = BANK_DB           ; (LiveGlue's)
 AREA_DB_BANK   = BANK_DB        ; (src/area.6502's)
 AREA_CONV_BANK = BANK_DATA
+AREA_PANEL     = TRUE           ; (src/area.6502: the panel drawn as the beam allows between records, its bank AreaConv's)
 IF LIVE_LOGIC
     OBJ_LOGIC    = TRUE         ; (src/area.6502, src/objects.6502: what's hidden is the logic's)
     AREA_GLOBALS = Globals      ; (the globals' records are the logic's, which moves the rig's parts)
@@ -587,13 +588,19 @@ REGIONS = P% - regions
 .pattern
     LDA (p),Y : STA rs_pat,Y
     DEY : BPL pattern
+    \ the lines of text, and with the logic the panel's values, before the
+    \ conversion, which draws the panel's cells as the beam allows
+    \ (src/area.6502's AREA_PANEL), so that the name and message are mostly
+    \ drawn by the frame's end
+    JSR live_lines
+IF LIVE_LOGIC
+    JSR panel_values
+ENDIF
     PAGE_IN BANK_OBJ
     LDA #ACCCON_X : TRB acccon                  ; (the working copy, and the sort's memory its cache_reset clears, are main RAM's &3000 on)
     LDA lv_area : JSR area_enter
     PAGE_IN BANK_RASTER
     JSR raster_forget
-    PAGE_IN BANK_DATA
-    JSR live_lines
     PAGE_IN BANK_GLUE
     RTS
 }
