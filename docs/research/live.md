@@ -89,7 +89,7 @@ ends.
   writer of `ix_flags`, has run since, which sets `vw_flags`), and the
   crosshair (`CrossOn`, and `CrossX` and
   `CrossY` while it's on). Nothing else a frame reads changes but as an
-  area is entered (the patterns, the working copy, `raster_forget`). The
+  area is entered (the patterns, the working copy). The
   panel round the view is no input: it's drawn into both buffers outside
   the frames.
 - **The last frame handed over is enough.** The buffer not shown may hold
@@ -173,7 +173,7 @@ ends.
   new area comes the frame after (`lv_switch`, `lv_switched`): the area's
   working copy built from the logic's records (`area_enter`, ACCCON's X
   cleared, as its `cache_reset` clears the sort's memory in main RAM's
-  `&3000` on), its patterns, `raster_forget`, its name, the screen's
+  `&3000` on), its patterns, its name, the screen's
   colours and the objects' flags. The renderer's copy indexes the old
   area's flags until then (`ix_flags`, which the logic's new index doesn't
   touch).
@@ -338,7 +338,10 @@ don't run.
   `lv_enter_area` copies an area's `LIVE_PATTERNS` in on entry
   (`live_patterns`: `ld_pat_ix` names each of an area's by its place in
   `ld_pool0`-`ld_pool3`, the distinct ones, from `tools/model/colours.py`'s
-  table for the build's display) and calls `raster_forget`. The sky is the background; there's no horizon.
+  table for the build's display). The fill isn't told (no `raster_forget`):
+  what each screen holds is recorded as the bytes written, which hold as
+  true in the new area's colours (2026-11-06, the fourteenth round). The
+  sky is the background; there's no horizon.
   The logic names an area by its id: `ld_area_of` gives its index.
 - **Paging**: `PAGE_IN bank` sets `romsel` and `ROMSEL_COPY` together. Code
   in main RAM pages; nothing in a bank pages another. The logic's entries

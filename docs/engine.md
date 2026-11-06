@@ -338,10 +338,14 @@ come with it, to see where the cycles go.
   fill's edge set-up (`RASTER_BL2`). HAZEL holds the filing system's workspace until
   the OS is gone, so nothing goes in before.
 - The fill's bank (6) holds the row runs, its code and its work. Its
-  routines are fewer on the live disc (no horizon: decision 71), and the
-  room it has is from `raster_work_end` to `&C000` (`docs/research/raster.md`,
-  "Round 6" and "Round 7"); the 96 bytes after each row's run in the row
-  runs' pages are room besides.
+  routines are fewer on the live disc (no horizon: decision 71), which
+  spends some of that room writing out the line loop's and the
+  background's ends (`RASTER_ENDS_INLINE`; `docs/research/raster.md`,
+  "Round 8"); the room it has is from `raster_work_end` to `&C000`
+  (`docs/research/raster.md`, "Round 6" to "Round 8"); the 96 bytes after
+  each row's run in the row runs' pages are room besides. The fill's
+  check build keeps the horizon and writes the ends out too, so its work
+  is in main RAM.
 - What each buffer holds of its lines' ends (`RasterEnds`, decision 100)
   is per-buffer data: the same addresses in main and shadow RAM, the last
   of main RAM's room before `SCREEN`, which shadow RAM has free past the

@@ -581,6 +581,38 @@ line, directly: Driller's views drawn fresh 8,282,061 cycles to 8,165,079
 main RAM's room before `SCREEN` is gone (the twelfth round's journal entry
 had it for a memo of the areas' slanted faces, which isn't worth it: below).
 
+### Round 8: the ends written out, and no forgetting at an entry (2026-11-06)
+
+Counted first, on the live check's frames in order (eight of the logic
+disc's scenarios, 1,369 frames, through the check build with `--hot`): a
+frame calls `end_first`, `end_last` and `end_both` about 85 times, most
+from INSERT's fresh `[a, W)` path (`fresh_cut`, 18 a frame), the
+background's gaps from 0 (14) and to `VIEW_W` (7), and INSERT's whole gaps
+(19). Written out (`END_FIRST`, `END_LAST`) where the includer names
+`RASTER_ENDS_INLINE`, a call's twelve cycles and `r_ev`'s six go from each
+held end and about half that from each written one. They're written out
+at INSERT's six ends and the background's two, not the stretch's (a few a
+frame). Three of INSERT's branches no longer reach their targets past the
+written-out ends: `out2` moved before them, `cut_left`'s last piece and
+`right_even`'s last whole gap are a `JMP` away, and the overflow has a
+second landing pad. The live disc names it (the fill's bank had the room:
+about 1.8K of it went) and so does the fill's check build, whose work
+moved to main RAM below `&3000` for it (the bank keeps the horizon there);
+the slideshow, whose bank is full, keeps the calls. Measured:
+`tools/rastercheck.mjs`'s Driller views fresh a median 114,441 cycles to
+114,029 (all 8,166,547 to 8,145,270); the live frames in order (the check
+build) a median 36,177 to 35,579 (mean 41,399 to 40,692). On the disc,
+the fill walking 0.66 fields a frame to 0.64 at the median.
+
+The live disc no longer calls `raster_forget` as an area is entered: what
+each screen holds is kept as the bytes written, not as patterns (above,
+"What the screen already holds"), so it holds as true in the new area's
+colours, and nothing else draws in the view at an entry. An entrance's
+first frame then keeps whatever lines the last area's frame two before
+left in the same bytes, and the entry saves `raster_forget`'s own cycles
+(about 2,200). On the disc, entrances flip to flip a median 8.48 fields to
+8.15.
+
 ### Measured and not built
 
 - **Faces' lines already full** when the face comes, which its line loop

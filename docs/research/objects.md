@@ -1266,7 +1266,53 @@ In the front end:
   keeps 27% of an entry's planes on a first visit, and a memo by place
   (like the globals') helps only an area entered again; its 5K fits only
   shadow RAM, which the conversion reads with X clear. Main RAM's room
-  before `SCREEN` went to the fill's records instead.
+  before `SCREEN` went to the fill's records instead. (The fourteenth
+  round built it by shape, in shadow RAM, X set round each access: below.)
+
+## The fourteenth round: the entry's planes, and the sort
+
+The journal's entry of 2026-11-06, "the fourteenth round", has the figures.
+
+- **The slanted faces' planes by their shape** (decision 101): what
+  `ac_plane_face` makes of a face (the cross product's components, its axis
+  or axes, n reduced) depends on its loop's first two edges u and w alone,
+  so a memo of 256 entries found by a hash of the six bytes (each rotated
+  left and EORed in) keeps u, w and the result, for the globals' faces and
+  every area's. A shape repeats across areas (483 faces of 312 shapes), and
+  an area entered again finds most of its own. Simulated on the tour's
+  order first (`tools/model` and the entrances in turn): 807 of 1,155
+  faces found, against 843 that an unlimited memo would, and 700 for a
+  memo by place. Its eleven pages are in shadow RAM after the logic's
+  lists (`AreaShapes`), so the conversion sets ACCCON's X round each
+  access; the globals' memo by place (`pm_*`) went, and main RAM's room
+  before `RasterEnds` with it.
+- **A face's vertices** (`ac_fm`) from its caller: the loops are fixed, so
+  a pyramid's are constants (`tools/mkareas.py`'s `LP_*_MASK`) and an
+  n-gon's all n, not made from the loop each face.
+- **The reduction by exact division**: n's two components less their
+  shared twos are each a quotient under 128 times the divisor's odd part
+  o, so the quotient is that's low byte times o's inverse mod 256 (a table
+  of the odd bytes' inverses, `AC_INV`), by `ac_mul`; the twos aren't put
+  back, and the two long divisions go.
+- **A pyramid's vertices** without a `CLC` a coordinate: no cell passes
+  254, so no sum carries.
+- **The sort's passes** carry the entry moving right and its row of the
+  memory from pair to pair: a swap writes only the entry it passes, and the
+  carried one's place is written once, where it stops. The rows are found
+  by slot as each entry becomes the next pair's first, so `dl_rl` and
+  `dl_rh` (76 bytes of `ObjWork`) went.
+
+Counted and not built: a cuboid's seen faces by its box against the
+camera's cells (three compares, not one a face), which wants a byte a face
+a slot to map a box's six faces to the object's (most cuboids have fewer
+than six coloured; 34 of 273 have all six), about 600 cycles a frame; a
+pyramid's vertices written out for each of its six types (about 4K of an
+entry, 1K of `AreaConv`'s bank); `area_copy` unrolled (about 1K an entry);
+the sort's compares' overhead (about 1K an entrance). At an entrance the
+sort makes 41 distinct compares of 88 looked up, at the median view of ten
+entries, and 59 of 65 views take all n - 1 passes, as the original's swaps
+any pair it can't order; a pass repeating the one two before is rare (87
+of 5,740 pairs come after one), so detecting it isn't worth a test a pass.
 
 ## The floor (decision 8a)
 
@@ -1406,12 +1452,9 @@ ways):
 - **The logic's side**: a build with the logic (`OBJ_LOGIC`, `AREA_GLOBALS`)
   calls `area_enter` after each of its area loads, which builds the
   globals' slots from its records with the rig's parts where it put them.
-- **Area entry's cost** is mostly the area's own slanted faces' planes
-  (the cross product's products, the greatest common divisor and the
-  divisions), the pyramids' vertices and the bookkeeping of each face and
-  slot, and the reading of the records through main RAM; the globals'
-  planes come from the memo, and the sort's memory is no longer cleared
-  (the tenth round, above), and the globals' slots are kept while their
-  records are the same (the eleventh round). A memo of the area's own
-  faces by their u and w would take the repeated shapes too, for more of
-  main RAM's room.
+- **Area entry's cost** is the slanted faces' bookkeeping, the pyramids'
+  vertices, each face's and slot's, and the reading of the records through
+  main RAM; the planes come from the memo by shape where it has them (the
+  fourteenth round), the sort's memory is no longer cleared (the tenth
+  round), and the globals' slots are kept while their records are the same
+  (the eleventh round).

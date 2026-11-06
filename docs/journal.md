@@ -1252,3 +1252,91 @@ What's left, and what blocks it:
   nothing found worth that room yet;
 - the floor as the horizon (about 43K a turn): a picture change past the
   thin band (the platform's edge), so not taken; decision 8a.
+
+## 2026-11-06: the fourteenth round
+
+The coordinator asked for more speed, profiled first, each change kept
+only if faster and passing `make check`, each a commit of its own. The
+profiles: `livecheck.mjs --profile-rest`, and a new `--profile-all` that
+counts the whole loop by routine, halves too; `objectcheck.mjs`'s; and
+`rastercheck.mjs --hot` over the live check's frames in order (eight of
+the logic disc's scenarios, 1,369 frames, rendered by the model into a
+sequence file, a scratch script's), each instruction against baron's
+listing. At an entrance the rest of the frame was 98,510 cycles (the
+panel's name and message 19K, the slanted faces' planes 20K, the area's
+other records most of the rest), and the front end's largest routine the
+sort (12.6K a view); walking, the crosshair's EOR, the fill's calls to its
+ends, and a long tail of a percent each.
+
+What went in, none changing what any stage outputs or the picture:
+
+- **The slanted faces' planes kept by their shape** (decision 101;
+  `docs/research/objects.md`, "The fourteenth round"): a memo of 256
+  entries by a hash of u and w, the globals' faces and every area's, in
+  shadow RAM past the logic's lists, X set round each access. The globals'
+  memo by place went from main RAM. `areacheck` (which now enters every
+  area a second time, after all of them): `area_enter` a median 48,828
+  cycles to 42,247 (40,647 the second time); with the logic 75,780 to
+  71,807. On the disc the entrances' rest went from 98,510 cycles a frame
+  to 90,674 (`ac_reduce` 8,406 to 2,824).
+- **The sort's passes carry the entry moving right** and its row of the
+  memory (`src/order.6502`): `objectcheck`'s entrance views, the sort a
+  median 11,794 cycles to 11,218 (most 49,415 to 43,760), the view 118,117
+  to 117,864; walks 92,974 to 92,891.
+- **No `raster_forget` at an entry** (`docs/research/raster.md`, "Round
+  8"): what each screen holds is the bytes written, which hold in any
+  area's colours. Entrances, flip to flip, a median 8.48 fields to 8.15.
+- **The crosshair's EOR from one column's address**: 996 cycles a walking
+  frame to 686.
+- **A face's vertex mask from its caller**, the loops being fixed:
+  `area_enter` 42,247 to 40,990 (with the logic 71,807 to 70,287).
+- **The fill's commonest ends written out** (`RASTER_ENDS_INLINE`, the live
+  disc and the fill's check build, whose work moves to main RAM for it;
+  raster.md, "Round 8"): Driller's views fresh a median 114,441 cycles to
+  114,029, the live frames in order 36,177 to 35,579; the fill walking 0.66
+  fields to 0.64.
+- **A pyramid's vertices without a `CLC` a coordinate**: `area_enter` to
+  40,714 (70,007).
+- **The reduction by exact divisions mod 256** (each quotient a low byte
+  times the divisor's odd part's inverse): `area_enter` to 38,970, most
+  138,365 to 131,066 (with the logic 64,853).
+
+The live disc's check, fields a frame, median / p90 / max, from the start
+of the round to its end:
+
+| | flip to flip, before | after | the rest, before | after |
+|---|---|---|---|---|
+| all | 1.81 / 5.03 / 19.39 | 1.77 / 4.95 / 18 | 0.1 / 0.53 / 5.2 | 0.09 / 0.51 / 4.94 |
+| entrance (75) | 8.54 / 13.02 / 19.39 | 7.97 / 12.05 / 18 | 2.44 / 3.25 / 5.2 | 2.11 / 2.88 / 4.94 |
+| standing (669) | 0.53 / 2.04 / 8.47 | 0.53 / 1.94 / 8.19 | 0.21 / 0.31 / 2.51 | 0.2 / 0.3 / 2.25 |
+| walking | 1.56 / 4.12 / 13.53 | 1.54 / 4.05 / 13.37 | 0.1 / 0.54 / 4.27 | 0.09 / 0.52 / 3.55 |
+| turning | 2.1 / 5.49 / 12.94 | 2.06 / 5.37 / 11.93 | 0.09 / 0.41 / 4.66 | 0.09 / 0.4 / 3.48 |
+
+The fill, walking 0.69 / 2.18 / 8.49 to 0.65 / 2.09 / 8.18; the rest at an
+entrance 98,510 cycles a frame to 86,091 (the mean); a key's first changed
+view, walking 4.77 fields to 4.66 and turning 4.89 to 4.7 at the median.
+`objectcheck` over every view (the check without the logic): the entrance
+views 117,737 / 196,616 / 280,749, walks 92,678 / 137,430 / 173,076, yaw
+sweeps 65,457 / 143,329 / 215,476. `make check` passes.
+
+The room, at the end: the fill's bank 1,024 bytes (from 2,816: the ends
+written out); the front end's bank 933 (990); `AreaConv`'s 1,191 (1,322:
+the inverses); `ObjMore` 1,292; ANDY 70; `ObjWork` 169 (92: `dl_rl`,
+`dl_rh` and `ac_pm` gone); main RAM before `RasterEnds` 382 (none: the
+globals' memo gone); shadow RAM after `AreaShapes` to `RasterEnds` 2,864,
+and the 224 bytes between the logic's lists and it.
+
+Counted and not built (`docs/research/objects.md`, "The fourteenth
+round"): a cuboid's seen faces from its box (about 600 cycles a frame, a
+byte a face a slot of main RAM's new room); a pyramid's vertices written
+out for each type (about 4K an entry, 1K of `AreaConv`'s bank);
+`area_copy` unrolled (about 1K an entry); the sort's compare overhead
+(about 1K an entrance) and a pass repeating the one two before (87 of
+5,740 pairs come after one); the stretch's ends written out too (a few a
+frame); the panel's glyphs by a table of their addresses in place of the
+stride's additions (about 50 cycles a glyph); the keys' scan (as tight as
+the VIA's 1MHz accesses let it be). Still open from before: the last face
+into the background and a line's first face kept compact (much of the line
+loop's code), both fills in one build (the busiest fresh views), the
+transform's cache at 128 slots, and the three remaining decision 76
+shares.
