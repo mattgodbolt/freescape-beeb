@@ -129,9 +129,9 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]);
-for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjBound", "ObjMore", "ObjCheck"]) {
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjBound", "ObjMore", "ObjCheck", "AreaKeep"]) {
     const a = sections[name];
-    allowed.push([a.org, a.guard]);
+    if (a) allowed.push([a.org, a.guard]);
 }
 const code = Object.entries(codeSpace).filter(([name]) => sections[name])
     .map(([name, p]) => ({ lo: sections[name].org, hi: sections[name].org + sizes[name], guard: sections[name].guard, p }));

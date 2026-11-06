@@ -272,6 +272,10 @@ RASTER_IN_HEAD = 11                     ; rs_nfaces .. rs_overflow
 RASTER_IN_ORG = RASTER_IN_END - 5 * 256 - 3 * RS_FACES - RASTER_IN_HEAD
 SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
+\ The globals' records their slots were built from (src/area.6502), after
+\ Work in the OS's pages.
+SECTION AreaKeep, org = work_end, guard = RASTER_IN_ORG, virtual = TRUE
+ENDSECTION
 \ Page &0D: the start, which runs once (LiveBoot: start, before live_loop,
 \ with lv_start and clock_init). The
 \ DFS's NMI code is there until the loader's last read, and nothing after;
@@ -1929,6 +1933,9 @@ ENDSECTION
 SECTION Work
 .work_end
 ENDSECTION
+SECTION AreaKeep
+.area_keep_end
+ENDSECTION
 obj_area_start = obj_const_end
 
 \ The map's boundaries.
@@ -1957,9 +1964,10 @@ ASSERT obj_andy_end <= &9000 AND obj_andy_reach >= &9000
 ASSERT LO(RASTER_STATE_ORG) = 0 AND RASTER_STATE_ORG >= &0E00
 ASSERT live_end <= area_code_end AND area_code_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
 ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
-\ The OS's pages: Work, then RasterIn (with ObjOut over it) to the NMI's
-\ page, and there the start, below the MOS's extended vectors.
-ASSERT work_end <= RASTER_IN_ORG AND obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
+\ The OS's pages: Work, AreaKeep, then RasterIn (with ObjOut over it) to
+\ the NMI's page, and there the start, below the MOS's extended vectors.
+ASSERT work_end <= area_keep_end AND area_keep_end <= RASTER_IN_ORG
+ASSERT obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
 ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 \ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
 \ memory, the pipeline's tables, the area's working copy and the objects'

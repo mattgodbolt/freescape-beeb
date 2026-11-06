@@ -519,6 +519,7 @@ def emit(db, loops, globals_rec, areas, gbytes, out6502, outjson):
     w("\\ first nine; tools/freescape.py's FIXED_LENGTH).")
     w(blist("AC_FIXED", freescape.FIXED_LENGTH + [REC["LEN"] + 1]))
     w("G_RECORDS   = %d           ; the globals' records" % len(db["globals"]))
+    w("G_BYTES     = %d          ; ... their bytes, together (the logic moves them, keeping each's length)" % len(gbytes))
     w("\\ The logic's index (src/logic/index.6502) needs this many places at most.")
     w("IX_MOST     = %d" % (max(len(a["objects"]) for a in db["areas"]) + len(db["globals"])))
     w("\\ Colour bytes each record type takes from the colour stream (AreaConv).")

@@ -15,8 +15,10 @@
 // - after area_init, the globals' slots are mkareas.py's: every array's
 //   first G_ entries;
 // - after area_enter for each area in turn, with the working copy past the
-//   globals' (all of it, with OBJ_LOGIC, which builds them again) filled
-//   with junk first: the globals' slots, with ob_ix their places in the
+//   globals' (all of it, with OBJ_LOGIC, for every other area, which finds
+//   a byte of the globals' records changed from those their slots were
+//   built from, ag_kept, and so builds them again; the rest keep them)
+//   filled with junk first: the globals' slots, with ob_ix their places in the
 //   logic's index after the area's records; the area's, every array's
 //   entries from G_ for its counts; ob_n and ar_counts; and, without
 //   OBJ_LOGIC, ob_state, each slot's F_HIDDEN;
@@ -131,7 +133,8 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]); // (the check's stubs page HAZEL in and out)
-for (const name of ["ObjArea", "ObjWork", "ObjMemo"]) allowed.push([sections[name].org, sections[name].guard]);
+for (const name of ["ObjArea", "ObjWork", "ObjMemo", "AreaKeep"])
+    if (sections[name]) allowed.push([sections[name].org, sections[name].guard]);
 const badWrites = [];
 m.tm.processor.debugWrite.add((addr) => {
     if (!allowed.some(([lo, hi]) => addr >= lo && addr < hi) && badWrites.length < 10) badWrites.push(addr);
@@ -176,15 +179,25 @@ if (m.peek(S("ob_n")) !== G("obj")) fail(`area_init: ob_n ${m.peek(S("ob_n"))}, 
 
 // The areas.
 const cycles = [];
-for (const area of layout.areas) {
+let kept = 0;
+for (const [i, area] of layout.areas.entries()) {
     const what = `area ${area.id} (${area.name})`;
-    junk((s) => (logic ? 0 : G(s)));
+    // With the logic, the globals' slots are kept when their records are
+    // those they were last built from (ag_kept): every other area finds one
+    // of those bytes changed, as if the logic had moved a part, and must
+    // build them again over junk; the rest must keep them.
+    const rebuild = logic && i % 2 === 0;
+    if (rebuild) {
+        const at = S("ag_kept") + ((i * 37) % S("G_BYTES"));
+        m.poke(at, m.peek(at) ^ 0xff);
+    } else if (logic) kept++;
+    junk((s) => (rebuild ? 0 : G(s)));
     m.poke(S("check_area"), area.index);
     badWrites.length = 0;
     profiling = true;
     const { total } = await m.call(S("check_enter"));
     profiling = false;
-    cycles.push([total, area]);
+    cycles.push([total, area, rebuild]);
     if (badWrites.length) fail(`${what}: wrote outside its memory at ${badWrites.map(hex).join(" ")}`);
     for (const name of arrays) {
         const g = name === "ob_ix" ? area.globals_index : layout.globals.arrays[name];
@@ -213,6 +226,11 @@ console.log(
         `(${arrays.length} arrays); cycles: area_init ${init}, area_enter median ${median}, ` +
         `most ${most} (area ${mostArea.id})`,
 );
+if (logic) {
+    const med = (xs) => xs.sort((a, b) => a - b)[xs.length >> 1];
+    console.log(`areas (OBJ_LOGIC): area_enter median ${med(cycles.filter((c) => c[2]).map(([c]) => c))} building ` +
+        `the globals again, ${med(cycles.filter((c) => !c[2]).map(([c]) => c))} keeping them (${kept} areas)`);
+}
 if (profile) {
     const all = [...profile.values()].reduce((a, b) => a + b, 0);
     console.log(`areas: area_enter's cycles by label, a mean over the ${layout.areas.length} areas`);

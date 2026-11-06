@@ -194,6 +194,48 @@ ASSERT LEN(AC_FIXED) = 16 AND MAX(AC_FIXED) = FETCH_N AND MIN(AC_FIXED) > REC_LE
 
 ENDSECTION
 
+IF DEFINED(OBJ_LOGIC)
+\ The globals' records as their slots were last built from (ag_same). With
+\ the logic each entry would build the globals' slots again, as the logic
+\ moves the rig's parts as an area loads; but a build from the same records
+\ makes the same slots, in the same places (they come first, from the
+\ spaces' starts), which nothing but the conversion writes. So when the
+\ records are the same, the slots are kept.
+SECTION AreaKeep
+.ag_kept    SKIP G_BYTES
+.ag_valid   SKIP 1                  ; non-zero once ag_kept is the slots' records
+ENDSECTION
+ASSERT G_BYTES <= 255
+
+\ ag_same: C set if the globals' records (G_BYTES from AG_ADDR, in bank
+\ AG_BANK) are ag_kept; else C clear, and they're ag_kept now. Puts back the
+\ bank that was in. (In main RAM, as it pages.) Clobbers A, X.
+SECTION ObjMore
+.ag_same
+{
+    LDA ROMSEL_COPY : PHA
+    LDA #AG_BANK : STA ROMSEL_COPY : STA romsel
+    LDA ag_valid : BEQ keep
+    LDX #G_BYTES
+.compare
+    LDA AG_ADDR - 1,X : CMP ag_kept - 1,X : BNE keep
+    DEX : BNE compare
+    SEC
+    BRA done
+.keep
+    LDX #G_BYTES
+.copy
+    LDA AG_ADDR - 1,X : STA ag_kept - 1,X
+    DEX : BNE copy
+    LDA #1 : STA ag_valid
+    CLC
+.done
+    PLA : STA ROMSEL_COPY : STA romsel
+    RTS
+}
+ENDSECTION
+ENDIF
+
 SECTION AreaConv
 
 \ ac_first: the memo emptied, then ac_globals.
@@ -204,6 +246,9 @@ SECTION AreaConv
 .forget
     STA pm_k,X
     DEX : BPL forget
+    IF DEFINED(OBJ_LOGIC)
+        STZ ag_valid                        ; (no records kept: the first entry builds them again)
+    ENDIF
 }
 \ ac_globals: the globals' records into slots from 0, their slanted faces
 \ by the memo.
@@ -236,7 +281,13 @@ SECTION AreaConv
 .ac_area
 {
     IF DEFINED(OBJ_LOGIC)
-        PHA : JSR ac_globals : PLA          ; (the logic moves the rig's parts)
+        \ the globals' slots again (the logic moves the rig's parts), unless
+        \ their records are as the slots were last built from
+        PHA
+        JSR ag_same : BCS globals_kept
+        JSR ac_globals
+    .globals_kept
+        PLA
     ENDIF
     TAX
     LDA ac_streams_lo,X : STA ac_col
