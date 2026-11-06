@@ -264,13 +264,8 @@ ASSERT im_fx1 = im_fx0 + 3 AND im_fx2 = im_fx1 + 3 AND im_fy1 = im_fy0 + 3 AND i
 ENDSECTION
 SECTION ObjCode
 
-\ BP_SITE site, f, k: bound_box's term for bound f on axis k, at site,
-\ patched for the coefficient bp_p: its products' bases (f(u + phi) from sq
-\ at phi when phi >= 0, else from ng, f(j - 255), at 255 + phi; f(u - phi)
-\ likewise at -phi, a base of ng's at 255 serving for 0), the cell it reads
-\ (the box's high one on axis k when phi is positive, else its low), and for
-\ a term past the bound's first, whether it's skipped (a phi of 0) or
-\ counted in bb_bias.
+\ BP_SITE site, f, k: bp_site's work for term site (bound f, axis k), written
+\ out, for a level camera's patch
 MACRO BP_SITE site, f, k
     LDA bp_p+1 : BMI neg
     LDA bp_p
@@ -312,47 +307,76 @@ ENDMACRO
 \ bound_patch: bound_box's terms (src/transform.6502's "The bounds") for M,
 \ as it's built: term k of bound f takes f's coefficient on M's column k,
 \ L 3 M0k + 2 M2k, R 2 M2k - 3 M0k, T M2k - 3 M1k, in 16 bits (each within
-\ 255 either way: the model asserts, render.BOUND_PHI).
+\ 255 either way: the model asserts, render.BOUND_PHI), by bp_site; a level
+\ camera's columns 0 and 2 written out, its middle column (0, 64, 0) the
+\ same every time (L's and R's terms 0, skipped, and T's -192).
 .bound_patch
 {
     ZA_AUTO2 a3, b3, c1, c2
+    ZA_AUTO1 k
     \ each bound's bias: 64 times &8000 a term, the top byte's &20
     LDA #&20 : STA bb_bias : STA bb_bias+1 : STA bb_bias+2
     ASSERT BD_N = 3
-    FOR k = 0..2
-        IF k = 1
-            \ a level camera's middle column, (0, 64, 0): L's and R's terms
-            \ 0, skipped, and T's -192, as the last level camera's patch
-            \ left them (bp_level)
-            LDA mat_tilt : BNE column
-            LDA bp_level : BEQ column
-            LDA bb_bias + BD_T : CLC : ADC #&20 : STA bb_bias + BD_T
-            JMP column_done
-        .column
-        ENDIF
+    LDA mat_tilt : BEQ level
+    JMP any
+.level
+    FOR q = 0..1
+        k = 2 * q
         LDA mat + k : JSR times3 : STA a3 : STY a3+1
-        LDA mat + 3 + k : JSR times3 : STA b3 : STY b3+1
         LDA mat + 6 + k : JSR widen : STA c1 : STY c1+1
         ASL A : STA c2
         TYA : ROL A : STA c2+1
         \ L: c2 + a3
         LDA c2 : CLC : ADC a3 : STA bp_p
         LDA c2+1 : ADC a3+1 : STA bp_p+1
-        BP_SITE WHERE(k = 0, bb_t00, WHERE(k = 1, bb_t01, bb_t02)), BD_L, k
+        BP_SITE WHERE(k = 0, bb_t00, bb_t02), BD_L, k
         \ R: c2 - a3
         LDA c2 : SEC : SBC a3 : STA bp_p
         LDA c2+1 : SBC a3+1 : STA bp_p+1
-        BP_SITE WHERE(k = 0, bb_t10, WHERE(k = 1, bb_t11, bb_t12)), BD_R, k
-        \ T: c1 - b3
-        LDA c1 : SEC : SBC b3 : STA bp_p
-        LDA c1+1 : SBC b3+1 : STA bp_p+1
-        BP_SITE WHERE(k = 0, bb_t20, WHERE(k = 1, bb_t21, bb_t22)), BD_T, k
-        IF k = 1
-        .column_done
-        ENDIF
+        BP_SITE WHERE(k = 0, bb_t10, bb_t12), BD_R, k
+        \ T: c1 (M1k is 0)
+        LDA c1 : STA bp_p
+        LDA c1+1 : STA bp_p+1
+        BP_SITE WHERE(k = 0, bb_t20, bb_t22), BD_T, k
     NEXT
-    \ (whether the middle column's terms are a level camera's)
-    LDA mat_tilt : EOR #&FF : STA bp_level
+    \ the middle column, unless the last patch was a level camera's too
+    LDA bp_level : BNE kept
+    STZ bp_p : STZ bp_p+1
+    LDX #3 * BD_L + 1 : JSR bp_site
+    LDX #3 * BD_R + 1 : JSR bp_site
+    LDA #LO(-3 * 64) : STA bp_p
+    LDA #HI(-3 * 64) : STA bp_p+1
+    LDX #3 * BD_T + 1 : JSR bp_site
+    LDA #&FF : STA bp_level
+    RTS
+.kept
+    LDA bb_bias + BD_T : CLC : ADC #&20 : STA bb_bias + BD_T
+    RTS
+.any
+    STZ bp_level
+    LDX #0
+.column
+    STX k
+    LDA mat,X : JSR times3 : STA a3 : STY a3+1
+    LDX k : LDA mat + 3,X : JSR times3 : STA b3 : STY b3+1
+    LDX k : LDA mat + 6,X : JSR widen : STA c1 : STY c1+1
+    ASL A : STA c2
+    TYA : ROL A : STA c2+1
+    \ L: c2 + a3
+    LDA c2 : CLC : ADC a3 : STA bp_p
+    LDA c2+1 : ADC a3+1 : STA bp_p+1
+    LDX k : JSR bp_site
+    \ R: c2 - a3
+    LDA c2 : SEC : SBC a3 : STA bp_p
+    LDA c2+1 : SBC a3+1 : STA bp_p+1
+    LDA k : CLC : ADC #3 * BD_R : TAX : JSR bp_site
+    \ T: c1 - b3
+    LDA c1 : SEC : SBC b3 : STA bp_p
+    LDA c1+1 : SBC b3+1 : STA bp_p+1
+    LDA k : CLC : ADC #3 * BD_T : TAX : JSR bp_site
+    LDX k : INX : CPX #3 : BEQ patched
+    JMP column
+.patched
     RTS
 \ widen: A, Y = the signed byte A as 16 bits (low, high)
 .widen
@@ -372,7 +396,82 @@ ENDMACRO
     PLA
     RTS
 }
-ZA_AUTO2 b_t, b_u, bp_p
+ZA_AUTO2 b_t, b_u, bp_p, bp_ptr
+
+\ bp_site: bound_box's term X (3 f + k, at bb_site) patched for the
+\ coefficient phi, bp_p: its products' bases (f(u + phi) from sq at phi when
+\ phi >= 0, else from ng, f(j - 255), at 255 + phi; f(u - phi) likewise at
+\ -phi, a base of ng's at 255 serving for 0), the cell it reads (the box's
+\ high one on axis k when phi is positive, else its low), and for a term
+\ past the bound's first, whether it's skipped (a phi of 0) or counted in
+\ bb_bias.
+.bp_site
+{
+    ZA_AUTO1 i
+    STX i
+    LDA bb_site_lo,X : STA bp_ptr
+    LDA bb_site_hi,X : STA bp_ptr+1
+    LDA bp_p+1 : BMI neg
+    LDA bp_p
+    LDX #HI(sq_lo) : LDY #HI(ng_lo)
+    BRA bases
+.neg
+    LDA bp_p : DEC A                    ; 255 + phi
+    LDX #HI(ng_lo) : LDY #HI(sq_lo)
+.bases
+    \ A the + phi bases' low byte, X their page and Y the - phi bases', whose
+    \ low byte is 255 less A's
+    PHY
+    LDY #BB_A0 : STA (bp_ptr),Y
+    LDY #BB_A0 + BB_HI : STA (bp_ptr),Y
+    EOR #&FF
+    LDY #BB_B0 : STA (bp_ptr),Y
+    LDY #BB_B0 + BB_HI : STA (bp_ptr),Y
+    TXA
+    LDY #BB_A0 + 1 : STA (bp_ptr),Y
+    CLC : ADC #HI(sq_hi - sq_lo) : LDY #BB_A0 + BB_HI + 1 : STA (bp_ptr),Y
+    PLA
+    LDY #BB_B0 + 1 : STA (bp_ptr),Y
+    CLC : ADC #HI(sq_hi - sq_lo) : LDY #BB_B0 + BB_HI + 1 : STA (bp_ptr),Y
+    \ the cell
+    LDX i
+    LDA bb_cell,X
+    LDY bp_p+1 : BMI low
+    BNE high
+    LDY bp_p : BEQ low
+.high
+    CLC : ADC #bb_hi - bb_lo
+.low
+    LDY #BB_UX : STA (bp_ptr),Y
+    LDA bb_axis,X : BEQ done            ; (the bound's first term)
+    LDA bp_p : ORA bp_p+1 : BEQ skip
+    LDY bb_bound,X
+    LDA bb_bias,Y : CLC : ADC #&20 : STA bb_bias,Y
+    LDA #0
+    BRA put
+.skip
+    LDA #BB_SKIP
+.put
+    LDY #BB_SK : STA (bp_ptr),Y
+.done
+    RTS
+}
+ASSERT sq_hi - sq_lo = ng_hi - ng_lo AND LO(sq_hi - sq_lo) = 0
+
+\ bound_box's terms, by 3 f + k: each's address, the cell it reads by
+\ default (the box's low one on axis k), its axis and its bound
+.bb_site_lo
+    EQUB LO(bb_t00), LO(bb_t01), LO(bb_t02), LO(bb_t10), LO(bb_t11), LO(bb_t12)
+    EQUB LO(bb_t20), LO(bb_t21), LO(bb_t22)
+.bb_site_hi
+    EQUB HI(bb_t00), HI(bb_t01), HI(bb_t02), HI(bb_t10), HI(bb_t11), HI(bb_t12)
+    EQUB HI(bb_t20), HI(bb_t21), HI(bb_t22)
+.bb_cell
+    EQUB LO((0..8) MOD 3 + bb_lo)
+.bb_axis
+    EQUB (0..8) MOD 3
+.bb_bound
+    EQUB (0..8) DIV 3
 ASSERT BD_L = 0 AND BD_R = 1 AND BD_T = 2
 ASSERT HI(bb_lo) = HI(bb_hi + 2)                ; (only a cell's low byte is patched)
 
