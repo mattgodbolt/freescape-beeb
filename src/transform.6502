@@ -882,16 +882,8 @@ ZA_AUTO 3 * BD_N, bm
 \ ceil(v / 64), plus 64 times bound p's bias (bb_bias), saturated to 24
 \ bits unsigned
 MACRO BD_CEIL p, v
-    LDA v : CLC : ADC #63 : AND #&C0 : STA bd_mc + 3 * p
-    LDA v+1 : ADC #0 : STA bd_mc + 3 * p + 1
-    LDA v+2 : ADC bb_bias + p : STA bd_mc + 3 * p + 2
-    LDA v+3 : ADC #0 : BEQ done
-    BMI low
-    LDA #&FF : STA bd_mc + 3 * p : STA bd_mc + 3 * p + 1 : STA bd_mc + 3 * p + 2
-    BRA done
-.low
-    STZ bd_mc + 3 * p : STZ bd_mc + 3 * p + 1 : STZ bd_mc + 3 * p + 2
-.done
+    LDX #3 * p : LDY #p
+    JSR ceil
 ENDMACRO
 
 \ bound_frame: bd_mc = the three bounds of M c, made in 32 bits (M c isn't
@@ -941,6 +933,19 @@ ENDMACRO
     LDA mc+8 : SBC t+2 : STA f+2
     LDA zs : SBC t+3 : STA f+3
     BD_CEIL BD_T, f
+    RTS
+\ ceil: bd_mc's bound Y (X = 3 Y) from f, as BD_CEIL says
+.ceil
+    LDA f : CLC : ADC #63 : AND #&C0 : STA bd_mc,X
+    LDA f+1 : ADC #0 : STA bd_mc+1,X
+    LDA f+2 : ADC bb_bias,Y : STA bd_mc+2,X
+    LDA f+3 : ADC #0 : BEQ done
+    BMI low
+    LDA #&FF : STA bd_mc,X : STA bd_mc+1,X : STA bd_mc+2,X
+.done
+    RTS
+.low
+    STZ bd_mc,X : STZ bd_mc+1,X : STZ bd_mc+2,X
     RTS
 }
 
