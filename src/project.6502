@@ -179,18 +179,6 @@ ENDMACRO
 \ PROJ_IBITS), or to low's (one less). The patch keeps C.
 MACRO PROJ_CASE n, low
     PROJ_ZI n - PROJ_IBITS
-    JSR pj_patch
-    BCS high
-    JMP low
-.high
-ENDMACRO
-
-\ pj_patch: M for Zi (its low byte in X, its bit 8 in C) patched into pmul's
-\ operands, once for the cases all (a call's 12 cycles, for the eleven
-\ copies of its code it takes out of ObjMore); C is now whether Zi is in the
-\ high region.
-.pj_patch
-{
     BCC lower
     LDA proj_m+256,X                    ; Zi >= 768: the high region (C = 1)
     BCS patch
@@ -202,8 +190,10 @@ ENDMACRO
     STA pmul.a1+1 : STA pmul.a3+1 : STA pmul.b1+1 : STA pmul.b3+1
     EOR #&FF                            ; (NGC and NG are indexed by x + NOT M)
     STA pmul.a2+1 : STA pmul.a4+1 : STA pmul.b2+1 : STA pmul.b4+1
-    RTS
-}
+    BCS high
+    JMP low
+.high
+ENDMACRO
 
 \ A block, for shift t: its head notes it for project_y and project_z ...
 MACRO PROJ_BHEAD t
