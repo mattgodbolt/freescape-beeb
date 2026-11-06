@@ -783,6 +783,12 @@ cycles), before and after:
 | a pitch turn, total | 72,854 / 167,793 / 323,156 / 87,886 | 55,657 / 146,483 / 317,297 / 73,866 |
 | a roll turn, total | 168,064 / 250,937 / 313,252 / 174,045 | 164,344 / 243,750 / 305,748 / 166,557 |
 
+On the live disc's check, stages 1-7 in fields a frame (median / p90 /
+max): turning 2.02 / 3.52 / 5.49 to 1.40 / 2.85 / 5.07, walking 0.75 / 1.99
+/ 4.95 to 0.75 / 1.99 / 4.91, entrances 3.08 / 5.52 / 7.36 to 2.53 / 5.26 /
+7.26; the whole frame, flip to flip, turning a median 2.97 fields and
+walking 2.41. `make check` passes.
+
 A step is unchanged. On the way, two things cost steps and were put right:
 the bounds kept at their sums' own scale had top bytes nearly always equal,
 so a step's compares fell to the low bytes (about 500 cycles a step); and a
