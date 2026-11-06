@@ -37,12 +37,26 @@
 \ from a page; the high bytes 512 on), to read instead of building its own
 \ (rq_lo, rq_hi) in RasterWork. The live disc names the maths' (sq_lo, in
 \ HAZEL), and checks it's the same table.
+\
+\ It may likewise name RASTER_BL2: twice the bit length of each byte, from a
+\ page, already in memory whenever the rasteriser runs (the maths' proj_bl2,
+\ which the live disc names), to read instead of building its own (bl2, in
+\ RasterWork).
+\
+\ And RASTER_HEAD (VIEW_H bytes, any address the rasteriser can always
+\ read and write) for the lines' heads, which RasterWork would hold; the
+\ live disc puts them in the OS's pages. (writer.6502 likewise: RASTER_SCRATCH.)
 \ ***************************************************************************
 
 RS_FACES    = 128                   ; faces in one frame, at most
 RS_VERTICES = 256                   ; vertices of all of them
 RS_PATTERNS = 64                    ; patterns (four bytes each)
 RS_HMAX     = 30000                 ; |rs_hx|, |rs_hy| at most
+\ The horizon's code (horizon_split's sloping and level cases, and the
+\ background's split of a gap): an includer that never sets rs_horizon,
+\ as the live disc doesn't (decision 8a: Driller's views have none), names
+\ RASTER_NO_HORIZON, and every line is sky end to end.
+RASTER_HORIZON = NOT(DEFINED(RASTER_NO_HORIZON))
 POOL_NODES  = 127                   ; gaps a pool holds (1..POOL_NODES; raster.md, "The span buffer")
 \ The painter build (docs/research/raster.md): the backmost face and the
 \ background through the span buffer, then the other faces back to front.
@@ -107,12 +121,18 @@ ENDSECTION
 \ The span buffer: each line's first gap (0: the line is full), the
 \ background's split on each line, and the pools.
 SECTION RasterWork
+IF NOT(DEFINED(RASTER_HEAD))
 .head       SKIP VIEW_H
+ENDIF
+IF RASTER_HORIZON
 .hsplit     SKIP VIEW_H
+ENDIF
     ALIGN 256
 .line7      SKIP 256                ; (n + 7) >> 4 (raster_init)
 .vk         SKIP RS_VERTICES        ; each vertex's line (raster_face)
-.k8         SKIP 256                ; n's bit length (raster_init)
+IF NOT(DEFINED(RASTER_BL2))
+.bl2        SKIP 256                ; twice n's bit length (raster_init)
+ENDIF
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
 IF NOT(DEFINED(RASTER_SQUARES))
 .rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
@@ -129,6 +149,13 @@ IF DEFINED(RASTER_SQUARES)
     rq_lo = RASTER_SQUARES
     rq_hi = RASTER_SQUARES + 512
 ENDIF
+IF DEFINED(RASTER_BL2)
+    bl2 = RASTER_BL2
+ENDIF
+IF DEFINED(RASTER_HEAD)
+    head = RASTER_HEAD
+ENDIF
+ASSERT LO(bl2) = 0                  ; (edge_setup's index is the byte alone)
 
 \ What lasts from frame to frame: each screen's lines' backgrounds
 \ (raster_background).
@@ -137,7 +164,9 @@ SECTION RasterState
 .bg_was     SKIP 256
 .bg_sig     SKIP 16
 .f_dir      SKIP 1                  ; the way the last face's left chain walked
+IF RASTER_HORIZON
 .hz_sky     SKIP 1                  ; hsplit holds the all-sky splits
+ENDIF
 ENDSECTION
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * POOL_FIELD
@@ -195,7 +224,9 @@ ENDIF
     LSR A : INY
     BRA length
 .counted
-    TYA : STA k8,X
+IF NOT(DEFINED(RASTER_BL2))
+    TYA : ASL A : STA bl2,X
+ENDIF
     TXA
 .up
     CPY #8 : BCS normed
@@ -229,7 +260,9 @@ IF NOT(DEFINED(RASTER_SQUARES))
     BRA q_high
 .q_done
 ENDIF
+IF RASTER_HORIZON
     STZ hz_sky
+ENDIF
     JSR raster_forget
     JMP writer_init
 }
@@ -1046,16 +1079,17 @@ ZA_AUTO1 m_v2
     ADC line7,Y : STA e_x+1             ; (C = 0 from the ASLs)
     TYA : ASL A : ASL A : ASL A : ASL A
     CLC : ADC #255 - SUB DIV 2 * 16 : STA e_x
-    \ dy as n 2^s, n in [128, 255]: e_sh = 8 + s
+    \ dy as n 2^s, n in [128, 255]: e_sh = 2 (8 + s), which the jump and the
+    \ shifts want doubled
     LDY e_dy+1 : BNE wide
     LDY e_dy
-    LDA k8,Y : STA e_sh                 ; (8 + s is dy's bit length)
+    LDA bl2,Y : STA e_sh                ; (8 + s is dy's bit length)
     LDA nrm,Y
     BRA normed
 .wide
     \ dy >= 256: s = the high byte's bit length, n = dy >> s rounded up
-    LDA k8,Y : TAX
-    CLC : ADC #8 : STA e_sh
+    LDA bl2,Y : LSR A : TAX
+    ASL A : ADC #16 : STA e_sh          ; (C = 0: the length is under 8)
     LDA e_dy : STA m_p : STZ m_p+1
     TYA
 .shr
@@ -1067,12 +1101,12 @@ ZA_AUTO1 m_v2
     LDA m_p+1 : CMP #1                  ; C = a bit went
     LDA m_p : ADC #0
     BNE normed
-    INC e_sh                            ; 256: 128 at one more shift
+    INC e_sh : INC e_sh                 ; 256: 128 at one more shift
     LDA #128
 .normed
     TAY
     CPY #128 : BNE reciprocal
-    DEC e_sh                            ; (512 v >> sh is 256 v >> sh - 1)
+    DEC e_sh : DEC e_sh                 ; (512 v >> sh is 256 v >> sh - 1)
 .reciprocal
     LDA recipf - 128,Y : STA e_f
     STA product.lo + 1 : STA product.hi + 1
@@ -1082,7 +1116,7 @@ ZA_AUTO1 m_v2
     \ The gradient g = |dx| r >> (8 + s), by a jump into the shifts with
     \ A = m_p+1: up 8 - (8 + s) bits, or down s, and the top two bytes.
     JSR product
-    LDA e_sh : ASL A : TAX
+    LDX e_sh
     LDA m_p+1
     JMP (shift_by - 2 * SHIFT_MIN,X)
     ZA_CANJUMP up3, up2, up1, by8, dn1, dn2, dn3
@@ -1093,7 +1127,7 @@ ZA_AUTO1 m_v2
     LDA e_t0 : JSR mul4
     LDA m_p : STA e_dx : LDA m_p+1 : STA e_dx+1
     JSR product
-    LDA e_sh : CLC : ADC #4 : JSR shr24
+    LDA e_sh : LSR A : ADC #4 : JSR shr24   ; (C = 0: e_sh is even)
     JMP offset
 .up3 ASL m_p : ROL A : ROL m_p+2
 .up2 ASL m_p : ROL A : ROL m_p+2
@@ -1164,7 +1198,7 @@ ZA_AUTO1 m_v2
     LDA #0 : SBC e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
     LDA #STEP_G
     JMP patch_steps
-SHIFT_MIN = 5                           ; e_sh on a tall edge: 5..11
+SHIFT_MIN = 5                           ; e_sh / 2 on a tall edge: 5..11
 .shift_by
     EQUW up3, up2, up1, by8, dn1, dn2, dn3
 }
@@ -1290,7 +1324,10 @@ NEXT
 \ stretch's); one filled by more than one piece is 0 as it fills (INSERT's
 \ unlink), so the records of a full line are the faces' and not this.
 
-ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, bg_k, bg_x, g_s, g_e, g_h
+ZA_AUTO1 bg_l, bg_r, bg_buf
+IF RASTER_HORIZON
+    ZA_AUTO1 bg_split, bg_k, bg_x, g_s, g_e, g_h
+ENDIF
 ZA_AUTO 4, bgv_l
 ZA_AUTO 4, bgv_la
 ZA_AUTO 4, bgv_lb
@@ -1317,7 +1354,12 @@ ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
     LDA #BG_SCREEN
 .main
     STA bg_buf
+IF RASTER_HORIZON
     JSR horizon_split
+ELSE
+    LDA rs_sky : STA bg_l
+    LDA rs_ground : STA bg_r
+ENDIF
     \ Both patterns' bytes for each phase, and their halves.
     LDA bg_l : ASL A : ASL A : TAX
     LDA bg_r : ASL A : ASL A : TAY
@@ -1378,7 +1420,9 @@ MACRO FILL k
     GS = pool_gs(k)
     GE = pool_ge(k)
     GH = pool_gh(k)
+IF RASTER_HORIZON
     LDA bg_split : CMP GE,X : BCC split
+ENDIF
     LDA GS,X : LSR A : BCC l_even
     BND_X GS
     LDA GH,X : AND #PIX_LEFT : ORA bgv_lb + k
@@ -1392,6 +1436,7 @@ MACRO FILL k
     ENTER_X GS
     PLANT_X GE
     GO_V bgv_l + k
+IF RASTER_HORIZON
     BRA done
 .split
     LDA GS,X : STA g_s
@@ -1400,9 +1445,11 @@ MACRO FILL k
     LDA #k : STA bg_k
     JSR fill_split
 .done
+ENDIF
 }
 ENDMACRO
 
+IF RASTER_HORIZON
 \ fill_split: the gap [g_s, g_e) of line r_y, its neighbours' halves in g_h,
 \ which ends right of the split, in phase bg_k's patterns: the left one's
 \ piece if it starts left of the split, then the right one's. Keeps X.
@@ -1443,6 +1490,7 @@ ENDMACRO
     LDX bg_x
     RTS
 }
+ENDIF
 
 \ Line r_y's background, from pool k's gaps; then the next line, the next
 \ copy's, which copies 0 to 2 fall into (VIEW_H is a multiple of 4, so the
@@ -1462,10 +1510,16 @@ MACRO BGLINE k, next
     JMP stepped
 .some
     TXA : ORA bg_buf : TAY              ; the line's record for this screen
+IF RASTER_HORIZON
     LDA hsplit,X : STA bg_split
+ENDIF
     LDA head,X : BPL gaps
     \ No face here: background alone, which the screen may hold already.
+IF RASTER_HORIZON
     LDA bg_split : INC A
+ELSE
+    LDA #VIEW_W + 1                     ; (all sky: the split at the right edge)
+ENDIF
     CMP bg_was,Y : BNE draw
     JMP stepped
 .draw
@@ -1496,6 +1550,7 @@ ENDMACRO
 .bg2 BGLINE 2, bg3
 .bg3 BGLINE 3, bg0
 
+IF RASTER_HORIZON
 \ ---------------------------------------------------------------------------
 \ horizon_split: which pattern is left of the split (bg_l, bg_r), and each
 \ line's split (hsplit).
@@ -1803,4 +1858,5 @@ ZA_AUTO2 d32_r
     DEC n : BNE bit
     RTS
 }
+ENDIF
 ENDSECTION

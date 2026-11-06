@@ -42,7 +42,9 @@ ASSERT (VIEW_ADDR AND &FF) = VIEW_COL0 * 8 AND SCREEN_ROW MOD 256 = 0
 ZA_AUTO1 r_row, r_pcur
 ZA_AUTO2 r_bp0, r_bp1, r_rr
 \ A piece: its pixels [r_lo, r_hi), its pattern byte; a shared byte's value.
-ZA_AUTO1 r_lo, r_hi, r_v, r_bv
+IF RASTER_HORIZON OR RASTER_PAINTER
+    ZA_AUTO1 r_lo, r_hi, r_v, r_bv
+ENDIF
 
 \ ---------------------------------------------------------------------------
 \ The row runs, a page each.
@@ -64,23 +66,26 @@ FOR r = 0..<RR_ROWS
 NEXT
 ENDSECTION
 
+IF DEFINED(RASTER_SCRATCH)
+    rr_scratch = RASTER_SCRATCH     ; (8 bytes: raster.6502's note)
+ELSE
 SECTION RasterWork
 .rr_scratch SKIP 8                  ; what the extra slot stores into
 ENDSECTION
+ENDIF
 
 SECTION RasterCode
 
 \ Per pixel boundary p (0..VIEW_W): a piece starting at p enters its row's
 \ run at rr_en (its first whole byte's slot), and one ending at p plants the
-\ RTS at rr_pl (the slot after its last whole byte).
-.rr_en
-FOR p = 0..VIEW_W
-    EQUB 3 * ((p + 1) DIV 2)
-NEXT
+\ RTS at rr_pl (the slot after its last whole byte). The slot a piece
+\ enters at is the one the same boundary's successor would plant at, so
+\ rr_en is rr_pl a byte on, and rr_pl has the one more.
 .rr_pl
-FOR p = 0..VIEW_W
+FOR p = 0..VIEW_W + 1
     EQUB 3 * (p DIV 2)
 NEXT
+rr_en = rr_pl + 1
 \ For an odd p, the shared byte p DIV 2's offset from r_bp0 (p < BND_SPLIT)
 \ or from r_bp1.
 .bnd_ofs
@@ -116,13 +121,16 @@ ASSERT (HI(rr_rows) AND &0F) = 0 AND RR_ROWS <= 16
 
 \ put_run: the whole bytes of the piece [r_lo, r_hi) of line r_y, in
 \ pattern byte A, by put_go. Keeps X. (A piece with no whole bytes enters
-\ at its plant, (lo + 1) DIV 2 = hi DIV 2, so it writes none.)
+\ at its plant, (lo + 1) DIV 2 = hi DIV 2, so it writes none.) Only the
+\ horizon's split gaps and the painter's pieces call it.
+IF RASTER_HORIZON OR RASTER_PAINTER
 .put_run
     STA r_v
     ENTER_ZP r_lo
     PLANT_ZP r_hi
     LDY r_y : LDA r_v
     JMP put_go
+ENDIF
 
 \ put_go: into the row's run (row_load patches the page, ENTER the slot),
 \ whose planted RTS returns to put_go's caller. Y the line, A the byte.
@@ -152,7 +160,8 @@ ASSERT (HI(rr_rows) AND &0F) = 0 AND RR_ROWS <= 16
 }
 
 \ put_bnd: A into the shared byte at odd pixel boundary Y of line r_y.
-\ Keeps X.
+\ Keeps X. (Called as put_run is.)
+IF RASTER_HORIZON OR RASTER_PAINTER
 .put_bnd
 {
     STA r_bv
@@ -167,6 +176,7 @@ ASSERT (HI(rr_rows) AND &0F) = 0 AND RR_ROWS <= 16
     STA (r_bp1),Y
     RTS
 }
+ENDIF
 
 \ writer_init: every row's plant in its extra slot (raster_init, once).
 .writer_init

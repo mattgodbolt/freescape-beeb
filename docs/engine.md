@@ -299,7 +299,11 @@ come with it, to see where the cycles go.
   locations.
 - `&0400-&0CFF`, the OS's pages: the engine's variables (`Work`), the
   globals' records their slots were built from (`AreaKeep`), and the
-  rasteriser's input, which the object pipeline's output lies over.
+  rasteriser's input, which the object pipeline's output lies over. The
+  last page of that input holds the patterns, of which the disc uses
+  `LIVE_PATTERNS`; the rest of the page (`RASTER_SPARE`) holds the fill's
+  line heads and scratch bytes (`RASTER_HEAD`, `RASTER_SCRATCH`) and what
+  they leave is room.
 - Page `&0D` below `&0D9F` (the Master's extended vectors, which a soft
   BREAK reads): the live disc's start, which runs once, once the disc is
   done with.
@@ -324,8 +328,14 @@ come with it, to see where the cycles go.
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
   f64 table) and the front end's work. The maths' quarter squares serve the
-  logic and the fill too. HAZEL holds the filing system's workspace until
+  logic and the fill too, and its doubled bit lengths (`proj_bl2`) the
+  fill's edge set-up (`RASTER_BL2`). HAZEL holds the filing system's workspace until
   the OS is gone, so nothing goes in before.
+- The fill's bank (6) holds the row runs, its code and its work. Its
+  routines are fewer on the live disc (no horizon: decision 71), and the
+  room it has is from `raster_work_end` to `&C000` (`docs/research/raster.md`,
+  "Round 6"); the 96 bytes after each row's run in the row runs' pages are
+  room besides.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
