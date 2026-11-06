@@ -731,7 +731,10 @@ projection's patch of `pmul` (a project), the 2D clip's passes (a pass),
 (a frame), and a level camera's bound patch (a turn's frame, the largest).
 Nothing any stage outputs changes. Each is a commit of its own, and the cost
 of each is in the journal, 2026-11-06, "the twelfth round"; a change can be
-reverted alone if its cycles are worth more than its bytes.
+reverted alone if its cycles are worth more than its bytes. (Four were, once
+the room was back: the level camera's bound patch, the projection's patch of
+`pmul`, the 2D clip's passes and `camera_setup`'s loop; journal, 2026-11-06,
+"the thirteenth round".)
 
 ## 100. A line's first and last pieces leave out what the buffer holds (2026-11-06, autonomous; amends 70)
 

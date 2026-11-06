@@ -1241,6 +1241,33 @@ candidate); `CE_TERM`'s two copies in `cone_eval`; `dot3`'s three terms
 (the maths' code patches itself by their offsets); the fills' unrolled
 cells; `dedupe` and `stage_pa`, which ANDY's code reaches.
 
+## The thirteenth round: the room spent
+
+The journal's entry of 2026-11-06, "the thirteenth round", has the figures.
+In the front end:
+
+- **Decision 76's dearest shares undone**, each by reverting its commit, as
+  that decision allowed: a level camera's bound patch written out (594
+  bytes of the bank), the projection's patch of `pmul` in each case (381 of
+  `ObjMore`), the 2D clip's four passes each with its body (284 of
+  `ObjMore`), `camera_setup`'s axes written out (243 of the bank). Left
+  shared: `transform_setup`'s tilted rows, `bound_frame`'s ceilings and
+  `transform_object`'s vertex 0, which cost a frame next to nothing, and
+  `fill_patch`, which saved cycles.
+- **The bounds at a 64th of the scale**, measured and not kept: no
+  `BD_STORE` shifts, but `BD_BEYOND`'s compare, every candidate every
+  frame, falls through to the low two bytes once the top byte holds two
+  bits, and walks lost more than turns gained. The 64-times quarter
+  squares (the twelfth round's what's left) keep the scale but make each
+  of `bound_box`'s nine terms a byte wider, which costs about what the
+  shifts do: not built.
+- **A memo of the areas' own slanted faces**, counted and not built: the
+  areas have 483 such faces, of 312 shapes (u, w), so a memo by shape
+  keeps 27% of an entry's planes on a first visit, and a memo by place
+  (like the globals') helps only an area entered again; its 5K fits only
+  shadow RAM, which the conversion reads with X clear. Main RAM's room
+  before `SCREEN` went to the fill's records instead.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's

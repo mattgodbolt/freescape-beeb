@@ -1212,3 +1212,43 @@ fresh a median 116,242 to 114,458, the live frames in order 32,025 to
 4.36 / 13.63 to 1.57 / 4.12 / 13.52, turning 2.1 / 5.51 / 12.95 to 2.09 /
 5.48 / 12.96, entrances 8.59 / 13 / 19.49 to 8.55 / 13.03 / 19.4. The fill's
 bank has 2,816 bytes free.
+
+**`camera_setup`'s axes written out again** (decision 76's, reverted):
+`objectcheck`'s walks 92,897 to 92,765, yaw sweeps 65,582 to 65,501; 243
+bytes of the front end's bank.
+
+The round's whole frame on the disc, flip to flip, median / p90 / max, from
+the start of the round to its end: walking 1.83 / 4.53 / 13.6 to 1.56 /
+4.12 / 13.53, turning 2.32 / 5.53 / 12.49 to 2.1 / 5.49 / 12.94, entrances
+8.46 / 12.62 / 19.17 to 8.54 / 13.02 / 19.39. Room left: the fill's bank
+2,816 bytes, the front end's bank 990, `ObjMore` 1,292, `AreaConv`'s 1,322,
+main RAM before `SCREEN` none (shadow RAM's past the logic's lists still
+free), ANDY 70, `ObjWork` 92, the OS's pages 52 as before. `make check`
+passes.
+
+Counted and not built (`docs/research/objects.md`, "The thirteenth round"):
+the bounds at a 64th of the scale (walks lose more than turns gain) and the
+64-times quarter squares (each term a byte wider costs what the shifts
+did); a memo of the areas' own slanted faces (483 faces of 312 shapes: a
+first visit keeps little, and its 5K fits only shadow RAM). Left of
+decision 76's shares: three that cost a frame next to nothing.
+
+What's left, and what blocks it:
+
+- inlining `end_first` and `end_last` at the hot sites (about ten cycles an
+  end, a few hundred a held frame, up to 2K a fresh one): the slideshow's
+  bank is full, unless the slideshow drops the horizon's code as the live
+  disc did (its views have none), about 1.2K;
+- a fill routine a line rather than a row (about 5.4K a fresh view): 16K of
+  code, which no bank has;
+- both fills in one build, painting a frame's faces when they span many
+  lines (about 40K off the busiest fresh view, nothing at the median): about
+  half a K of the fill's bank, which has it now, but a painted frame's
+  lines lose their records, so the frames after it write more;
+- the last face into the background (about 1.6K a fresh view) and a line's
+  first face kept compact (at most 1.6K): no memory needed, a good deal of
+  the line loop's code;
+- the transform's cache at 128 slots an array (1,152 bytes of main RAM):
+  nothing found worth that room yet;
+- the floor as the horizon (about 43K a turn): a picture change past the
+  thin band (the platform's edge), so not taken; decision 8a.
