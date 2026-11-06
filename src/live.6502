@@ -585,8 +585,11 @@ REGIONS = P% - regions
 }
 
 \ lv_enter_area: area A (its index in the records' directory) entered: its
-\ patterns, the records' working copy, the rasteriser told, its lines of
-\ text. Returns with BANK_GLUE paged.
+\ patterns, the records' working copy, its lines of text. Returns with
+\ BANK_GLUE paged. The rasteriser isn't told: what each screen holds is
+\ kept as bytes, not patterns, so it holds as true in the new area's
+\ colours (src/raster.6502's RasterEnds), and nothing else has drawn in the
+\ view.
 .lv_enter_area
 {
     STA lv_area
@@ -604,8 +607,6 @@ ENDIF
     PAGE_IN BANK_OBJ
     LDA #ACCCON_X : TRB acccon                  ; (the working copy, and the sort's memory its cache_reset clears, are main RAM's &3000 on)
     LDA lv_area : JSR area_enter
-    PAGE_IN BANK_RASTER
-    JSR raster_forget
     PAGE_IN BANK_GLUE
     RTS
 }
