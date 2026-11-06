@@ -326,6 +326,15 @@ come with it, to see where the cycles go.
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
   with room to share. The renderer reads the database too, as it enters
   an area (`src/area.6502`).
+- The front end's bank (`ObjCode`), ANDY (`ObjAndy`) and `ObjMore` (main
+  RAM below `&3000`, after the maths' code, the projection and the 2D
+  clip) share repeated code where a frame hardly spends the cycles: one
+  patch of `pmul` for the projection's cases, one body of the 2D clip's pass
+  for each axis, one vertex 0 for `transform_object`, loops for
+  `camera_setup`, `transform_setup`'s tilted rows and `bound_frame`'s
+  ceilings, and `bp_site` for a level camera's bound patch too (decisions 75
+  and 76, the journal's "twelfth round" for the figures). Their guards in
+  `src/live.6502` say when any doesn't fit.
 - ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the paged bank's
   first 4K): the front end's rarely run code, reached through trampolines
   in main RAM (decision 52, `docs/research/objects.md`, "ANDY").

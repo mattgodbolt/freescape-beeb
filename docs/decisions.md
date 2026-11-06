@@ -688,3 +688,29 @@ fill's bank, and the slideshow's `RasterState` moves to main RAM to make
 room in its bank. Lines of more than one run stay written whole (their
 records would need room the memory hasn't). Figures: journal, 2026-11-06,
 "the fill's fifth round".
+
+## 75. The projection takes the Z the engine projects (2026-11-06, autonomous, proposed for Matt; amends 17)
+
+The model's projection (`tools/model/maths.py`) took any Z from 64 (one
+world unit) to 2^23. Nothing nearer than the clip's near plane (`ZNEAR` 256,
+four world units) is ever projected, and nothing farther than a world's
+whole diagonal, `8192 * sqrt(3) * 64` or about 908,000 (Driller's deepest
+view is 742,000, `docs/research/maths.md`), under 2^20. So `ZNEAR` is now
+256 and `ZLIMIT` 2^20 (X and Y keep their 24 bits, `COORD_LIMIT`), and the
+6502 spells out the cases for bit lengths 9 to 20, not 7 to 23: five cases
+and their blocks less in `ObjMore`. The model asserts every Z it projects, so
+a Z outside the range fails the checks; the 6502's table still has an entry
+for every bit length of a 24-bit Z, the first and the last case standing in
+for those it no longer spells. No result changes for a Z in range.
+
+## 76. Room bought with cycles on the front end's cold paths (2026-11-06, autonomous, proposed for Matt)
+
+The front end's bank, ANDY and `ObjMore` were the limit on speed. Where code
+repeated itself for the sake of cycles that a frame hardly spends, the
+repeats were shared, at a call's 12 cycles or a loop's overhead: the
+projection's patch of `pmul` (a project), the 2D clip's passes (a pass),
+`camera_setup`, `transform_setup`'s tilted rows and `bound_frame`'s ceilings
+(a frame), and a level camera's bound patch (a turn's frame, the largest).
+Nothing any stage outputs changes. Each is a commit of its own, and the cost
+of each is in the journal, 2026-11-06, "the twelfth round"; a change can be
+reverted alone if its cycles are worth more than its bytes.
