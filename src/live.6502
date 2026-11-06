@@ -178,6 +178,13 @@ ENDSECTION
 \ (and the objects' bounds, kept with the cache: src/transform.6502)
 SECTION ObjBound, org = obj_area_end, guard = SCREEN, virtual = TRUE
 ENDSECTION
+\ What each buffer holds of its lines' ends (src/raster.6502's RasterEnds),
+\ the last of that room, at the same addresses in main and shadow RAM, so
+\ that the buffer ACCCON's X selects for the fill selects its records: two
+\ arrays a page, the first two ending at a page's end.
+RASTER_ENDS_ORG = (SCREEN AND &FF00) - &100 - 2 * VIEW_H
+SECTION RasterEnds, org = RASTER_ENDS_ORG, guard = SCREEN, virtual = TRUE
+ENDSECTION
 
 \ The logic, in this build's map: its variables after area_enter's code,
 \ its keys' bitmap this file's, its quarter squares the maths' in HAZEL,
@@ -225,10 +232,6 @@ ENDSECTION
 SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
 ENDSECTION
 SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
-ENDSECTION
-\ (what each screen holds, frame to frame, after the work: raster_init
-\ forgets it)
-SECTION RasterEnds, org = raster_work_end, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
 ENDSECTION
@@ -1967,8 +1970,7 @@ ASSERT obj_work_end <= &E000
 \ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
 \ The banks: each section after the last in its bank, below &C000.
-ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= raster_ends_end
-ASSERT raster_ends_end <= &C000
+ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= &C000
 ASSERT live_data_end <= panel_data_end AND panel_data_end <= area_conv_end AND area_conv_end <= &C000
 \ The panel's packed picture where nothing is till clear_work clears it,
 \ after panel_init: the transform's cache (which is virtual: !BOOT loads
@@ -1995,11 +1997,12 @@ ASSERT obj_out_end <= rs_pat AND raster_in_end <= RASTER_IN_END
 ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 \ Main RAM's &3000 up to SCREEN (with X clear): the cache, the sort's
 \ memory, the pipeline's tables, the area's working copy and the objects'
-\ bounds.
+\ bounds; then, in both main and shadow RAM, the fill's records.
 ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
-ASSERT obj_const_end <= obj_area_end AND obj_area_end <= obj_bound_end AND obj_bound_end <= SCREEN
+ASSERT obj_const_end <= obj_area_end AND obj_area_end <= obj_bound_end AND obj_bound_end <= RASTER_ENDS_ORG
+ASSERT raster_ends_end <= SCREEN
 \ Shadow RAM's &3000 on (with X set): the logic's lists by face.
-ASSERT logic_faces_end <= SCREEN AND LOGIC_FACES_ORG >= &3000
+ASSERT logic_faces_end <= RASTER_ENDS_ORG AND LOGIC_FACES_ORG >= &3000
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
 

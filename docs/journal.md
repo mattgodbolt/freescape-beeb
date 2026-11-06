@@ -1196,4 +1196,19 @@ terms a byte wider, about the cycles the shifts take. Reverted.
 **A level camera's bound patch written out again** (decision 76's largest
 cost, its commit reverted): `objectcheck`'s yaw sweeps 66,188 to 65,628 at
 the median, entrance views 119,104 to 118,538; 594 bytes of the front end's
-bank.
+bank. On the disc, flip to flip: turning 2.13 to 2.1 at the median.
+
+**The projection's patch of `pmul` and the 2D clip's passes written out
+again** (decision 76's next two, each its commit reverted): `objectcheck`'s
+entrance views 118,538 to 118,274 to 118,088 at the median, its walks 93,180
+to 92,950 to 92,897; 665 bytes of `ObjMore`, which had 1,957 free.
+
+**The records per buffer by ACCCON's X.** The fill's records moved from its
+bank to the last of main RAM's room before `SCREEN`, whose addresses shadow
+RAM has free too, so the buffer drawn selects its records and a line's are
+at its own index (`docs/research/raster.md`, "Round 7"): Driller's views
+fresh a median 116,242 to 114,458, the live frames in order 32,025 to
+30,679. On the disc, with the reverts before it, flip to flip: walking 1.6 /
+4.36 / 13.63 to 1.57 / 4.12 / 13.52, turning 2.1 / 5.51 / 12.95 to 2.09 /
+5.48 / 12.96, entrances 8.59 / 13 / 19.49 to 8.55 / 13.03 / 19.4. The fill's
+bank has 2,816 bytes free.

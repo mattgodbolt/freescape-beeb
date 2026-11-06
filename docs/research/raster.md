@@ -178,7 +178,9 @@ that overflowed before (330 and 1,040).
   Driller's views) is one piece inline; one the split crosses or that lies
   right of it goes through `fill_split`. Copies 0 to 2 fall into the next.
 - **What the screen already holds** (rounds 5 and 7, below). For each
-  screen (ACCCON's X) and line, `RasterEnds` keeps the line's first piece's
+  screen and line, `RasterEnds` (at the same addresses in main and shadow
+  RAM below `SCREEN`, so ACCCON's X selects the drawn screen's records with
+  its pixels, and a line's are indexed by the line) keeps the line's first piece's
   byte and the row run's slot after its whole bytes, and its last piece's
   byte and the slot of its first whole byte. A line's first piece (from
   pixel 0: a face's, the stretch's or a background gap's) whose byte is the
@@ -214,13 +216,13 @@ that overflowed before (330 and 1,040).
 - Sections: `RasterCode`, `RasterRuns` (page-aligned), `RasterWork` (per
   frame, and the tables `raster_init` builds), `RasterState` (frame to
   frame) and `RasterEnds` (what each screen holds, frame to frame, four
-  pages), the inputs in main RAM (decision 20). The live disc puts the first
-  three and `RasterEnds` in its bank and `RasterState` in main RAM below
-  `&3000`; the slideshow (`src/slides.6502`) puts `RasterState` and
-  `RasterEnds` in main RAM, with its line heads and scratch bytes
-  (`RASTER_HEAD`, `RASTER_SCRATCH`), as its bank holds its own quarter
-  squares; the check build puts them in main RAM too. Each asserts they
-  fit.
+  arrays of a line each), the inputs in main RAM (decision 20). The live
+  disc puts the first three in its bank, `RasterState` in main RAM below
+  `&3000` and `RasterEnds` below `SCREEN`, where main and shadow RAM are
+  both free; the slideshow (`src/slides.6502`) likewise, with its line
+  heads and scratch bytes (`RASTER_HEAD`, `RASTER_SCRATCH`) in main RAM, as
+  its bank holds its own quarter squares; the check build the same. Each
+  asserts they fit.
 
 ## Checks
 
@@ -567,6 +569,17 @@ walking 1.83 / 4.53 / 13.6 to 1.61 / 4.37 / 13.98, the fill 0.74 / 2.4 /
 12.62 / 19.17 to 8.6 / 13 / 19.5, the fill 2.74 / 4.7 / 8.2 to 2.95 / 4.92 /
 8.48. The fill's bank's free bytes went from 3,072 to 1,536, and main RAM
 below `&3000` gained what `bg_was` and `bg_sig` took. Decision 100.
+
+Then the records moved out of the bank to the memory ACCCON's X switches:
+the last of main RAM's room below `SCREEN`, which shadow RAM has free past
+the logic's lists, so the screen being drawn selects its own records and a
+line's are at the line's index (`raster_forget` clears both, X each way).
+No `ORA bg_buf` a record, and the whole lines' inline test indexes by X, the
+line, directly: Driller's views drawn fresh 8,282,061 cycles to 8,165,079
+(a median 116,242 to 114,458), the live frames in order a median 32,025 to
+30,679 (p90 91,547 to 89,875). The fill's bank has 2,816 bytes free again,
+main RAM's room before `SCREEN` is gone (the twelfth round's journal entry
+had it for a memo of the areas' slanted faces, which isn't worth it: below).
 
 ### Measured and not built
 

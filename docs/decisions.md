@@ -742,8 +742,9 @@ piece in the same byte isn't written as far as the buffer holds it from the
 line's start, nor a last piece from where it holds it to the line's end; a
 line held whole is the case decision 70 took. The picture doesn't change;
 every frame is the model's byte for byte, and the model's `held_writes`
-counts the bytes the 6502 writes. The records take 1K of the fill's bank
-(and the slideshow's main RAM), and replace decision 70's. A view drawn
+counts the bytes the 6502 writes. The records, four bytes a line, are
+per-buffer data at the same addresses in main and shadow RAM below
+`SCREEN` (the last of main RAM's room there), and replace decision 70's. A view drawn
 into a buffer that holds nothing of it (an entrance) pays the records'
 tests on every line's ends, 6% of the fill there; walking and turning gain
 more (`docs/research/raster.md`, "Round 7", and the journal, 2026-11-06).

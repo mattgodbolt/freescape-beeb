@@ -321,9 +321,11 @@ come with it, to see where the cycles go.
   reached with X set, as its passes run. No code goes there. The matrix's
   products read the maths' quarter squares in HAZEL and its cosines are the
   sine table a quarter turn on, the sort's memory is exactly its pairs, and
-  the working copy keeps no object id, so the room before `SCREEN` is what
-  `docs/journal.md` (2026-11-06, room in main RAM) counts; shadow RAM's
-  past the logic's lists is free but the front end can't reach it.
+  the working copy keeps no object id, which made the room before `SCREEN`
+  that `docs/journal.md` (2026-11-06, room in main RAM) counts; the fill's
+  records (`RasterEnds`, below) take it now, in shadow RAM too. Shadow
+  RAM's past the logic's lists is free besides, but the front end can't
+  reach it with X clear.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
@@ -331,12 +333,15 @@ come with it, to see where the cycles go.
   logic and the fill too, and its doubled bit lengths (`proj_bl2`) the
   fill's edge set-up (`RASTER_BL2`). HAZEL holds the filing system's workspace until
   the OS is gone, so nothing goes in before.
-- The fill's bank (6) holds the row runs, its code, its work and what each
-  buffer holds of each line's ends (`RasterEnds`, decision 100). Its
+- The fill's bank (6) holds the row runs, its code and its work. Its
   routines are fewer on the live disc (no horizon: decision 71), and the
-  room it has is from `raster_ends_end` to `&C000` (`docs/research/raster.md`,
+  room it has is from `raster_work_end` to `&C000` (`docs/research/raster.md`,
   "Round 6" and "Round 7"); the 96 bytes after each row's run in the row
   runs' pages are room besides.
+- What each buffer holds of its lines' ends (`RasterEnds`, decision 100)
+  is per-buffer data: the same addresses in main and shadow RAM, the last
+  of main RAM's room before `SCREEN`, which shadow RAM has free past the
+  logic's lists.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,

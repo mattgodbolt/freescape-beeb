@@ -160,20 +160,27 @@ IF RASTER_HORIZON
 ENDIF
 ENDSECTION
 
-\ What each screen holds (frame to frame; the includer puts the section
-\ where it has room): for each screen and line (line OR bg_buf), its first
-\ piece's byte and the row run's slot after its whole bytes, and its last
-\ piece's byte and the slot of its first whole byte. A line's first piece
-\ isn't written where the screen holds it already in the same byte, nor its
-\ last (the END_* macros, below). Forgotten, a line's first slot is 0 and its
-\ last RR_END, which hold nothing.
+\ What each screen holds (frame to frame): for each line, its first piece's
+\ byte and the row run's slot after its whole bytes, and its last piece's
+\ byte and the slot of its first whole byte. A line's first piece isn't
+\ written where the screen holds it already in the same byte, nor its last
+\ (end_first and the rest, below). Forgotten, a line's first slot is 0 and
+\ its last RR_END, which hold nothing. The includer puts the section in
+\ &3000 up to SCREEN, at addresses free in both main and shadow RAM, so that
+\ ACCCON's X, which selects the screen drawn, selects its records too
+\ (screen.6502's per-buffer data), and a line's records are indexed by the
+\ line alone.
 SECTION RasterEnds
-    ALIGN 256
-.re_fe      SKIP 256
-.re_fv      SKIP 256
-.re_ls      SKIP 256
-.re_lv      SKIP 256
+.re_fe      SKIP VIEW_H
+.re_fv      SKIP VIEW_H
+.re_ls      SKIP VIEW_H
+.re_lv      SKIP VIEW_H
 ENDSECTION
+\ (each array within a page, so that an indexed load costs the same on every
+\ line; and in the memory ACCCON's X switches)
+FOR a = {re_fe, re_fv, re_ls, re_lv}
+    ASSERT HI(a) = HI(a + VIEW_H - 1) AND a >= &3000 AND a + VIEW_H <= SCREEN
+NEXT
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * POOL_FIELD
 FUNCTION pool_ge(k) = pools + (4 * k + 1) * POOL_FIELD
@@ -325,8 +332,7 @@ IF RASTER_PAINTER
     BRA paint
 .painted
     \ The lines painted over hold more than their records say: forgotten.
-    LDA pt_top : ORA bg_buf : TAX
-    LDA pt_bot : ORA bg_buf : STA pt_bot
+    LDX pt_top
 .mark
     CPX pt_bot : BCS marked
     STZ re_fe,X
@@ -578,8 +584,8 @@ ZA_AUTO1 r_t, r_ev
 .end_first
 {
     STA r_ev
-    LDA r_y : ORA bg_buf : TAY
-    LDA r_ev : CMP re_fv,Y : BNE new
+    LDY r_y
+    CMP re_fv,Y : BNE new
     LDA re_fe,Y : BEQ from0             ; (none: forgotten, or no whole byte)
     CMP r_pcur : BCS held               ; the screen holds every whole byte
     STA put_go + 1
@@ -590,7 +596,7 @@ ZA_AUTO1 r_t, r_ev
     STZ put_go + 1                      ; (the slot for pixel 0)
 .record
     LDA r_pcur : STA re_fe,Y
-    LDY r_y : LDA r_ev
+    LDA r_ev                            ; (Y the line, for put_go too)
     JMP put_go
 .held
     LDA r_pcur : STA re_fe,Y
@@ -601,8 +607,8 @@ ZA_AUTO1 r_t, r_ev
 .end_last
 {
     STA r_ev
-    LDA r_y : ORA bg_buf : TAY
-    LDA r_ev : CMP re_lv,Y : BNE new
+    LDY r_y
+    CMP re_lv,Y : BNE new
     LDA re_ls,Y : CMP put_go + 1 : BCC held : BNE trim
     CMP #RR_END : BNE held              ; (at the entry: nothing left, unless none)
 .trim
@@ -629,8 +635,8 @@ ZA_AUTO1 r_t, r_ev
 .end_both
 {
     STA r_ev
-    LDA r_y : ORA bg_buf : TAY
-    LDA r_ev : CMP re_fv,Y : BNE f_new
+    LDY r_y
+    CMP re_fv,Y : BNE f_new
     LDA re_fe,Y : CMP #RR_END : BEQ held
     STA put_go + 1                      ; (0 if forgotten)
     BRA f_record
@@ -662,9 +668,8 @@ ZA_AUTO1 r_t, r_ev
 \ END_WHOLE v: line r_y, in X too, whole in byte v: end_both, but first
 \ inline the commonest case, a line the screen holds whole in v.
 MACRO END_WHOLE v
-    TXA : ORA bg_buf : TAY
-    LDA v : CMP re_fv,Y : BNE call
-    LDA re_fe,Y : CMP #RR_END : BEQ done
+    LDA v : CMP re_fv,X : BNE call
+    LDA re_fe,X : CMP #RR_END : BEQ done
 .call
     LDA v : JSR end_both
 .done
@@ -1448,7 +1453,7 @@ NEXT
 \ holds already in the same byte, by its records (RasterEnds, end_*), so a
 \ line the screen holds whole isn't written at all.
 
-ZA_AUTO1 bg_l, bg_r, bg_buf
+ZA_AUTO1 bg_l, bg_r
 IF RASTER_HORIZON
     ZA_AUTO1 bg_split, bg_k, bg_x, g_s, g_e, g_h
 ENDIF
@@ -1459,22 +1464,14 @@ ZA_AUTO 4, bgv_r
 ZA_AUTO 4, bgv_ra
 ZA_AUTO 4, bgv_rb
 
-BG_SCREEN = 128                     ; the records' offset for the second screen
-ASSERT VIEW_H <= BG_SCREEN
-
 .raster_background
     STZ r_y
     JMP bg0
 
-\ background_set (before the faces, which read and write the records):
-\ the screen drawn (ACCCON's X), where its lines' records are (bg_buf);
-\ the background's split on each line and its patterns' bytes.
+\ background_set: the background's split on each line and its patterns'
+\ bytes.
 .background_set
 {
-    LDA acccon : AND #ACCCON_X : BEQ main
-    LDA #BG_SCREEN
-.main
-    STA bg_buf
 IF RASTER_HORIZON
     JSR horizon_split
 ELSE
@@ -1498,20 +1495,27 @@ ENDIF
 \ raster_forget: neither screen holds what the rasteriser last drew there
 \ (for when something else has drawn on them).
 .raster_forget
+{
     ZA_ENTRY
-    LDX #0 : JSR forget_screen
-    LDX #BG_SCREEN
-\ forget_screen: the screen whose records start at X holds nothing known.
+    LDA acccon : PHA
+    AND #NOT(ACCCON_X) AND &FF : STA acccon : JSR forget_screen
+    ORA #ACCCON_X : STA acccon : JSR forget_screen
+    PLA : STA acccon
+    RTS
+}
+\ forget_screen: the screen ACCCON's X selects holds nothing known. Keeps A.
 .forget_screen
 {
-    LDY #VIEW_H DIV 8
+    PHA
+    LDX #VIEW_H DIV 8 - 1
     LDA #RR_END
 .line
     FOR i = 0..7
         STZ re_fe + i * (VIEW_H DIV 8),X
         STA re_ls + i * (VIEW_H DIV 8),X
     NEXT
-    INX : DEY : BNE line
+    DEX : BPL line
+    PLA
     RTS
 }
 ASSERT VIEW_H MOD 8 = 0

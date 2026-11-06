@@ -73,7 +73,7 @@ SECTION RasterIn, org = &0F00, guard = &1700, virtual = TRUE
 ENDSECTION
 SECTION RasterState, org = &1700, guard = &1800, virtual = TRUE
 ENDSECTION
-SECTION RasterEnds, org = &1800, guard = &1C00, virtual = TRUE
+SECTION RasterEnds, org = (SCREEN AND &FF00) - &100 - 2 * VIEW_H, guard = SCREEN, virtual = TRUE
 ENDSECTION
 \ The bank's sections one after another, as the slideshow has them.
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
