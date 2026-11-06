@@ -894,10 +894,12 @@ ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
 
 \ ac_reduce: n_a = ac_nn + X and n_b = ac_nn + Y (16-bit signed, neither
 \ 0) over their greatest common divisor, in na and nb (signed bytes:
-\ tools/mkareas.py asserts they fit).
+\ tools/mkareas.py asserts they fit). The divisor is 2^t o, o odd: each
+\ magnitude less its t twos is its quotient q (under 128) times o, so q is
+\ that's low byte times o's inverse mod 256 (AC_INV), mod 256.
 .ac_reduce
 {
-    ZA_AUTO1 na, nb, sa, sb
+    ZA_AUTO1 na, nb, sa, sb, la, lb
     ZA_AUTO2 ma, mb, ga, gb
     \ their magnitudes, and signs
     LDA ac_nn + 1,X : STA sa : STA ma+1
@@ -912,17 +914,19 @@ ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
     LDA #0 : SEC : SBC mb : STA mb
     LDA #0 : SBC mb+1 : STA mb+1
 .b_plus
-    \ ga = their greatest common divisor, by Stein's way: the twos they share
-    \ counted off (in X), then the odd parts
+    \ ga = their greatest common divisor's odd part o, by Stein's way: the
+    \ twos they share taken off, which leaves q o in each (its low byte in la
+    \ and lb), then the odd parts
     LDA ma : STA ga : LDA ma+1 : STA ga+1
     LDA mb : STA gb : LDA mb+1 : STA gb+1
-    LDX #0
 .twos
-    LDA ga : ORA gb : LSR A : BCS odd
+    LDA ga : ORA gb : LSR A : BCS shared
     LSR ga+1 : ROR ga
     LSR gb+1 : ROR gb
-    INX
     BRA twos
+.shared
+    LDA ga : STA la
+    LDA gb : STA lb
 .odd
     LDA ga : LSR A : BCS loop
     LSR ga+1 : ROR ga
@@ -940,15 +944,16 @@ ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
     LDA gb : SEC : SBC ga : STA gb
     LDA gb+1 : SBC ga+1 : STA gb+1
     ORA gb : BNE loop
-.twos_back
-    DEX : BMI divide
-    ASL ga : ROL ga+1
-    BRA twos_back
 .divide
-    LDA ma : LDX ma+1 : JSR quotient
-    BIT sa : JSR signed : STA na
-    LDA mb : LDX mb+1 : JSR quotient
-    BIT sb : JSR signed : STA nb
+    \ (la and lb aren't 0: q under 128 times o odd isn't a multiple of 256;
+    \ and their product's low byte is the same signed as not)
+    LDA ga : LSR A : TAY
+    LDX ac_inv,Y : PHX
+    LDA la : JSR ac_mul
+    LDA ac_mul.p : BIT sa : JSR signed : STA na
+    PLX
+    LDA lb : JSR ac_mul
+    LDA ac_mul.p : BIT sb : JSR signed : STA nb
     RTS
 \ signed: A negated if N is set.
 .signed
@@ -956,36 +961,6 @@ ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
     EOR #&FF : INC A
 .plus
     RTS
-\ quotient: A = (A, X) / ga, which ga divides, the quotient under 128: ga
-\ doubled past the dividend, then halved back, a quotient's bit each time.
-\ The dividend is under &8000, so the doubling can't pass 16 bits.
-.quotient
-{
-    ZA_AUTO2 r, d
-    ZA_AUTO1 q, bits
-    STA r : STX r+1
-    LDA ga : STA d : LDA ga+1 : STA d+1
-    STZ bits
-.up
-    LDA r : CMP d : LDA r+1 : SBC d+1 : BCC down        ; (d past r)
-    ASL d : ROL d+1
-    INC bits
-    BRA up
-.down
-    STZ q
-.bit
-    DEC bits : BMI done
-    LSR d+1 : ROR d
-    ASL q
-    LDA r : CMP d : LDA r+1 : SBC d+1 : BCC bit
-    STA r+1
-    LDA r : SBC d : STA r                   ; (C set)
-    INC q
-    BRA bit
-.done
-    LDA q
-    RTS
-}
 }
 
 \ The conversion's tables.
@@ -993,6 +968,11 @@ ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
 .ac_colours     EQUB AC_COLOURS             ; colour bytes a record takes, by type
 .ac_gix         EQUB G_IX                   ; the globals' places in the logic's index
 .ac_pyr_rec     EQUB PYR_REC                ; a pyramid's vertices, by type from 4
+.ac_inv         EQUB AC_INV                 ; 2 i + 1's inverse mod 256, at i
+ASSERT LEN(AC_INV) = 128
+FOR i = 0..127
+    ASSERT ((2 * i + 1) * AC_INV[i]) MOD 256 = 1
+NEXT
 ASSERT LEN(AC_COLOURS) = 15 AND LEN(G_IX) = G_OBJ AND LEN(PYR_REC) = 6 * 24
 \ What the conversion writes, never in sideways RAM, which it pages: the
 \ working copy from its first array to its counts, and ObjWork's part.

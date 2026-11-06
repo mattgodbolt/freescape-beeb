@@ -542,6 +542,8 @@ def emit(db, loops, globals_rec, areas, gbytes, out6502, outjson):
     w(blist("LP_SIDE_MASK", [sum(1 << i for i in s) for s in PYRAMID_SIDES]))
     w(blist("LP_TRI_MASK", [sum(1 << i for i in s) for s in PYRAMID_TRIANGLES]))
     w(blist("CUBE_VMASK", [sum(1 << i for i in f) for f in objects._CUBOID_FACES]))
+    w("\\ Each odd byte's inverse mod 256 (2 i + 1's at i): ac_reduce's exact divisions.")
+    w(blist("AC_INV", [pow(2 * i + 1, -1, 256) for i in range(128)]))
     w("\\ A pyramid's vertices (types 4-9), each coordinate an offset into its record.")
     w(blist("PYR_REC", pyramid_sources()))
     w("")
