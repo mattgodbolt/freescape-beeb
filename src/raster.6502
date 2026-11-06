@@ -37,6 +37,11 @@
 \ from a page; the high bytes 512 on), to read instead of building its own
 \ (rq_lo, rq_hi) in RasterWork. The live disc names the maths' (sq_lo, in
 \ HAZEL), and checks it's the same table.
+\
+\ It may likewise name RASTER_BL2: twice the bit length of each byte, from a
+\ page, already in memory whenever the rasteriser runs (the maths' proj_bl2,
+\ which the live disc names), to read instead of building its own (bl2, in
+\ RasterWork).
 \ ***************************************************************************
 
 RS_FACES    = 128                   ; faces in one frame, at most
@@ -112,7 +117,9 @@ SECTION RasterWork
     ALIGN 256
 .line7      SKIP 256                ; (n + 7) >> 4 (raster_init)
 .vk         SKIP RS_VERTICES        ; each vertex's line (raster_face)
-.k8         SKIP 256                ; n's bit length (raster_init)
+IF NOT(DEFINED(RASTER_BL2))
+.bl2        SKIP 256                ; twice n's bit length (raster_init)
+ENDIF
 .nrm        SKIP 256                ; n shifted up to bit 7 (raster_init)
 IF NOT(DEFINED(RASTER_SQUARES))
 .rq_lo      SKIP 512                ; n^2 DIV 4 for n = 0..510 (raster_init)
@@ -129,6 +136,10 @@ IF DEFINED(RASTER_SQUARES)
     rq_lo = RASTER_SQUARES
     rq_hi = RASTER_SQUARES + 512
 ENDIF
+IF DEFINED(RASTER_BL2)
+    bl2 = RASTER_BL2
+ENDIF
+ASSERT LO(bl2) = 0                  ; (edge_setup's index is the byte alone)
 
 \ What lasts from frame to frame: each screen's lines' backgrounds
 \ (raster_background).
@@ -195,7 +206,9 @@ ENDIF
     LSR A : INY
     BRA length
 .counted
-    TYA : STA k8,X
+IF NOT(DEFINED(RASTER_BL2))
+    TYA : ASL A : STA bl2,X
+ENDIF
     TXA
 .up
     CPY #8 : BCS normed
@@ -1046,16 +1059,17 @@ ZA_AUTO1 m_v2
     ADC line7,Y : STA e_x+1             ; (C = 0 from the ASLs)
     TYA : ASL A : ASL A : ASL A : ASL A
     CLC : ADC #255 - SUB DIV 2 * 16 : STA e_x
-    \ dy as n 2^s, n in [128, 255]: e_sh = 8 + s
+    \ dy as n 2^s, n in [128, 255]: e_sh = 2 (8 + s), which the jump and the
+    \ shifts want doubled
     LDY e_dy+1 : BNE wide
     LDY e_dy
-    LDA k8,Y : STA e_sh                 ; (8 + s is dy's bit length)
+    LDA bl2,Y : STA e_sh                ; (8 + s is dy's bit length)
     LDA nrm,Y
     BRA normed
 .wide
     \ dy >= 256: s = the high byte's bit length, n = dy >> s rounded up
-    LDA k8,Y : TAX
-    CLC : ADC #8 : STA e_sh
+    LDA bl2,Y : LSR A : TAX
+    ASL A : ADC #16 : STA e_sh          ; (C = 0: the length is under 8)
     LDA e_dy : STA m_p : STZ m_p+1
     TYA
 .shr
@@ -1067,12 +1081,12 @@ ZA_AUTO1 m_v2
     LDA m_p+1 : CMP #1                  ; C = a bit went
     LDA m_p : ADC #0
     BNE normed
-    INC e_sh                            ; 256: 128 at one more shift
+    INC e_sh : INC e_sh                 ; 256: 128 at one more shift
     LDA #128
 .normed
     TAY
     CPY #128 : BNE reciprocal
-    DEC e_sh                            ; (512 v >> sh is 256 v >> sh - 1)
+    DEC e_sh : DEC e_sh                 ; (512 v >> sh is 256 v >> sh - 1)
 .reciprocal
     LDA recipf - 128,Y : STA e_f
     STA product.lo + 1 : STA product.hi + 1
@@ -1082,7 +1096,7 @@ ZA_AUTO1 m_v2
     \ The gradient g = |dx| r >> (8 + s), by a jump into the shifts with
     \ A = m_p+1: up 8 - (8 + s) bits, or down s, and the top two bytes.
     JSR product
-    LDA e_sh : ASL A : TAX
+    LDX e_sh
     LDA m_p+1
     JMP (shift_by - 2 * SHIFT_MIN,X)
     ZA_CANJUMP up3, up2, up1, by8, dn1, dn2, dn3
@@ -1093,7 +1107,7 @@ ZA_AUTO1 m_v2
     LDA e_t0 : JSR mul4
     LDA m_p : STA e_dx : LDA m_p+1 : STA e_dx+1
     JSR product
-    LDA e_sh : CLC : ADC #4 : JSR shr24
+    LDA e_sh : LSR A : ADC #4 : JSR shr24   ; (C = 0: e_sh is even)
     JMP offset
 .up3 ASL m_p : ROL A : ROL m_p+2
 .up2 ASL m_p : ROL A : ROL m_p+2
@@ -1164,7 +1178,7 @@ ZA_AUTO1 m_v2
     LDA #0 : SBC e_g+1 : STA ch_gh,X : ZA_INDEXEDBY 0..1
     LDA #STEP_G
     JMP patch_steps
-SHIFT_MIN = 5                           ; e_sh on a tall edge: 5..11
+SHIFT_MIN = 5                           ; e_sh / 2 on a tall edge: 5..11
 .shift_by
     EQUW up3, up2, up1, by8, dn1, dn2, dn3
 }

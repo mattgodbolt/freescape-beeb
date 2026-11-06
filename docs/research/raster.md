@@ -75,7 +75,9 @@ division and no compare a line (Rich Talbot-Watkins's portalc does the
 same, `docs/research/rtw-sources.md` 1.5-1.6):
 
 - dy, in sixteenths, is normalised to n·2^s with n in [128, 255], rounded
-  up when bits go (`k8` gives the bit length, `nrm` the shifted byte);
+  up when bits go (`bl2` gives twice the bit length, which the jump into
+  the shifts wants doubled, and is the maths' `proj_bl2` on the live disc,
+  `RASTER_BL2`; `nrm` the shifted byte);
 - r = 256 + f(n) ≤ 65536 / n, f from a 128-byte table (`recipf`);
 - the gradient g = |dx|·r >> (8 + s) and the first line's offset
   g·t0 >> 4 (t0 the line centre's distance below the vertex); an edge no

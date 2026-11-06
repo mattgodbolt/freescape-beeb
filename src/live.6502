@@ -189,6 +189,9 @@ LOGIC_SQUARES     = sq_lo
 \ The fill's quarter squares the same (src/raster.6502's RASTER_SQUARES):
 \ HAZEL is paged whenever it runs.
 RASTER_SQUARES    = sq_lo
+\ ... and the edges' bit lengths the projection's (proj_bl2: twice each
+\ byte's bit length), where the fill would build a table of its own.
+RASTER_BL2        = proj_bl2
 IF LIVE_LOGIC
     LOGIC_KEYS        = lv_lkeys
     LOGIC_HOOK_WAIT   = lv_hook_wait
