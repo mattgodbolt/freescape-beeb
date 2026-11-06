@@ -584,19 +584,23 @@ SECTION AreaConv
     FOR f = 0..3
         LDA ac_c + f : BEQ skip
         LDA shrunk : AND #1 << f : BEQ whole
+        LDA #LP_TRI_MASK[f] : STA ac_fm
         LDA #LP_TRI[f] : LDX #3
         BRA side
     .whole
+        LDA #LP_SIDE_MASK[f] : STA ac_fm
         LDA #LP_SIDE[f] : LDX #4
     .side
         LDY ac_c + f : JSR ac_plane_face
     .skip
     NEXT
     LDA ac_c + 4 : BEQ no_base
+    LDX #LP_BASE_MASK : STX ac_fm
     TAY : LDA #LP_BASE : LDX #4 : JSR ac_plane_face
 .no_base
     LDA ac_c + 5 : BEQ no_apex
     LDA shrunk : BNE no_apex
+    LDA #LP_APEX_MASK : STA ac_fm
     LDY ac_c + 5 : LDA #LP_APEX : LDX #4 : JSR ac_plane_face
 .no_apex
     LDA #8 : STA ac_nv
@@ -619,6 +623,8 @@ SECTION AreaConv
     NEXT
     INY : INY : INY
     INX : DEC left : BNE vertex
+    \ each loop uses all n vertices
+    LDX ac_nv : LDA ac_bits,X : DEC A : STA ac_fm
     LDA ac_c : BEQ no_back
     TAY
     LDA #LP_BACK + 6 : SEC : SBC ac_nv
@@ -692,22 +698,16 @@ SECTION AreaConv
 }
 
 \ ac_plane_face: a face of a generic object, colour Y, its loop at lp_table
-\ + A, X long, its vertices from ac_g0: its plane from the cross product
+\ + A, X long, the vertices it uses in ac_fm (its caller's, as the loops
+\ are fixed), its vertices from ac_g0: its plane from the cross product
 \ n = (v1 - v0) x (v2 - v1) of its loop's first three. None if n is 0; an
 \ axis test if one component isn't; else a plane test, n reduced. What u and
 \ w make is the memo's (AreaShapes) when its entry for them has them.
 .ac_plane_face
 {
-    ZA_AUTO1 colour, i1, i2, left, nonzero, axis, pa, pb, slot, sign, na, nb
+    ZA_AUTO1 colour, i1, i2, nonzero, axis, pa, pb, slot, sign, na, nb
     ZA_AUTO 3, u, w
     STA ac_fl : STX ac_fn : STY colour
-    \ the vertices it uses
-    TAY
-    STX left
-    STZ ac_fm
-.mask
-    LDX lp_table,Y : LDA ac_bits,X : TSB ac_fm
-    INY : DEC left : BNE mask
     \ its first three: v0 kept, u = v1 - v0 and w = v2 - v1, signed bytes
     \ (tools/mkareas.py asserts they are)
     LDY ac_fl

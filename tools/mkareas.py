@@ -536,6 +536,11 @@ def emit(db, loops, globals_rec, areas, gbytes, out6502, outjson):
     w("LP_BASE = %d : LP_APEX = %d" % (loops.at[PYRAMID_BASE], loops.at[PYRAMID_APEX]))
     w(blist("LP_SIDE", [loops.at[s] for s in PYRAMID_SIDES]))
     w(blist("LP_TRI", [loops.at[s] for s in PYRAMID_TRIANGLES]))
+    w("\\ The vertices each of a pyramid's loops uses, a bit each.")
+    w("LP_BASE_MASK = %d : LP_APEX_MASK = %d" % (sum(1 << i for i in PYRAMID_BASE),
+                                                 sum(1 << i for i in PYRAMID_APEX)))
+    w(blist("LP_SIDE_MASK", [sum(1 << i for i in s) for s in PYRAMID_SIDES]))
+    w(blist("LP_TRI_MASK", [sum(1 << i for i in s) for s in PYRAMID_TRIANGLES]))
     w(blist("CUBE_VMASK", [sum(1 << i for i in f) for f in objects._CUBOID_FACES]))
     w("\\ A pyramid's vertices (types 4-9), each coordinate an offset into its record.")
     w(blist("PYR_REC", pyramid_sources()))
