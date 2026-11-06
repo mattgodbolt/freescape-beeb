@@ -52,7 +52,7 @@ ENDSECTION
 \ e moves past some box's L or H (a new so_gen), or the objects move
 \ (sort_forget).
 SECTION ObjMemo
-.so_memo    SKIP ((N_OBJ * N_OBJ + 255) DIV 256) * 256   ; (whole pages: so_new clears them)
+.so_memo    SKIP N_OBJ * N_OBJ      ; (so_clear clears exactly these)
 \ The last sort's draw list and its order (so_save): a list the same as it,
 \ slot for slot, under the same generation has every compare the same, so
 \ the same order.
@@ -90,7 +90,7 @@ SECTION ObjCode
     LDA #&FF : STA so_ln                ; (no last order: its generation comes again)
     LDA #LO(so_memo) : STA at
     LDA #HI(so_memo) : STA at+1
-    LDX #HI(N_OBJ * N_OBJ + 255)
+    LDX #HI(N_OBJ * N_OBJ)              ; the whole pages
     LDY #0
     TYA
 .clear
@@ -98,11 +98,17 @@ SECTION ObjCode
     INY : BNE clear
     INC at+1
     DEX : BNE clear
+    LDY #LO(N_OBJ * N_OBJ)              ; and the bytes past them
+    BEQ clear_done
+.rest
+    DEY : STA (at),Y
+    BNE rest
+.clear_done
     LDA #2 : STA so_gen
 .done
     RTS
 }
-ASSERT (N_OBJ * N_OBJ + 255) DIV 256 < 256
+ASSERT HI(N_OBJ * N_OBJ) > 0
 
 \ SK_AXIS k, lo, hi, side, olo, ohi: entry X's keys on axis k, from slot Y's
 \ header box (olo, ohi)

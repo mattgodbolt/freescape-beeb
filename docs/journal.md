@@ -1020,3 +1020,45 @@ the stretch's four copies each and the background's gaps; the globals
 compared by a checksum (inexact); the vertical sync's byte loop unrolled
 (under a hundred cycles a field); `drawable`'s products decided by bit
 lengths first (little of a few hundred cycles a step).
+
+## 2026-11-06: room in main RAM's `&3000` up to `SCREEN`
+
+The eleventh round left `ObjMemo` 41 bytes of room before `SCREEN`, and a
+memo of each area's own slanted faces (`ac_plane_face`, about 20K cycles an
+entrance) wants more. Four pieces went, none changing what any stage
+outputs, and none costing a cycle that a check shows:
+
+- `msq_lo` and `msq_hi` (the matrix's quarter squares, n = 0..128, 258
+  bytes of `ObjConst`) are the first 129 entries of the maths' `sq_lo` and
+  `sq_hi` in HAZEL, which `mmul` can read as the transform's own products
+  do: `mmul` now indexes those, the same instructions.
+- the cosine table (72 bytes of `ObjConst`) is the sine table a quarter turn
+  on, so `mkareas.py` emits the sine and its first 18 entries again
+  (`cos_table = sin_table + 18`), asserting the tape's cosines are exactly
+  that: 54 bytes freed.
+- `so_memo` was rounded to whole pages for `so_clear`; it is now exactly
+  `N_OBJ * N_OBJ` bytes and `so_clear` clears the whole pages and then the
+  bytes past them (92 bytes; the clear runs when generations run out, and
+  once at the start).
+- `ob_id`, the working copy's object id, was written by the conversion and
+  read by nothing (the logic finds slots by `ob_ix`): the array is gone,
+  `N_OBJ` bytes and an instruction pair per object in `ac_slot` (38 bytes).
+
+Together 442 bytes, so `ObjBound`'s end sits that far lower and the room
+before `SCREEN` is 483 bytes (from 41). `objectcheck`: an entrance view's
+total median 117,987 (118,016 before), the walks' and sweeps' within a few
+cycles; `areacheck` with the logic: `area_enter` 82,972 building the
+globals again (83,082) and 56,762 keeping them (56,835). `make check`
+passes.
+
+Counted and not built: the transform's cache has 256 slots an array (nine
+pages); with 128 slots two arrays could share a page at no cost a access,
+freeing 1,152 bytes, at the price of the cache emptying whenever an area's
+objects need more than 128 slots, and one compare more in `transform_fill`.
+Not measured on the walks, so not built. The sort's memory held as nibbles
+would halve `so_memo` but adds cycles to every pair looked up, and a pair's
+verdict is not its reverse's (ties go to the second below, the first above),
+so a triangle is not exact. `oc_x` and `oc_y` (512 bytes) have different
+edges and bits, so don't share. The shadow RAM from `logic_faces_end` to
+`SCREEN` is free but the front end reads its data with X clear, so only the
+logic can use it.

@@ -314,7 +314,12 @@ come with it, to see where the cycles go.
   RAM's (the transform's cache, the sort's memory, the pipeline's tables
   and the area's working copy), reached with X clear, as the front end
   runs (decision 31), and the logic's lists by face in shadow RAM's,
-  reached with X set, as its passes run. No code goes there.
+  reached with X set, as its passes run. No code goes there. The matrix's
+  products read the maths' quarter squares in HAZEL and its cosines are the
+  sine table a quarter turn on, the sort's memory is exactly its pairs, and
+  the working copy keeps no object id, so the room before `SCREEN` is what
+  `docs/journal.md` (2026-11-06, room in main RAM) counts; shadow RAM's
+  past the logic's lists is free but the front end can't reach it.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
