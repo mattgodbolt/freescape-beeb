@@ -1525,41 +1525,54 @@ CROSS_LEFT  = mode2_byte(7, 0)
 CROSS_RIGHT = mode2_byte(0, 7)
 .cross_eor
 {
-    ZA_AUTO1 bc, r, px, py
+    ZA_AUTO1 bc, r, mask, top
     ZA_AUTO2 at
     DEC A : LSR A : STA bc
     STY r : LDA #VIEW_H : SEC : SBC r : STA r
-    LDX #CROSS_N - 1
-.pixel
-    LDA bc : CLC : ADC cross_dx,X : STA px
-    CMP #VIEW_W : BCS next
-    LDA r : CLC : ADC cross_dy,X : STA py
-    CMP #VIEW_H : BCS next
-    \ VIEW_ADDR + (py DIV 8) SCREEN_ROW + 8 (px DIV 2) + py MOD 8
-    STZ at+1
-    LDA px : AND #&FE
-    ASL A : ROL at+1
-    ASL A : ROL at+1
-    STA at
-    LDA py : AND #7 : ORA at : STA at
-    LDA py : LSR A : LSR A : AND #&FE : CLC : ADC at+1 : STA at+1
-    LDA at : CLC : ADC #LO(VIEW_ADDR) : STA at
-    LDA at+1 : ADC #HI(VIEW_ADDR) : STA at+1
-    LDA px : LSR A
+    \ every pixel has the centre's parity, the arms across being two from it
+    LDA bc : LSR A
     LDA #CROSS_RIGHT : BCS right
     LDA #CROSS_LEFT
 .right
-    EOR (at) : STA (at)
+    STA mask
+    \ the arms across, on line r: pixels bc - 2 and bc + 2
+    LDA r : CMP #VIEW_H : BCS up_down
+    LDA bc : SEC : SBC #2 : CMP #VIEW_W : BCS no_left
+    JSR column : LDA r : JSR pixel
+.no_left
+    LDA bc : CLC : ADC #2 : CMP #VIEW_W : BCS up_down
+    JSR column : LDA r : JSR pixel
+.up_down
+    \ the arms up and down, in bc's column: lines r + CROSS_DY
+    LDA bc : CMP #VIEW_W : BCS done
+    JSR column
+    LDX #LEN(CROSS_DY) - 1
+.line
+    LDA r : CLC : ADC cross_dy,X : CMP #VIEW_H : BCS next
+    JSR pixel
 .next
-    DEX : BPL pixel
+    DEX : BPL line
+.done
     RTS
-.cross_dx   EQUB CROSS_DX AND &FF
+\ column: at, and top, for pixel A's byte column: VIEW_ADDR + 8 (A DIV 2)
+.column
+    STZ top
+    AND #&FE : ASL A : ASL A : ROL top
+    CLC : ADC #LO(VIEW_ADDR) : STA at
+    LDA top : ADC #HI(VIEW_ADDR) : STA top
+    RTS
+\ pixel: line A of the column EORed with mask: at + (A DIV 8)
+\ SCREEN_ROW + A MOD 8. Keeps X.
+.pixel
+    TAY
+    LSR A : LSR A : AND #&FE : CLC : ADC top : STA at+1
+    TYA : AND #7 : TAY
+    LDA (at),Y : EOR mask : STA (at),Y
+    RTS
 .cross_dy   EQUB CROSS_DY AND &FF
 }
-CROSS_DX = {-2, 2, 0, 0, 0, 0}
-CROSS_DY = {0, 0, -3, -2, 2, 3}
-CROSS_N  = LEN(CROSS_DX)
-ASSERT LEN(CROSS_DY) = CROSS_N AND SCREEN_ROW = 512
+CROSS_DY = {-3, -2, 2, 3}                       ; (the arms across are two either side, on the centre's line)
+ASSERT SCREEN_ROW = 512 AND VIEW_W < 128
 ASSERT VIEW_W < 254 AND VIEW_H < 253          ; (an arm off an edge wraps past the view)
 
 ELSE
