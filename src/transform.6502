@@ -239,22 +239,27 @@ SECTION ObjCode
     STA mc+5
     JMP valid
 .rows
-    FOR r = 0..2
-        LDA mat + 3 * r + 0 : STA mrow+0
-        LDA mat + 3 * r + 1 : STA mrow+1
-        LDA mat + 3 * r + 2 : STA mrow+2
-        JSR dot_set
-        LDA cam_x+0 : STA mv0+0
-        LDA cam_x+1 : STA mv0+1
-        LDA cam_y+0 : STA mv1+0
-        LDA cam_y+1 : STA mv1+1
-        LDA cam_z+0 : STA mv2+0
-        LDA cam_z+1 : STA mv2+1
-        JSR dot3
-        LDA macc+0 : STA mc + 3 * r + 0
-        LDA macc+1 : STA mc + 3 * r + 1
-        LDA macc+2 : STA mc + 3 * r + 2
-    NEXT
+    \ (a loop: a tilted camera's M c costs three dot3 anyway)
+    LDX #0                              ; 3 r
+.row
+    LDA mat+0,X : STA mrow+0
+    LDA mat+1,X : STA mrow+1
+    LDA mat+2,X : STA mrow+2
+    PHX
+    JSR dot_set
+    LDA cam_x+0 : STA mv0+0
+    LDA cam_x+1 : STA mv0+1
+    LDA cam_y+0 : STA mv1+0
+    LDA cam_y+1 : STA mv1+1
+    LDA cam_z+0 : STA mv2+0
+    LDA cam_z+1 : STA mv2+1
+    JSR dot3
+    PLX
+    LDA macc+0 : STA mc+0,X
+    LDA macc+1 : STA mc+1,X
+    LDA macc+2 : STA mc+2,X
+    INX : INX : INX
+    CPX #9 : BNE row
 .valid
     LDA #1 : STA mc_valid
 .moved
