@@ -1024,18 +1024,20 @@ ENDMACRO
     ZA_ENTRY
     ZA_AUTO1 want, slot
     STA want
-    LDA ob_slot,X : STA slot
-    LDA ob_flags,X : AND #K_MASK
-    BNE not_cuboid
+    LDA ob_flags,X : AND #K_MASK : TAY
+    LDA ob_slot,X
+    ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2 AND K_SENSOR = 3
+    CPY #K_GENERIC : BEQ generic
+    \ the others' vertex 0, made once for all of them: the cache slot's
+    \ vector less M c; the kind's in Y (0 cuboid, 1 rect, 3 sensor)
+    TAX
+    V_SUB 0
+    CPY #K_RECT : BEQ rect
+    BCS sensor
     JMP cuboid
-.not_cuboid
-    CMP #K_RECT : BNE not_rect
-    JMP rect
-.not_rect
-    CMP #K_SENSOR : BNE generic
-    JMP sensor
 .generic
     \ a generic object: each wanted vertex from its own slot
+    STA slot
     LDY #0
 .gen_vertex
     LSR want : BCC gen_next
@@ -1054,12 +1056,8 @@ ENDMACRO
     LDA want : BNE gen_vertex
     RTS
 .sensor
-    LDX slot
-    V_SUB 0
     RTS
 .rect
-    LDX slot
-    V_SUB 0
     V_ADD 1, 0, 1
     V_ADD 2, 1, 2
     V_ADD 3, 0, 2
@@ -1081,8 +1079,6 @@ ENDMACRO
     ORA #&04
 .no6
     LSR A : STA want
-    LDX slot
-    V_SUB 0
     FOR j = 1..7
         LSR want : BCC skip
         V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
@@ -1107,8 +1103,6 @@ ENDMACRO
     ORA #&04
 .l_no367
     STA want
-    LDX slot
-    V_SUB 0
     V_IF 1, l_1
     V_XZ 1, 0, 1
 .l_1
