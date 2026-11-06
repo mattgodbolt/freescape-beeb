@@ -532,28 +532,22 @@ def held_writes(frames):
             rec = recs[build_]
             if t == 0:
                 rec[0][:] = rec[1][:] = [0] * VIEW_H
+            if sigs[build_][screen] != sig:
+                sigs[build_][screen] = sig
+                rec[screen][:] = [0] * VIEW_H
             touched, wholes = [], []
             spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched, wholes=wholes)
             skipped = 0
-            # The faces first: a line one face's piece takes whole isn't
-            # written in the byte the screen holds there already; a line
-            # more than one piece fills is no longer known.
             for y in range(VIEW_H):
                 if wholes[y] is not None:
+                    # One face's piece took the line whole: in the byte the
+                    # screen holds there already, it isn't written.
                     if rec[screen][y] == ("whole", wholes[y]):
                         skipped += 1
                     else:
                         rec[screen][y] = ("whole", wholes[y])
                 elif touched[y]:
                     rec[screen][y] = 0
-            # Then the background, which forgets the screen's lines if its
-            # patterns aren't those of last time.
-            if sigs[build_][screen] != sig:
-                sigs[build_][screen] = sig
-                rec[screen][:] = [0] * VIEW_H
-            for y in range(VIEW_H):
-                if touched[y]:
-                    pass
                 elif rec[screen][y] == splits[y][2] + 1:
                     skipped += 1
                 else:

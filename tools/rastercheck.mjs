@@ -335,12 +335,12 @@ if (results.length) {
     console.log(`cycles a scene: min ${sorted[0]}, median ${sorted[(sorted.length - 1) >> 1]}, ` +
         `mean ${Math.round(sum / sorted.length)}, p90 ${rank(0.9)}, max ${sorted[sorted.length - 1]}`);
 }
-if (hotOut) fs.writeFileSync(hotOut, JSON.stringify(Object.fromEntries([...hot].map(([a, v]) => [a, v]))) + "\n");
-
 // The sequences: frames in turn into alternate screens, each keeping what
 // was drawn into it two frames before.
 const seqResults = [];
 let seqFailures = 0;
+const seqTotals = {};
+const held = [];
 for (const q of sequences) {
     const before = failures;
     const cycles = [];
@@ -350,12 +350,27 @@ for (const q of sequences) {
         report(`${q.name} frame ${t}`, r);
         cycles.push(r.cycles);
         written.push(r.counts.bytes);
+        // (a frame after the first two: what the screen held counts)
+        if (t >= 2) {
+            held.push(r.cycles);
+            for (const [k, v] of Object.entries(r.prof)) seqTotals[k] = (seqTotals[k] || 0) + v;
+        }
     }
     if (failures > before) seqFailures++;
     seqResults.push({ name: q.name, cycles, written, alone: q.frames.map((s) => countsOf(s).bytes) });
-    console.log(`  ${q.name.padEnd(10)} cycles ${cycles.join(" ")}; bytes written ${written.join(" ")}`);
+    if (verbose || q.frames.length <= 16)
+        console.log(`  ${q.name.padEnd(10)} cycles ${cycles.join(" ")}; bytes written ${written.join(" ")}`);
 }
 console.log(`${sequences.length - seqFailures}/${sequences.length} sequences match the model frame by frame`);
+if (held.length) {
+    const sorted = [...held].sort((a, b) => a - b);
+    const all = held.reduce((t, c) => t + c, 0);
+    console.log(`cycles a sequence's frame after its first two: median ${sorted[(sorted.length - 1) >> 1]}, ` +
+        `mean ${Math.round(all / held.length)}, p90 ${sorted[Math.max(0, Math.ceil(0.9 * sorted.length) - 1)]}, ` +
+        `max ${sorted.at(-1)} (${held.length} frames), by part: ` +
+        Object.entries(seqTotals).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(100 * v / all).toFixed(1)}%`).join(", "));
+}
+if (hotOut) fs.writeFileSync(hotOut, JSON.stringify(Object.fromEntries([...hot].map(([a, v]) => [a, v]))) + "\n");
 
 // The cost model: cycles against the model's counts, by least squares over
 // the scenes that didn't overflow.

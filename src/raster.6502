@@ -258,11 +258,7 @@ ENDIF
     NEXT
     LDA #VIEW_H : STA nopen
     STZ rs_overflow
-    \ The screen drawn (ACCCON's X): where its lines' records are.
-    LDA acccon : AND #ACCCON_X : BEQ main
-    LDA #BG_SCREEN
-.main
-    STA bg_buf
+    JSR background_set
     JSR writer_begin
 IF RASTER_PAINTER
     \ The backmost face into the span buffer, and the background round it.
@@ -1307,7 +1303,20 @@ LN_WHOLE  = &FF                     ; bg_was: the line one piece in ln_v's byte
 ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
 
 .raster_background
+    STZ r_y
+    JMP bg0
+
+\ background_set (before the faces, which read and write the records):
+\ the screen drawn (ACCCON's X), where its lines' records are (bg_buf);
+\ the background's split on each line and its patterns' bytes; and if
+\ those aren't the patterns the screen's records were drawn in, its lines
+\ forgotten.
+.background_set
 {
+    LDA acccon : AND #ACCCON_X : BEQ main
+    LDA #BG_SCREEN
+.main
+    STA bg_buf
     JSR horizon_split
     \ Both patterns' bytes for each phase, and their halves.
     LDA bg_l : ASL A : ASL A : TAX
@@ -1320,8 +1329,7 @@ ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
         AND #PIX_LEFT : STA bgv_ra + k
         LDA bgv_r + k : AND #PIX_RIGHT : STA bgv_rb + k
     NEXT
-    \ The screen drawn (bg_buf, raster_frame's): the patterns its lines'
-    \ records were drawn in.
+    \ The patterns the screen's lines' records were drawn in.
     LDX #0
     LDA bg_buf : BEQ first
     LDX #8
@@ -1336,10 +1344,9 @@ ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
     .same_r
     NEXT
     TYA : BEQ known
-    LDX bg_buf : JSR forget_screen
+    LDX bg_buf : JMP forget_screen
 .known
-    STZ r_y
-    JMP bg0
+    RTS
 }
 
 \ raster_forget: neither screen holds what the rasteriser last drew there
