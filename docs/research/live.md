@@ -627,9 +627,10 @@ disc's demo.
 - **The player logic (J)**: the hooks this disc fills in, and the names it
   sets (`LOGIC_*`), are the logic's interface now; `tools/logiccheck.6502`
   keeps the defaults.
-- **The maths (F)**: the projection's shared-coordinate entries are reached
-  by a stub (`live_shared`) until a stage calls them; the logic and the
-  fill read the maths' quarter squares. The maths' code is in `ObjMore`, from a page, as
+- **The maths (F)**: the projection's shared-coordinate entries were
+  reached by a stub (`live_shared`) until a stage called them, which the
+  vertex pass does now; the logic and the fill read the maths' quarter
+  squares. The maths' code is in `ObjMore`, from a page, as
   in `tools/mathscheck.6502`.
 
 ## What's left

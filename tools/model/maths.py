@@ -34,11 +34,16 @@ YC = SUB * VIEW_H // 2
 assert FY == 2 * FX
 
 # The nearest Z the projection takes, and one past the farthest. The
-# method's error is relative, so ZNEAR costs nothing in precision; it sets
-# how many cases the 6502 has code for (PROJ_NMIN). Camera space is 64
-# to a world unit, so ZNEAR is one world unit.
-ZNEAR = 64
-ZLIMIT = 1 << 23            # Z is a positive 24-bit number
+# method's error is relative, so ZNEAR costs nothing in precision; the two
+# set how many cases the 6502 has code for (PROJ_NMIN to PROJ_NMAX).
+# Camera space is 64 to a world unit. ZNEAR is the clip's (view.ZNEAR, four
+# world units: nothing nearer is projected), and ZLIMIT is a power of two
+# past Driller's deepest view, 8192 * sqrt(3) * 64 (a world's whole
+# diagonal; docs/research/maths.md), so no case is spelt out that nothing
+# reaches (decision 75).
+ZNEAR = 256
+ZLIMIT = 1 << 20
+COORD_LIMIT = 1 << 23       # X and Y are 24-bit signed numbers
 
 # --- Quarter squares ------------------------------------------------------
 #
@@ -180,7 +185,7 @@ def pmul(v, m):
 def project(X, Y, Z):
     """(sx, sy) in sixteenths of a pixel, as the 6502 computes them."""
     assert ZNEAR <= Z < ZLIMIT, Z
-    assert -ZLIMIT <= X < ZLIMIT and -ZLIMIT <= Y < ZLIMIT, (X, Y)
+    assert -COORD_LIMIT <= X < COORD_LIMIT and -COORD_LIMIT <= Y < COORD_LIMIT, (X, Y)
     assert abs(X) <= PROJ_XBAND * Z and abs(Y) <= PROJ_YBAND * Z, (X, Y, Z)
     m, t = recip(Z)
     xp, yp = _shr(X, t), _shr(Y, t - 1)

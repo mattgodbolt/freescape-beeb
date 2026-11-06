@@ -1203,6 +1203,44 @@ Counted and not built:
   most of the products' cases have sums within one bit, so it would take
   little of the few hundred cycles a step its products cost.
 
+## The twelfth round: room in the front end's bank, ANDY and ObjMore
+
+Memory was the limit on speed (a quarter-square table at 64 times the
+scale for `bound_object` wants about 1.8K), so this round freed bytes
+without changing what any stage outputs. The journal's entry for it has the
+figures: bytes freed in each region and the cycles each change costs, the
+checks' median over the entrance views, their walks and the yaw sweeps.
+What went, each a commit of its own:
+
+- **The projection's range** (decision 75): its cases cover the Z the
+  engine projects, `ZNEAR` the clip's and `ZLIMIT` a power of two past a
+  world's whole diagonal, so the cases for bit lengths 7, 8 and 21 to 23
+  and their blocks are gone. The table of cases still has an entry for
+  every bit length a 24-bit Z has, the first and the last case standing in.
+- **`pj_patch`**: the cases' eleven copies of the patch of `pmul`'s
+  operands are one routine, a call's 12 cycles a `project`.
+- **The 2D clip's passes**: a head for each of the four, and a body for each
+  axis, called by the axis's two passes, its bound in two zero-page bytes
+  (`clip2d.bl`, `bh`): a call's 12 cycles a pass.
+- **`transform_object`** makes vertex 0 once for the cuboids, rectangles and
+  sensors, which each had their own copy.
+- **The level camera's bound patch** calls `bp_site`, as the tilted
+  camera's does, in place of its six terms written out. The one change that
+  costs real cycles (a turn's frame), on its own commit.
+- **Loops** where the code runs once a frame or less: `camera_setup`'s
+  three axes, `transform_setup`'s three rows of a tilted camera, `bound_frame`'s
+  ceilings (one routine); and `fill_patch` computes each entry of M's bases
+  once for both of its sites.
+- **The stub** that reached the projection's shared entries is gone: the
+  vertex pass calls them.
+
+Looked at and left: `band_test` in ANDY is the vertex pass's inline test
+again (ANDY's 121 bytes, for 12 cycles a vertex in the bank to share it);
+the two `BD_BEYOND` triples in `objects_frame` (about 80 bytes, 12 cycles a
+candidate); `CE_TERM`'s two copies in `cone_eval`; `dot3`'s three terms
+(the maths' code patches itself by their offsets); the fills' unrolled
+cells; `dedupe` and `stage_pa`, which ANDY's code reaches.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's

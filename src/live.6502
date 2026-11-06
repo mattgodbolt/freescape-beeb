@@ -255,21 +255,6 @@ SECTION ObjMore, org = logic_work_end, filename = "OMORE", guard = &3000, cmos =
 ALIGN 256
 INCLUDE "maths.6502"
 INCLUDE "project.6502"
-\ live_shared: never called. It reaches the projection's shared-coordinate
-\ entries as a caller would (mk/objects.mk's check_shared), since no stage
-\ calls them yet, so that baron places their zero page.
-.live_shared
-    ZA_ENTRY
-    JSR shared_in : JSR project
-    JSR shared_in : JSR project_z
-    JSR shared_in : JSR project_y
-    RTS
-.shared_in
-    ZA_DISCARD proj_v
-    FOR i = 0..8
-        STZ proj_v + i
-    NEXT
-    RTS
 ENDSECTION
 \ RasterIn ends at RASTER_IN_END, its vertices (from rs_vxl) page-aligned
 \ straight after its faces' arrays, as ObjOut's are.

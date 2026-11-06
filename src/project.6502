@@ -59,7 +59,7 @@ PROJ_TMIN = PROJ_NMIN - PROJ_IBITS - 1      ; the blocks' shifts
 PROJ_TMAX = PROJ_NMAX - PROJ_IBITS
 ASSERT PROJ_XC = PROJ_YC                    ; sy is x's sum, by SQC's XC
 ASSERT PROJ_IBITS = 10 AND PROJ_T >= 512 AND PROJ_T < 768
-ASSERT PROJ_NMIN = 7 AND PROJ_NMAX = 23     ; the cases and blocks spelt out below
+ASSERT PROJ_NMIN = 9 AND PROJ_NMAX = 20     ; the cases and blocks spelt out below
 ASSERT LO(sqc_lo) = 0 AND LO(sqc_hi) = 0 AND LO(ngc_lo) = 0 AND LO(ngc_hi) = 0
 ASSERT LO(proj_m) = 0
 
@@ -179,6 +179,18 @@ ENDMACRO
 \ PROJ_IBITS), or to low's (one less). The patch keeps C.
 MACRO PROJ_CASE n, low
     PROJ_ZI n - PROJ_IBITS
+    JSR pj_patch
+    BCS high
+    JMP low
+.high
+ENDMACRO
+
+\ pj_patch: M for Zi (its low byte in X, its bit 8 in C) patched into pmul's
+\ operands, once for the cases all (a call's 12 cycles, for the eleven
+\ copies of its code it takes out of ObjMore); C is now whether Zi is in the
+\ high region.
+.pj_patch
+{
     BCC lower
     LDA proj_m+256,X                    ; Zi >= 768: the high region (C = 1)
     BCS patch
@@ -190,10 +202,8 @@ MACRO PROJ_CASE n, low
     STA pmul.a1+1 : STA pmul.a3+1 : STA pmul.b1+1 : STA pmul.b3+1
     EOR #&FF                            ; (NGC and NG are indexed by x + NOT M)
     STA pmul.a2+1 : STA pmul.a4+1 : STA pmul.b2+1 : STA pmul.b4+1
-    BCS high
-    JMP low
-.high
-ENDMACRO
+    RTS
+}
 
 \ A block, for shift t: its head notes it for project_y and project_z ...
 MACRO PROJ_BHEAD t
@@ -213,33 +223,29 @@ MACRO PROJ_BY t
     JMP pmul
 ENDMACRO
 
-\ The cases, at proj_cases + 2 bitlen(Z). Bit lengths below ZNEAR's go to
-\ the first (they're not to be asked).
-PROJ_CASES = {proj_c7, proj_c8, proj_c9, proj_c10, proj_c11, proj_c12, proj_c13, proj_c14, proj_c15, proj_c16, proj_c17, proj_c18, proj_c19, proj_c20, proj_c21, proj_c22, proj_c23}
+\ The cases, at proj_cases + 2 bitlen(Z), a table of the bit lengths a Z of
+\ 24 bits has. Those below ZNEAR's and above ZLIMIT's go to the first and
+\ the last (they're not to be asked: the build can't tell, but the model
+\ asserts every Z it projects).
+PROJ_NTAB = 24
+PROJ_CASES = {proj_c9, proj_c10, proj_c11, proj_c12, proj_c13, proj_c14, proj_c15, proj_c16, proj_c17, proj_c18, proj_c19, proj_c20}
 .proj_cases
-    FOR n = 0..<PROJ_NMIN : EQUW proj_c7 : NEXT
+    FOR n = 0..<PROJ_NMIN : EQUW proj_c9 : NEXT
     EQUW PROJ_CASES
-ASSERT (P% - proj_cases) DIV 2 = PROJ_NMAX + 1
+    FOR n = PROJ_NMAX + 1..<PROJ_NTAB : EQUW proj_c20 : NEXT
+ASSERT (P% - proj_cases) DIV 2 = PROJ_NTAB
 
 \ The blocks' entries for project_z and project_y, by pj_blk.
-PJ_XY = {pj_xy_m4, pj_xy_m3, pj_xy_m2, pj_xy_m1, pj_xy_0, pj_xy_1, pj_xy_2, pj_xy_3, pj_xy_4, pj_xy_5, pj_xy_6, pj_xy_7, pj_xy_8, pj_xy_9, pj_xy_10, pj_xy_11, pj_xy_12, pj_xy_13}
-PJ_Y = {pj_y_m4, pj_y_m3, pj_y_m2, pj_y_m1, pj_y_0, pj_y_1, pj_y_2, pj_y_3, pj_y_4, pj_y_5, pj_y_6, pj_y_7, pj_y_8, pj_y_9, pj_y_10, pj_y_11, pj_y_12, pj_y_13}
+PJ_XY = {pj_xy_m2, pj_xy_m1, pj_xy_0, pj_xy_1, pj_xy_2, pj_xy_3, pj_xy_4, pj_xy_5, pj_xy_6, pj_xy_7, pj_xy_8, pj_xy_9, pj_xy_10}
+PJ_Y = {pj_y_m2, pj_y_m1, pj_y_0, pj_y_1, pj_y_2, pj_y_3, pj_y_4, pj_y_5, pj_y_6, pj_y_7, pj_y_8, pj_y_9, pj_y_10}
 .pj_xytab   EQUW PJ_XY
 .pj_ytab    EQUW PJ_Y
-ASSERT PROJ_TMIN = -4 AND PROJ_TMAX = 13
+ASSERT PROJ_TMIN = -2 AND PROJ_TMAX = 10
 ASSERT pj_ytab - pj_xytab = 2 * (PROJ_TMAX - PROJ_TMIN + 1)
 
 \ Each case n, then the block for t = n - 10, which its high region falls
 \ into; its low region goes on to the block before.
-.pj_b_m4    PROJ_BHEAD -4
-.pj_xy_m4   PROJ_BX -4
-.pj_y_m4    PROJ_BY -4
-.proj_c7    PROJ_CASE 7, pj_b_m4
-.pj_b_m3    PROJ_BHEAD -3
-.pj_xy_m3   PROJ_BX -3
-.pj_y_m3    PROJ_BY -3
-.proj_c8    PROJ_CASE 8, pj_b_m3
-.pj_b_m2    PROJ_BHEAD -2
+.pj_b_m2   PROJ_BHEAD -2
 .pj_xy_m2   PROJ_BX -2
 .pj_y_m2    PROJ_BY -2
 .proj_c9    PROJ_CASE 9, pj_b_m2
@@ -290,18 +296,6 @@ ASSERT pj_ytab - pj_xytab = 2 * (PROJ_TMAX - PROJ_TMIN + 1)
 .pj_b_10    PROJ_BHEAD 10
 .pj_xy_10   PROJ_BX 10
 .pj_y_10    PROJ_BY 10
-.proj_c21   PROJ_CASE 21, pj_b_10
-.pj_b_11    PROJ_BHEAD 11
-.pj_xy_11   PROJ_BX 11
-.pj_y_11    PROJ_BY 11
-.proj_c22   PROJ_CASE 22, pj_b_11
-.pj_b_12    PROJ_BHEAD 12
-.pj_xy_12   PROJ_BX 12
-.pj_y_12    PROJ_BY 12
-.proj_c23   PROJ_CASE 23, pj_b_12
-.pj_b_13    PROJ_BHEAD 13
-.pj_xy_13   PROJ_BX 13
-.pj_y_13    PROJ_BY 13
 
 \ pmul: XC + floor(v R / 256) + 1, R = 256 + M (patched by the case), v =
 \ x1:x0 signed, x1 + 128 in Y and x0 in X, to sixteen bits: in pj_u:pj_t

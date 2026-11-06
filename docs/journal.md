@@ -1101,3 +1101,57 @@ pages each have 96 free bytes after their 160, twelve gaps for routines of
 that size (`swap_chains`, `product`, `fill_split` are 92, 92, 95) or per-row
 records indexed by `(r_rr),Y` (raster.md, round 6). `bnd_ofs` has an
 entry for every pixel and reads only the odd ones.
+
+## 2026-11-06: the twelfth round, room in the front end
+
+Memory was the limit on speed (a quarter-square table at 64 times the scale
+for `bound_object` wants about 1.8K), and the front end's regions had little
+left: the bank (`ObjCode`) 477 bytes free, ANDY 70, `ObjMore` 383. This round
+freed bytes there without changing what any stage outputs
+(`docs/research/objects.md`, "The twelfth round"; decisions 75 and 76), each
+change a commit of its own so one can be reverted alone. `objectcheck`
+agrees on every view after each, and `make check` passes on the last.
+
+Bytes freed and cycles changed, the entrance views' median in cycles a view
+(118,016 before) and the yaw sweeps' (a 5-degree turn, 65,460 before), then
+the walks' (92,740):
+
+| change | region | bytes | entrances | turns | walks |
+|---|---|---|---|---|---|
+| the projection's cases, 9 to 20 of bit length | `ObjMore` | 615 | -16 | | |
+| the never-called stub for the shared entries | `ObjMore` | 38 | | | |
+| `transform_object` makes vertex 0 once | bank | 264 | +3 | | |
+| a level camera's bound patch by `bp_site` | bank | 594 | +546 | +581 | |
+| one patch of `pmul` for the cases | `ObjMore` | 381 | +241 | | +120 |
+| the 2D clip's passes share a body per axis | `ObjMore` | 284 | +252 | | +127 |
+| `transform_setup`'s tilted rows a loop | bank | 121 | +21 | | |
+| `fill_patch` once for both sites of an entry | bank | 48 | | -36 | |
+| `bound_frame`'s ceilings one routine | bank | 89 | | | |
+| `camera_setup` a loop | bank | 243 | +84 | | |
+
+(The cycles are `objectcheck`'s, each against the change before it, and a
+change that moves code moves the page crossings of what comes after, so
+differences under about 50 cycles are that.) In all, from 15,779 bytes of
+code in the bank to 14,420 (1,836 free, from 477), `ObjMore` from 4,901 to
+3,583 (1,701 free, from 383), ANDY unchanged (70). The whole: entrances
+118,016 / 197,496 / 286,805 (median / p90 / max) to 119,091 / 198,665 /
+287,405 (+0.9%); walks 92,740 / 138,505 / 173,145 to 93,161 / 138,916 /
+173,839 (+0.45%); the yaw sweeps 65,460 / 143,791 / 219,883 to 66,156 /
+145,213 / 221,535 (+1.1%); all views 88,144 / 183,851 / 316,392 to 88,567 /
+184,766 / 318,457. The level camera's bound patch is over half of that
+(594 bytes for about 580 cycles on a turn's frame): the one change here
+that is more than a trivial price, and its commit can be reverted alone.
+
+The projection's cases were the largest find: the model took Z from 64 to
+2^23, and nothing nearer than the clip's 256 or farther than a world's
+diagonal (under 2^20) is projected, so `ZNEAR` and `ZLIMIT` came to those
+and five cases and their blocks went (decision 75). The 6502's table of
+cases still has an entry for every bit length of a 24-bit Z.
+
+Looked at and left (`docs/research/objects.md` has them): ANDY's `band_test`
+is the vertex pass's inline test again, but sharing it costs the bank 12
+cycles a vertex; the two `BD_BEYOND` triples; `CE_TERM`; `dot3`'s three
+terms; the fills' unrolled cells. ANDY could not give the bank anything:
+its 70 bytes free are what it has, and the setup routines that would fit
+there (`transform_setup`, `bound_frame`) reach code in the bank's first 4K,
+which ANDY hides, or patch it (`fill_patch`).

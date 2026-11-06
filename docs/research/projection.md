@@ -171,8 +171,10 @@ Not taken, each small: pmul in zero page (its patch 3 cycles a store: 8
 a vertex, for about 70 bytes of zero page); a dispatch table on Z's top
 byte that knows Zi's half (about 5 a vertex, for a table and twice the
 cases); x0 added from an identity table (2 a coordinate, for 256 bytes);
-`ZNEAR` raised to the clip's (decision 15), which drops four cases'
-code. Rare shifts (Z under 1,024 or over 2^20) cost more cycles, and
+`ZNEAR` raised to the clip's (decision 15), which would drop the cases
+under it; the twelfth round did (decision 75), and `ZLIMIT` came down to a
+power of two past a world's whole diagonal, 2^20, taking the cases past it
+too (objects.md, "The twelfth round"). Rare shifts (Z under 1,024 or over 2^20) cost more cycles, and
 table-driven shifts would trade a few kilobytes of HAZEL for them.
 
 ## Sharing

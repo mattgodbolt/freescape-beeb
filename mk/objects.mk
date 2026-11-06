@@ -55,10 +55,9 @@ define OBJECTS_CHECK_6502
 \ tools/areacheck.mjs). The front end's code where the live disc has it:
 \ ObjCode in its sideways bank (src/defs.6502's OBJ_BANK, from
 \ OBJ_CODE_ORG), ObjAndy in ANDY over that bank's first 4K, and ObjMore in
-\ main RAM from a page, the maths' code first, then the same never-called
-\ stub as the live disc's (live_shared), so that every byte of the front
-\ end's code is where the free disc has it (the logic's disc's differs by
-\ OBJ_LOGIC); the check's entries in ObjCheck. The working copy and the
+\ main RAM from a page, the maths' code first, so that every byte of the
+\ front end's code is where the free disc has it (the logic's disc's
+\ differs by OBJ_LOGIC); the check's entries in ObjCheck. The working copy and the
 \ work in main RAM, the output in the OS's pages (nothing of the OS runs
 \ once the harness's stub has turned interrupts off); the maths' tables,
 \ the transform's cache and f64 table in HAZEL, which the check's entries
@@ -79,21 +78,6 @@ ENDSECTION
 SECTION ObjMore, org = &0E00, guard = &5700, filename = "OMORE", cmos = TRUE
 INCLUDE "../../src/maths.6502"
 INCLUDE "../../src/project.6502"
-\ check_shared: never called (src/live.6502's live_shared, the same code):
-\ it reaches the projection's shared-coordinate entries, as a caller
-\ would, so that baron places their zero page.
-.check_shared
-    ZA_ENTRY
-    JSR shared_in : JSR project
-    JSR shared_in : JSR project_z
-    JSR shared_in : JSR project_y
-    RTS
-.shared_in
-    ZA_DISCARD proj_v
-    FOR i = 0..8
-        STZ proj_v + i
-    NEXT
-    RTS
 ENDSECTION
 \ The check's entry points, each called from the harness's stub: the
 \ pipeline's bank paged (and its copy at &F4, as the live disc's PAGE_IN

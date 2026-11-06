@@ -239,22 +239,27 @@ SECTION ObjCode
     STA mc+5
     JMP valid
 .rows
-    FOR r = 0..2
-        LDA mat + 3 * r + 0 : STA mrow+0
-        LDA mat + 3 * r + 1 : STA mrow+1
-        LDA mat + 3 * r + 2 : STA mrow+2
-        JSR dot_set
-        LDA cam_x+0 : STA mv0+0
-        LDA cam_x+1 : STA mv0+1
-        LDA cam_y+0 : STA mv1+0
-        LDA cam_y+1 : STA mv1+1
-        LDA cam_z+0 : STA mv2+0
-        LDA cam_z+1 : STA mv2+1
-        JSR dot3
-        LDA macc+0 : STA mc + 3 * r + 0
-        LDA macc+1 : STA mc + 3 * r + 1
-        LDA macc+2 : STA mc + 3 * r + 2
-    NEXT
+    \ (a loop: a tilted camera's M c costs three dot3 anyway)
+    LDX #0                              ; 3 r
+.row
+    LDA mat+0,X : STA mrow+0
+    LDA mat+1,X : STA mrow+1
+    LDA mat+2,X : STA mrow+2
+    PHX
+    JSR dot_set
+    LDA cam_x+0 : STA mv0+0
+    LDA cam_x+1 : STA mv0+1
+    LDA cam_y+0 : STA mv1+0
+    LDA cam_y+1 : STA mv1+1
+    LDA cam_z+0 : STA mv2+0
+    LDA cam_z+1 : STA mv2+1
+    JSR dot3
+    PLX
+    LDA macc+0 : STA mc+0,X
+    LDA macc+1 : STA mc+1,X
+    LDA macc+2 : STA mc+2,X
+    INX : INX : INX
+    CPX #9 : BNE row
 .valid
     LDA #1 : STA mc_valid
 .moved
@@ -496,25 +501,24 @@ ZA_AUTO 9, fill_acc
 
 \ fill_patch: a level camera's fills' bases (above, "A level camera's
 \ fills") for M, as it's built: + m's 64 + m, - m's 64 - m.
-MACRO LV_PATCH site, m, a0, a1, a2, b0, b1, b2
+MACRO LV_PATCH m, s, a0, a1, a2, b0, b1, b2, t, c0, c1, c2, d0, d1, d2
     LDA m : CLC : ADC #64
-    STA site + a0 : STA site + a1 : STA site + a2
+    STA s + a0 : STA s + a1 : STA s + a2
+    STA t + c0 : STA t + c1 : STA t + c2
     LDA #64 : SEC : SBC m
-    STA site + b0 : STA site + b1 : STA site + b2
+    STA s + b0 : STA s + b1 : STA s + b2
+    STA t + d0 : STA t + d1 : STA t + d2
 ENDMACRO
 .fill_patch
 {
     LDA mat_tilt : BEQ level
     RTS
 .level
-    LV_PATCH fill_point.lv_x0, M00, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
-    LV_PATCH fill_point.lv_z0, M20, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
-    LV_PATCH fill_point.lv_x1, M02, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
-    LV_PATCH fill_point.lv_z1, M22, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
-    LV_PATCH fill_edge.lv_xx, M00, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_xz, M20, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_zx, M02, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_zz, M22, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    \ each entry of M's patched into a point fill's site and an edge fill's
+    LV_PATCH M00, fill_point.lv_x0, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2, fill_edge.lv_xx, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M20, fill_point.lv_z0, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2, fill_edge.lv_xz, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M02, fill_point.lv_x1, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2, fill_edge.lv_zx, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M22, fill_point.lv_z1, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2, fill_edge.lv_zz, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
     RTS
 }
 
@@ -878,16 +882,8 @@ ZA_AUTO 3 * BD_N, bm
 \ ceil(v / 64), plus 64 times bound p's bias (bb_bias), saturated to 24
 \ bits unsigned
 MACRO BD_CEIL p, v
-    LDA v : CLC : ADC #63 : AND #&C0 : STA bd_mc + 3 * p
-    LDA v+1 : ADC #0 : STA bd_mc + 3 * p + 1
-    LDA v+2 : ADC bb_bias + p : STA bd_mc + 3 * p + 2
-    LDA v+3 : ADC #0 : BEQ done
-    BMI low
-    LDA #&FF : STA bd_mc + 3 * p : STA bd_mc + 3 * p + 1 : STA bd_mc + 3 * p + 2
-    BRA done
-.low
-    STZ bd_mc + 3 * p : STZ bd_mc + 3 * p + 1 : STZ bd_mc + 3 * p + 2
-.done
+    LDX #3 * p : LDY #p
+    JSR ceil
 ENDMACRO
 
 \ bound_frame: bd_mc = the three bounds of M c, made in 32 bits (M c isn't
@@ -937,6 +933,19 @@ ENDMACRO
     LDA mc+8 : SBC t+2 : STA f+2
     LDA zs : SBC t+3 : STA f+3
     BD_CEIL BD_T, f
+    RTS
+\ ceil: bd_mc's bound Y (X = 3 Y) from f, as BD_CEIL says
+.ceil
+    LDA f : CLC : ADC #63 : AND #&C0 : STA bd_mc,X
+    LDA f+1 : ADC #0 : STA bd_mc+1,X
+    LDA f+2 : ADC bb_bias,Y : STA bd_mc+2,X
+    LDA f+3 : ADC #0 : BEQ done
+    BMI low
+    LDA #&FF : STA bd_mc,X : STA bd_mc+1,X : STA bd_mc+2,X
+.done
+    RTS
+.low
+    STZ bd_mc,X : STZ bd_mc+1,X : STZ bd_mc+2,X
     RTS
 }
 
@@ -1024,18 +1033,20 @@ ENDMACRO
     ZA_ENTRY
     ZA_AUTO1 want, slot
     STA want
-    LDA ob_slot,X : STA slot
-    LDA ob_flags,X : AND #K_MASK
-    BNE not_cuboid
+    LDA ob_flags,X : AND #K_MASK : TAY
+    LDA ob_slot,X
+    ASSERT K_CUBOID = 0 AND K_RECT = 1 AND K_GENERIC = 2 AND K_SENSOR = 3
+    CPY #K_GENERIC : BEQ generic
+    \ the others' vertex 0, made once for all of them: the cache slot's
+    \ vector less M c; the kind's in Y (0 cuboid, 1 rect, 3 sensor)
+    TAX
+    V_SUB 0
+    CPY #K_RECT : BEQ rect
+    BCS sensor
     JMP cuboid
-.not_cuboid
-    CMP #K_RECT : BNE not_rect
-    JMP rect
-.not_rect
-    CMP #K_SENSOR : BNE generic
-    JMP sensor
 .generic
     \ a generic object: each wanted vertex from its own slot
+    STA slot
     LDY #0
 .gen_vertex
     LSR want : BCC gen_next
@@ -1054,12 +1065,8 @@ ENDMACRO
     LDA want : BNE gen_vertex
     RTS
 .sensor
-    LDX slot
-    V_SUB 0
     RTS
 .rect
-    LDX slot
-    V_SUB 0
     V_ADD 1, 0, 1
     V_ADD 2, 1, 2
     V_ADD 3, 0, 2
@@ -1081,8 +1088,6 @@ ENDMACRO
     ORA #&04
 .no6
     LSR A : STA want
-    LDX slot
-    V_SUB 0
     FOR j = 1..7
         LSR want : BCC skip
         V_ADD j, CUBE_PARENT[j], CUBE_EDGE[j]
@@ -1107,8 +1112,6 @@ ENDMACRO
     ORA #&04
 .l_no367
     STA want
-    LDX slot
-    V_SUB 0
     V_IF 1, l_1
     V_XZ 1, 0, 1
 .l_1
