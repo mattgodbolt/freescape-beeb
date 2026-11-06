@@ -202,6 +202,9 @@ RASTER_BL2        = proj_bl2
 \ ... and no horizon's code (decision 8a: live_init sets rs_horizon to 0 and
 \ nothing sets it after; docs/research/raster.md, "Round 6").
 RASTER_NO_HORIZON = TRUE
+\ ... and, with the room that leaves, the line loop's and the background's
+\ ends written out (src/raster.6502's END_FIRST and END_LAST).
+RASTER_ENDS_INLINE = TRUE
 IF LIVE_LOGIC
     LOGIC_KEYS        = lv_lkeys
     LOGIC_HOOK_WAIT   = lv_hook_wait

@@ -665,6 +665,66 @@ ZA_AUTO1 r_t, r_ev
 .held
     RTS
 }
+\ END_FIRST v and END_LAST v: end_first and end_last of byte v (zero page),
+\ written out where the includer names RASTER_ENDS_INLINE (the live disc,
+\ whose fill's bank has the room: a call's cycles and r_ev's at each of the
+\ line loop's and the background's commonest ends), or called.
+IF DEFINED(RASTER_ENDS_INLINE)
+MACRO END_FIRST v
+{
+    LDY r_y
+    LDA v : CMP re_fv,Y : BNE new
+    LDA re_fe,Y : BEQ from0
+    CMP r_pcur : BCS held
+    STA put_go + 1
+    BRA record
+.new
+    STA re_fv,Y
+.from0
+    STZ put_go + 1
+.record
+    LDA r_pcur : STA re_fe,Y
+    LDA v : JSR put_go
+    BRA done
+.held
+    LDA r_pcur : STA re_fe,Y
+.done
+}
+ENDMACRO
+MACRO END_LAST v
+{
+    LDY r_y
+    LDA v : CMP re_lv,Y : BNE new
+    LDA re_ls,Y : CMP put_go + 1 : BCC held : BNE trim
+    CMP #RR_END : BNE held
+.trim
+    STA r_t
+    LDA put_go + 1 : STA re_ls,Y
+    LDA r_t
+.plant
+    CMP r_pcur : BEQ go
+    JSR replant
+.go
+    LDY r_y : LDA v : JSR put_go
+    BRA done
+.new
+    STA re_lv,Y
+    LDA put_go + 1 : STA re_ls,Y
+    LDA #RR_END : BRA plant
+.held
+    LDA put_go + 1 : STA re_ls,Y
+.done
+}
+ENDMACRO
+ELSE
+MACRO END_FIRST v
+    LDA v : JSR end_first
+ENDMACRO
+MACRO END_LAST v
+    LDA v : JSR end_last
+ENDMACRO
+ENDIF
+
 \ END_WHOLE v: line r_y, in X too, whole in byte v: end_both, but first
 \ inline the commonest case, a line the screen holds whole in v.
 MACRO END_WHOLE v
@@ -757,7 +817,7 @@ MACRO INSERT k, next, stretch
     PLANT_ZP r_b
     LDA r_b : STA GS,X
     LDA GH,X : AND #PIX_RIGHT : ORA PVA : STA GH,X
-    LDA PV : JSR end_first
+    END_FIRST PV
     JMP next
 .whole
     \ [s, e): the gap goes, with its shared byte at e if e is odd; to the
@@ -768,7 +828,8 @@ MACRO INSERT k, next, stretch
     BND_PUT
     BRA right_odd
 .right_even
-    CMP #VIEW_W DIV 2 : BEQ whole_last
+    CMP #VIEW_W DIV 2 : BNE right_odd
+    JMP whole_last
 .right_odd
     ENTER_X GS
     BEQ whole_first
@@ -788,16 +849,16 @@ MACRO INSERT k, next, stretch
     LDA GN,X : BEQ out2
     TAX
     JMP found
-.whole_first
-    PLANT_X GE
-    LDA PV : JSR end_first
-    BRA unlink
-.whole_last
-    ENTER_X GS
-    LDA PV : JSR end_last
-    BRA unlink
 .out2
     JMP next
+.whole_first
+    PLANT_X GE
+    END_FIRST PV
+    JMP unlink
+.whole_last
+    ENTER_X GS
+    END_LAST PV
+    JMP unlink
 .cut_left
     \ The span starts inside the gap.
     LDA r_b : CMP GE,X : BCC split
@@ -805,9 +866,7 @@ MACRO INSERT k, next, stretch
     \ shared byte at e if e is odd. To the line's end, it's the last piece.
     LDA GE,X : LSR A : BCS cut_odd
     CMP #VIEW_W DIV 2 : BNE cut_even
-    ENTER_ZP r_a
-    LDA PV : JSR end_last
-    BRA cut_done
+    JMP cut_last
 .cut_odd
     BND_X GE
     LDA GH,X : AND #PIX_RIGHT : ORA PVA
@@ -820,7 +879,7 @@ MACRO INSERT k, next, stretch
     LDA GE,X : CMP r_b                  ; (C: the span ends in this gap)
     LDA r_a : STA GE,X
     LDA GH,X : AND #PIX_LEFT : ORA PVB : STA GH,X
-    BCS out2
+    BCS out3
     STX r_prev
     LDA GN,X : BEQ out3
     TAX
@@ -848,6 +907,11 @@ MACRO INSERT k, next, stretch
     \ No room for the gaps this piece would leave: it isn't drawn.
     LDA #&FF : STA rs_overflow
     JMP next
+.cut_last
+    \ (cut_left's [a, W), the line's last piece)
+    ENTER_ZP r_a
+    END_LAST PV
+    JMP cut_done
 .fresh
     \ The line's first face (X is still the line): one gap [0, VIEW_W) with
     \ no neighbours, unless the span is empty; the chains swapped first if
@@ -870,6 +934,8 @@ MACRO INSERT k, next, stretch
     JMP next
 .on_whole
     LDY #ST_WHOLE : JMP fresh_on
+.overflow2
+    JMP overflow
 .fresh_right
     \ [0, b): the gap [b, W) waits on the byte at b.
     LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow2
@@ -880,7 +946,7 @@ MACRO INSERT k, next, stretch
     LDA #0 : STA GN,Y
     TYA : STA head,X
     PLANT_ZP r_b
-    LDA PV : JSR end_first
+    END_FIRST PV
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_right       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_right
@@ -895,16 +961,16 @@ MACRO INSERT k, next, stretch
     LDA PVB : STA GH,Y
     TYA : STA head,X
     ENTER_ZP r_a
-    LDA PV : JSR end_last
+    END_LAST PV
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_left       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_left
     LDY #ST_LEFT : JMP fresh_on
-.overflow2
+.overflow3
     JMP overflow
 .fresh_mid
     \ [a, b): gaps [0, a) and [b, W).
-    LDY gtop + k : CPY #POOL_HELD : BCS overflow2
+    LDY gtop + k : CPY #POOL_HELD : BCS overflow3
     INC gtop + k : INC gtop + k
     LDA #0 : STA GS,Y
     LDA r_a : STA GE,Y
@@ -1553,14 +1619,14 @@ ENDIF
     BEQ first                           ; (from 0: the run's first slot)
     PLANT_X GE
     GO_V bgv_l + k
-    BRA done
+    JMP done
 .first
     PLANT_X GE
-    LDA bgv_l + k : JSR end_first
-    BRA done
+    END_FIRST bgv_l + k
+    JMP done
 .last
     ENTER_X GS
-    LDA bgv_l + k : JSR end_last
+    END_LAST bgv_l + k
 IF RASTER_HORIZON
     BRA done
 .split

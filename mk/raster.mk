@@ -43,6 +43,8 @@ RASTER_BANK = 4
 \ live disc has them, in RasterState's page after its state.
 RASTER_HEAD = &1780
 RASTER_SCRATCH = RASTER_HEAD + VIEW_H
+\ (the ends written out, as the live disc has them)
+RASTER_ENDS_INLINE = TRUE
 
 \ The stubs the harness calls: each pages in the bank and the screen
 \ check_acccon names, and puts ACCCON back after.
@@ -75,12 +77,15 @@ SECTION RasterState, org = &1700, guard = &1800, virtual = TRUE
 ENDSECTION
 SECTION RasterEnds, org = (SCREEN AND &FF00) - &100 - 2 * VIEW_H, guard = SCREEN, virtual = TRUE
 ENDSECTION
-\ The bank's sections one after another, as the slideshow has them.
+\ The bank's code sections one after another, as the slideshow has them;
+\ the work in main RAM below &3000 (which ACCCON's X doesn't switch), as
+\ the bank hasn't room for it with the horizon's code and the ends written
+\ out both (it starts on a page either way).
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
 SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
 ENDSECTION
-SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
+SECTION RasterWork, org = &1800, guard = &3000, virtual = TRUE
 ENDSECTION
 
 INCLUDE "../../src/raster.6502"
@@ -97,7 +102,7 @@ ENDSECTION
 SECTION RasterState
 .raster_state_end
 ENDSECTION
-ASSERT raster_work_end <= &C000 AND raster_state_end <= RASTER_HEAD
+ASSERT raster_code_end <= &C000 AND raster_work_end <= &3000 AND raster_state_end <= RASTER_HEAD
 endef
 export RASTER_CHECK_6502
 
