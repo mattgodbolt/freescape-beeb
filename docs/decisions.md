@@ -751,3 +751,18 @@ per-buffer data at the same addresses in main and shadow RAM below
 into a buffer that holds nothing of it (an entrance) pays the records'
 tests on every line's ends, 6% of the fill there; walking and turning gain
 more (`docs/research/raster.md`, "Round 7", and the journal, 2026-11-06).
+
+## 101. The slanted faces' planes kept by their shape, in shadow RAM (2026-11-06, autonomous)
+
+What a slanted face's plane is (the cross product's components, its axis or
+its two axes, n reduced) depends on nothing but its loop's first two edges,
+u and w, six bytes. The area conversion keeps it in a memo of 256 entries
+found by a hash of those bytes (`src/area.6502`'s `AreaShapes`), the
+globals' faces and every area's alike, and a face whose u and w are its
+entry's takes the entry's plane; one that isn't takes the entry. This
+replaces the globals' memo by place (`pm_*`, in main RAM below `SCREEN`,
+which is free again). The memo's eleven pages are in shadow RAM past the
+logic's lists, where only the logic reached before: the conversion sets
+ACCCON's X round each access, as its working copy is main RAM's. Nothing
+any stage outputs changes: an entry is taken only when its six bytes are
+the face's. Figures: the journal, 2026-11-06, "the fourteenth round".

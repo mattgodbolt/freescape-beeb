@@ -110,24 +110,30 @@ SECTION ObjWork
 .ac_fm      SKIP 1                  ; the vertices it uses
 .ac_v0      SKIP 3                  ; a slanted face's first vertex, cells
 .ac_nn      SKIP 6                  ; its normal, (v1 - v0) x (v2 - v1), 16-bit signed
-.ac_pm      SKIP 1                  ; the globals' next face's entry in the memo; &FF an area's
 ENDSECTION
 
-\ The memo of the globals' slanted faces (ac_plane_face), an entry a face in
-\ their order: its u and w, and what they made (pm_k: ac_plane_face's
-\ nonzero, &FF for none yet; pm_a, pm_b: the axis and n's top byte, or the
-\ plane's axes; pm_na, pm_nb: n reduced). Main RAM's &3000 on, as the sort's.
-PM_N = G_FACE                       ; (each slanted face is a face, or none)
-ASSERT PM_N <= 128                  ; (an entry's index is positive)
-SECTION ObjMemo
-.pm_u       SKIP 3 * PM_N
-.pm_w       SKIP 3 * PM_N
-.pm_k       SKIP PM_N
-.pm_a       SKIP PM_N
-.pm_b       SKIP PM_N
-.pm_na      SKIP PM_N
-.pm_nb      SKIP PM_N
+\ The memo of the slanted faces' planes (ac_plane_face), the globals' and
+\ every area's: what a face's u and w made depends on them alone, so an
+\ entry, found by a hash of the six bytes, keeps them and what they made
+\ (hm_k: ac_plane_face's nonzero, &FF for none yet; hm_a, hm_b: the axis
+\ and n's top byte, or the plane's axes; hm_na, hm_nb: n reduced), and a
+\ face whose u and w are its entry's takes that, without the products and
+\ the reduction. Faces of one hash take the entry in turn. A page an
+\ array, so each is indexed by the hash alone. The includer puts it in
+\ &3000 up to SCREEN with ACCCON's X set, the conversion's X clear (its
+\ working copy's), so it's read and written with X set round each access:
+\ on the live disc, shadow RAM past the logic's lists, which only the front
+\ end's entry reaches (decision 101).
+SECTION AreaShapes
+.hm_u       SKIP 3 * 256
+.hm_w       SKIP 3 * 256
+.hm_k       SKIP 256
+.hm_a       SKIP 256
+.hm_b       SKIP 256
+.hm_na      SKIP 256
+.hm_nb      SKIP 256
 ENDSECTION
+ASSERT LO(hm_u) = 0 AND hm_u >= &3000 AND hm_nb + 256 <= SCREEN
 
 \ The pointers: the record being read, and the colour stream.
 ZA_AUTO2 ac_src, ac_col
@@ -238,27 +244,24 @@ ENDIF
 
 SECTION AreaConv
 
-\ ac_first: the memo emptied, then ac_globals.
+\ ac_first: the memo emptied (with ACCCON's X set: AreaShapes), then
+\ ac_globals.
 .ac_first
 {
+    LDA #ACCCON_X : TSB acccon
     LDA #&FF
-    LDX #PM_N - 1
+    LDX #0
 .forget
-    STA pm_k,X
-    DEX : BPL forget
+    STA hm_k,X
+    INX : BNE forget
+    LDA #ACCCON_X : TRB acccon
     IF DEFINED(OBJ_LOGIC)
         STZ ag_valid                        ; (no records kept: the first entry builds them again)
     ENDIF
 }
-\ ac_globals: the globals' records into slots from 0, their slanted faces
-\ by the memo.
+\ ac_globals: the globals' records into slots from 0.
 .ac_globals
 {
-    STZ ac_pm
-    JSR globals
-    LDA #&FF : STA ac_pm                    ; (an area's faces aren't the memo's)
-    RTS
-.globals
     LDA #LO(AG_ADDR) : STA ac_src
     LDA #HI(AG_ADDR) : STA ac_src+1
     LDA #AG_BANK : STA ac_bank
@@ -691,14 +694,8 @@ SECTION AreaConv
 \ ac_plane_face: a face of a generic object, colour Y, its loop at lp_table
 \ + A, X long, its vertices from ac_g0: its plane from the cross product
 \ n = (v1 - v0) x (v2 - v1) of its loop's first three. None if n is 0; an
-\ axis test if one component isn't; else a plane test, n reduced.
-\
-\ The globals' faces are converted in one order every time, and the logic
-\ only moves the rig's parts and hides and shows them, which leaves each
-\ face's u and w as they were: so the k-th face of the globals' (ac_pm, from
-\ 0 in ac_globals) keeps its u and w and what they made in pm_*'s entry k,
-\ and the next build of the globals takes that when its u and w are the same,
-\ without the products and the reduction.
+\ axis test if one component isn't; else a plane test, n reduced. What u and
+\ w make is the memo's (AreaShapes) when its entry for them has them.
 .ac_plane_face
 {
     ZA_AUTO1 colour, i1, i2, left, nonzero, axis, pa, pb, slot, sign, na, nb
@@ -726,37 +723,34 @@ SECTION AreaConv
     FOR k = 0..2
         LDA gv_x + k * N_GV,X : SEC : SBC gv_x + k * N_GV,Y : STA w + k
     NEXT
-    \ a global's face: its entry in the memo (slot), and what it made if its
-    \ u and w are the entry's
-    LDX ac_pm : CPX #PM_N : BCS no_memo     ; (an area's object: ac_pm &FF)
-    STX slot
-    INC ac_pm
-    LDA pm_k,X : BMI missed                 ; (none made yet: area_init's &FF)
-    FOR k = 0..2
-        LDA u + k : CMP pm_u + k * PM_N,X : BNE missed
-        LDA w + k : CMP pm_w + k * PM_N,X : BNE missed
+    \ its entry in the memo (slot: u and w's bytes each rotated left and
+    \ EORed in), and what they made if they're the entry's
+    LDA u
+    FOR b = {u + 1, u + 2, w, w + 1, w + 2}
+        ASL A : ADC #0 : EOR b
     NEXT
-    LDA pm_a,X : STA axis : STA pa
-    LDA pm_b,X : STA sign : STA pb
-    LDA pm_na,X : STA na
-    LDA pm_nb,X : STA nb
-    LDA pm_k,X
-    CMP #1 : BNE not_axis
+    STA slot : TAX
+    LDA #ACCCON_X : TSB acccon
+    LDA hm_k,X : BMI missed                 ; (none made yet: ac_first's &FF)
+    FOR k = 0..2
+        LDA u + k : CMP hm_u + k * 256,X : BNE missed
+        LDA w + k : CMP hm_w + k * 256,X : BNE missed
+    NEXT
+    LDA hm_a,X : STA axis : STA pa
+    LDA hm_b,X : STA sign : STA pb
+    LDA hm_na,X : STA na
+    LDA hm_nb,X : STA nb
+    LDY hm_k,X
+    LDA #ACCCON_X : TRB acccon
+    CPY #1 : BNE not_axis
     JMP axis_test
 .not_axis
-    CMP #2 : BNE none
+    CPY #2 : BNE none
     JMP plane_test
 .none
     RTS
 .missed
-    FOR k = 0..2
-        LDA u + k : STA pm_u + k * PM_N,X
-        LDA w + k : STA pm_w + k * PM_N,X
-    NEXT
-    BRA products
-.no_memo
-    LDA #&FF : STA slot
-.products
+    LDA #ACCCON_X : TRB acccon
     \ n_k = u_a w_b - u_b w_a, (k, a, b) a turn of (0, 1, 2), a product
     \ with a factor 0 not made; the last non-zero component's axis kept
     STZ nonzero
@@ -780,18 +774,13 @@ SECTION AreaConv
     .zero
     NEXT
     LDA nonzero
-    LDX slot : BMI kept
-    STA pm_k,X                              ; (what it makes, for the next build)
-.kept
     CMP #1 : BEQ axis_found
     CMP #2 : BEQ plane_found
-    RTS                                     ; (none: n is 0)
+    JMP remember                            ; (none: n is 0)
 .axis_found
-    LDA axis : ASL A : TAY
-    LDA ac_nn + 1,Y : STA sign
-    LDX slot : BMI axis_test
-    LDA axis : STA pm_a,X
-    LDA sign : STA pm_b,X
+    LDA axis : STA pa : ASL A : TAY
+    LDA ac_nn + 1,Y : STA sign : STA pb
+    JSR remember
 .axis_test
     \ on axis k: from above (T_AXHI + 2 k, 255 - v0's cell) if n_k > 0, else
     \ from below (T_AXLO + 2 k, the cell)
@@ -822,11 +811,7 @@ SECTION AreaConv
     JSR ac_reduce
     LDA ac_reduce.na : STA na
     LDA ac_reduce.nb : STA nb
-    LDX slot : BMI plane_test
-    LDA pa : STA pm_a,X
-    LDA pb : STA pm_b,X
-    LDA na : STA pm_na,X
-    LDA nb : STA pm_nb,X
+    JSR remember
 .plane_test
     \ the plane: its axes, n_a and n_b reduced, and v0's cells on them, 64 v
     \ (v >> 2 high, v << 6 low)
@@ -847,6 +832,22 @@ SECTION AreaConv
 .add
     LDA colour
     JMP ac_face
+\ remember: u and w, and what they made (nonzero; pa, pb, the axis and n's
+\ top byte for an axis; na, nb), into their entry. Keeps ACCCON's X clear.
+.remember
+    LDX slot
+    LDA #ACCCON_X : TSB acccon
+    FOR k = 0..2
+        LDA u + k : STA hm_u + k * 256,X
+        LDA w + k : STA hm_w + k * 256,X
+    NEXT
+    LDA nonzero : STA hm_k,X
+    LDA pa : STA hm_a,X
+    LDA pb : STA hm_b,X
+    LDA na : STA hm_na,X
+    LDA nb : STA hm_nb,X
+    LDA #ACCCON_X : TRB acccon
+    RTS
 }
 
 \ ac_mul: p = A X, signed bytes, neither 0, to 16 bits. Clobbers X, Y. By

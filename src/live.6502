@@ -213,6 +213,11 @@ ASSERT LEN(MATHS_SQ) = 512 AND MAX(ABS(MATHS_SQ - (0..511) * (0..511) DIV 4)) = 
 LOGIC_FACES_ORG   = &3000
 SECTION LogicFaces, org = LOGIC_FACES_ORG, guard = SCREEN, virtual = TRUE
 ENDSECTION
+\ Then, from a page, the memo of the slanted faces' planes (src/area.6502's
+\ AreaShapes), which only area_enter reads and writes, setting X round
+\ each access (decision 101).
+SECTION AreaShapes, org = (logic_faces_end + 255) AND &FF00, guard = RASTER_ENDS_ORG, virtual = TRUE
+ENDSECTION
 INCLUDE "logic/vars.6502"
 INCLUDE "logic/bank.6502"
 ASSERT LOGIC_BANK = BANK_DB AND LOGIC_CODE_BANK = BANK_DATA
@@ -1956,6 +1961,9 @@ ENDSECTION
 SECTION LogicFaces
 .logic_faces_end
 ENDSECTION
+SECTION AreaShapes
+.area_shapes_end
+ENDSECTION
 SECTION Work
 .work_end
 ENDSECTION
@@ -2001,8 +2009,10 @@ ASSERT LIVE_BOOT_ORG = &0D00 AND live_boot_end <= &0D9F
 ASSERT obj_cache_end <= obj_memo_end AND obj_memo_end <= obj_const_end
 ASSERT obj_const_end <= obj_area_end AND obj_area_end <= obj_bound_end AND obj_bound_end <= RASTER_ENDS_ORG
 ASSERT raster_ends_end <= SCREEN
-\ Shadow RAM's &3000 on (with X set): the logic's lists by face.
-ASSERT logic_faces_end <= RASTER_ENDS_ORG AND LOGIC_FACES_ORG >= &3000
+\ Shadow RAM's &3000 on (with X set): the logic's lists by face, then the
+\ slanted faces' memo.
+ASSERT logic_faces_end <= hm_u AND LOGIC_FACES_ORG >= &3000
+ASSERT area_shapes_end <= RASTER_ENDS_ORG
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
 

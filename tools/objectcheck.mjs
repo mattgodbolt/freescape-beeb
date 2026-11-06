@@ -129,7 +129,7 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]);
-for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjBound", "ObjMore", "ObjCheck", "AreaKeep"]) {
+for (const name of ["ObjArea", "ObjWork", "ObjCache", "ObjOut", "ObjMemo", "ObjBound", "ObjMore", "ObjCheck", "AreaKeep", "AreaShapes"]) {
     const a = sections[name];
     if (a) allowed.push([a.org, a.guard]);
 }

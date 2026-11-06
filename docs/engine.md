@@ -323,9 +323,13 @@ come with it, to see where the cycles go.
   sine table a quarter turn on, the sort's memory is exactly its pairs, and
   the working copy keeps no object id, which made the room before `SCREEN`
   that `docs/journal.md` (2026-11-06, room in main RAM) counts; the fill's
-  records (`RasterEnds`, below) take it now, in shadow RAM too. Shadow
-  RAM's past the logic's lists is free besides, but the front end can't
-  reach it with X clear.
+  records (`RasterEnds`, below) take it now, in shadow RAM too. The
+  globals' memo of their slanted faces' planes went from there (decision
+  101), which leaves main RAM's room before `RasterEnds` that it took.
+  Shadow RAM's past the logic's lists holds the slanted faces' planes by
+  their shape (`AreaShapes`, decision 101), which the area's conversion
+  reads and writes setting X round each access; the rest of it to
+  `RasterEnds` is free, for data the front end can reach so.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's

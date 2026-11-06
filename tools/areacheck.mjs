@@ -22,11 +22,14 @@
 //   logic's index after the area's records; the area's, every array's
 //   entries from G_ for its counts; ob_n and ar_counts; and, without
 //   OBJ_LOGIC, ob_state, each slot's F_HIDDEN;
+// - and the same for every area again, in the same order, once all have
+//   been entered (the slanted faces' memo, AreaShapes, then has the planes
+//   the later areas' faces left it);
 // - nothing outside the working copy, ObjWork, the sort's memory (ObjMemo),
-//   zero page, the stack, romsel
+//   the slanted faces' memo, zero page, the stack, romsel
 //   and its copy (&F4) was written.
 // It reports the cycles of area_init and of area_enter, median and most
-// over the areas.
+// over the areas, the first time and again.
 import fs from "node:fs";
 import path from "node:path";
 import { headless } from "./run6502.mjs";
@@ -133,7 +136,7 @@ const allowed = [
     [0xfe30, 0xfe31],
 ];
 allowed.push([S("acccon"), S("acccon") + 1]); // (the check's stubs page HAZEL in and out)
-for (const name of ["ObjArea", "ObjWork", "ObjMemo", "AreaKeep"])
+for (const name of ["ObjArea", "ObjWork", "ObjMemo", "AreaKeep", "AreaShapes"])
     if (sections[name]) allowed.push([sections[name].org, sections[name].guard]);
 const badWrites = [];
 m.tm.processor.debugWrite.add((addr) => {
@@ -178,10 +181,14 @@ for (const name of arrays) compare("globals", name, 0, layout.globals.arrays[nam
 if (m.peek(S("ob_n")) !== G("obj")) fail(`area_init: ob_n ${m.peek(S("ob_n"))}, want ${G("obj")}`);
 
 // The areas.
+// Twice round: the second time the slanted faces' memo (AreaShapes) has the
+// areas' planes, but where a later area's took an entry.
 const cycles = [];
+const again = [];
 let kept = 0;
+for (const round of [1, 2])
 for (const [i, area] of layout.areas.entries()) {
-    const what = `area ${area.id} (${area.name})`;
+    const what = `area ${area.id} (${area.name})${round > 1 ? ", again" : ""}`;
     // With the logic, the globals' slots are kept when their records are
     // those they were last built from (ag_kept): every other area finds one
     // of those bytes changed, as if the logic had moved a part, and must
@@ -190,14 +197,14 @@ for (const [i, area] of layout.areas.entries()) {
     if (rebuild) {
         const at = S("ag_kept") + ((i * 37) % S("G_BYTES"));
         m.poke(at, m.peek(at) ^ 0xff);
-    } else if (logic) kept++;
+    } else if (logic && round === 1) kept++;
     junk((s) => (rebuild ? 0 : G(s)));
     m.poke(S("check_area"), area.index);
     badWrites.length = 0;
-    profiling = true;
+    profiling = round === 1;
     const { total } = await m.call(S("check_enter"));
     profiling = false;
-    cycles.push([total, area, rebuild]);
+    (round === 1 ? cycles : again).push([total, area, rebuild]);
     if (badWrites.length) fail(`${what}: wrote outside its memory at ${badWrites.map(hex).join(" ")}`);
     for (const name of arrays) {
         const g = name === "ob_ix" ? area.globals_index : layout.globals.arrays[name];
@@ -226,11 +233,13 @@ console.log(
         `(${arrays.length} arrays); cycles: area_init ${init}, area_enter median ${median}, ` +
         `most ${most} (area ${mostArea.id})`,
 );
+const med = (xs) => xs.sort((a, b) => a - b)[xs.length >> 1];
 if (logic) {
-    const med = (xs) => xs.sort((a, b) => a - b)[xs.length >> 1];
     console.log(`areas (OBJ_LOGIC): area_enter median ${med(cycles.filter((c) => c[2]).map(([c]) => c))} building ` +
         `the globals again, ${med(cycles.filter((c) => !c[2]).map(([c]) => c))} keeping them (${kept} areas)`);
 }
+console.log(`areas${logic ? " (OBJ_LOGIC)" : ""}: each area entered again, area_enter median ` +
+    `${med(again.map(([c]) => c))}, most ${Math.max(...again.map(([c]) => c))}`);
 if (profile) {
     const all = [...profile.values()].reduce((a, b) => a + b, 0);
     console.log(`areas: area_enter's cycles by label, a mean over the ${layout.areas.length} areas`);

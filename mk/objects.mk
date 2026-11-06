@@ -183,6 +183,10 @@ SECTION ObjBound, org = &7800, guard = &7F00, virtual = TRUE
 ENDSECTION
 SECTION AreaKeep, org = &7F00, guard = &8000, virtual = TRUE
 ENDSECTION
+\ (the slanted faces' memo, read and written with ACCCON's X set: shadow
+\ RAM, as on the live disc)
+SECTION AreaShapes, org = &3000, guard = &3B00, virtual = TRUE
+ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION
 
