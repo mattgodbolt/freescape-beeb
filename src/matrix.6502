@@ -18,8 +18,13 @@
 \
 \ Entry points:
 \   matrix_update   the matrix for cam_yaw, cam_pitch, cam_roll, built if
-\                   an angle changed since the last build (and the
-\                   transform's cache then emptied); C set if it was built
+\                   an angle changed since the last build (and then the
+\                   transform's code patched for it, bound_patch and
+\                   fill_patch, and its cache emptied); C set if it was
+\                   built
+\
+\ A level camera's M (pitch and roll 0) is the yaw's rotation itself, so its
+\ build takes no products.
 \   andy_matrix_build  the matrix built (matrix_build, which is in ANDY: a
 \                   build is a turn's alone; src/transform.6502's ANDY_CALL)
 \ ***************************************************************************

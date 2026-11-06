@@ -747,3 +747,54 @@ in every fill. Four of the check's 3,265 views lose a sliver of a cone face
 made from an object wholly beyond the view; no entrance view, walk or ZX
 comparison changes. The cone's products, the projection's inlining and the
 floor were not reached.
+
+## 2026-11-06: the turn's rotation (the ninth round)
+
+The coordinator asked whether rotation could be made cheaper, a turn being
+the costly frame. The check now reports its yaw sweeps as their own group:
+each view after a sweep's first is one 5° turn with the camera kept, as the
+disc turns, and unlike the entrance views it keeps the sort's memory. On
+them, profiled, a turn's transform was mostly not the products. The bounds
+made in every fill were its largest part, then the fills' stores and
+bookkeeping; a pyramid's fill took about 5K cycles, a cuboid's 2K.
+
+What went in (`docs/research/objects.md`, "The ninth round"), all exact,
+every stage of every view still the model's:
+
+- each object's bounds made from its cells, before the fill and with their
+  own stamp, so a candidate passed over on a turn is never filled;
+- a level camera's fills read f64 at bases patched once a turn, the cell
+  the index, straight into the cache;
+- a level camera's matrix with no products (the yaw's rotation), its image
+  columns with two, its M c with four of `mul`.
+
+Measured by `objectcheck` on the full check (median / p90 / max / mean,
+cycles), before and after:
+
+| | before | after |
+|---|---|---|
+| a 5° turn (639 yaw-sweep views), total | 82,329 / 166,866 / 249,763 / 94,131 | 67,428 / 146,761 / 223,907 / 79,268 |
+| ... its matrix | 4,209 / 4,241 / 4,253 / 4,211 | 1,893 / 1,907 / 1,912 / 1,894 |
+| ... its transform | 29,194 / 57,390 / 79,788 / 31,247 | 15,035 / 34,906 / 57,887 / 18,575 |
+| an entrance view (a new camera), total | 142,269 / 211,387 / 292,496 / 141,723 | 121,266 / 200,345 / 288,376 / 129,741 |
+| ... its transform | 44,189 / 62,037 / 87,384 / 40,745 | 30,644 / 45,832 / 80,979 / 30,128 |
+| a step (260 walk views), total | 94,004 / 140,680 / 174,867 / 92,809 | 94,044 / 140,806 / 174,866 / 92,816 |
+| ... its transform | 7,488 / 11,887 / 14,199 / 7,593 | 7,492 / 11,891 / 14,203 / 7,597 |
+| a pitch turn, total | 72,854 / 167,793 / 323,156 / 87,886 | 55,657 / 146,483 / 317,297 / 73,866 |
+| a roll turn, total | 168,064 / 250,937 / 313,252 / 174,045 | 164,344 / 243,750 / 305,748 / 166,557 |
+
+A step is unchanged. On the way, two things cost steps and were put right:
+the bounds kept at their sums' own scale had top bytes nearly always equal,
+so a step's compares fell to the low bytes (about 500 cycles a step); and a
+second stamp test on the common path. A pitched or rolled camera's matrix
+costs about 1.7K more than before (its bounds' nine terms patched by one
+routine, kept small for the bank's room), but its transform gains more.
+
+Counted and not built: rotating the cached vectors by the turn's 5°
+(about twelve byte products a vector against a level fill's four for a
+point, and not exact, since M for the next yaw isn't the 5° rotation of M in
+bytes); the polar form (a turn of look-ups, but every step redoes each
+point's polar form, it's good to a pixel, and the cone needs camera
+space); log products (no fewer reads, and inexact). The front end's bank,
+which ANDY had freed, has less room: the bounds' and the level fills' code
+took most of what it had.

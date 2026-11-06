@@ -19,19 +19,24 @@
 \ Every world vertex is 64 times a vertex's cells, so each product the
 \ cache needs is 64 u m, u a cell (0..127) and m an entry of M (-64..64):
 \ by quarter squares, f64(u + m) - f64(u - m) with f64(n) = 64 (n * n DIV
-\ 4), read from fq0-fq2 at n + 64, so both indices are bytes.
+\ 4), read from fq0-fq2 at n + 64, so both indices are bytes. Under a level
+\ camera they're read at bases patched for M (fill_patch), the cell the
+\ index.
 \
 \ Entry points:
 \   cache_reset       every object's cache emptied, and the sort's memory
 \                     (area_enter; and anything that moves an object);
-\                     cache_empty, the cache alone (matrix_update and
-\                     area_enter call it; so must anything that moves an
-\                     object)
+\                     cache_empty, the cache and the bounds alone
+\                     (matrix_update and area_enter call it; so must
+\                     anything that moves an object)
+\   fill_patch        the level fills' bases for M (matrix_update)
 \   transform_setup   M c for the frame (after matrix_update), and its
 \                     bounds (bound_frame)
-\   transform_fill    X = a slot: its cache filled, and its bounds
-\                     (bound_fill), when it isn't good (ob_stamp isn't
-\                     cache_gen)
+\   bound_object      X = a slot: its bounds from its cells (below, "The
+\                     bounds"), when they aren't good (ob_bstamp isn't
+\                     cache_gen); X kept
+\   transform_fill    X = a slot: its cache filled, when it isn't good
+\                     (ob_stamp isn't cache_gen)
 \   transform_object  X = a slot, its cache good, A = the mask of its
 \                     vertices wanted: those vertices in vx*, vy*, vz*
 \                     (vertex j at index j). Others of its vertices may be

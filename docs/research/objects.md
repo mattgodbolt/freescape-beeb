@@ -24,6 +24,11 @@ node tools/objectcheck.mjs build/objects --entrance --quiet --json NEW.json --co
                                       # each stage against an earlier run's, view for view
 node tools/objectcheck.mjs build/objects --entrance --profile-walks --fine --top 60
                                       # by every label, scoped ones too
+node tools/objectcheck.mjs build/objects --profile-views '-y([1-9]|[0-9][0-9]+)$' --fine
+                                      # the yaw sweeps' 5-degree turns alone
+                                      # (--profile-turns: the entrance views')
+node tools/objectcheck.mjs build/objects --entrance --fills --quiet
+                                      # a turn's fills by the object's kind
 .venv/bin/python -I tools/model/render.py --diff clip.SIDE_RECIP build/data/driller.json build/zx/views
                                       # a model flag's pixels, and the ZX oracle's agreement
                                       # (render.py's own flags too, such as render.IMAGE_LINES)
@@ -141,6 +146,11 @@ when an angle changes (`matrix_update`). Checked on 8,472 angle triples
 and on every case [measured]: 1,620 cycles a build, 44 when the angles
 hold.
 
+A level camera's (pitch and roll 0) is the yaw's rotation itself, the
+rotations of 0 being 64 times the identity, which the rounding gives back,
+so since the ninth round its build takes no products, and its image columns
+(`im_cols`) two.
+
 **An entry can be 65.** Rounding lets `M`'s entries reach ±65 in 896 of
 the 373,248 orientations [measured, the model's `compose` over all of
 them]; `mat_big` marks those (see the transform).
@@ -192,7 +202,10 @@ faces use).
   generic object's vertex the one before it again (a pointed pyramid's apex,
   three times over) takes that slot's vector. An orientation with an entry
   of ±65 (`mat_big`) would run the table's index off its end for a cell of
-  0 or 127, so its fills use the maths' `mul` instead.
+  0 or 127, so its fills use the maths' `mul` instead. Under a level
+  camera (since the ninth round) the products are read at bases patched for
+  M (`fill_patch`), the cell the index register, and written straight into
+  the cache; M c is four of the maths' `mul` and a shift.
 - **The bounds** (since the eighth round; the model's `render.beyond_view`,
   `OBJECT_CULL`): each of L = 3x + 2z, R = 2z − 3x and T = z − 3y is zero on
   a plane through the eye beyond one of the view's sides (x = ∓2z/3 against
@@ -200,17 +213,23 @@ faces use).
   with every vertex where one is negative can't be seen, and `objects_frame`
   passes it over before its transform. A vertex's value is the function of
   M v less its value of M c, so an object's greatest over its vertices of
-  M v's is kept with its cache (`bd_k*`, in `ObjBound`), which the
-  orientation alone sets: the fill makes it from each vector as it's made
-  (`fill_acc`), a box's from its corner plus each edge that raises it, by
-  the edge's axis (`bd_sel`, from M by `bound_sel`), any other object's as
-  the greatest of its vertices'. The frame's of M c (`bound_frame`) are made
-  once, in 32 bits and saturated to 24, and a candidate's test is three
-  compares, mostly of top bytes kept with their sign bits flipped so that
-  their order is unsigned. Every object's bounds fit 23 bits signed (the
-  model asserts, `BOUND_BITS`), so the 24-bit arithmetic is exact. The
-  bottom of the view (z + 3y) was measured and left out: it caught the
-  fewest candidates for its cost on a turn.
+  M v's is kept (`bd_k*`, in `ObjBound`), which the orientation alone sets.
+  Since the ninth round it's made from the cells, before the fill
+  (`bound_object`, with its own stamp, `ob_bstamp`), so a candidate passed
+  over is never filled: F(M 64 u) = 64 (phi . u), phi F of M's columns, and
+  over a box's corners the greatest phi . u takes each axis's high cell
+  where phi is positive, else its low, three products a function
+  (`bound_box`, its nine terms patched for M by `bound_patch`, from the
+  maths' 16-bit quarter squares). A cuboid, a rectangle and a sensor are a
+  box each, a pyramid two (its base's and its apex's rectangles), any other
+  object a box a vertex. Each product is biased by &8000 so that the sums
+  are unsigned, and the object keeps 64 times its greatest; the frame's
+  (`bound_frame`), made in 32 bits, is 64 ceil(F(M c) / 64) plus the same
+  bias, saturated to 24 bits, so the test is exact and three compares,
+  mostly of top bytes. The model asserts every coefficient within 255
+  (`render.BOUND_PHI`), which the tables' bases need. The bottom of the
+  view (z + 3y) was measured and left out: it caught the fewest candidates
+  for its cost on a turn.
 
 **Does the cache pay?** Matt asked (via the coordinator) for the cached
 form against a straight per-frame transform. `make objects-nocache` builds
@@ -904,6 +923,75 @@ What's left:
 - **The lines** (C's two products of sixteen bits by sixteen, `im_term`),
   the cone's passes' products, and **the projection's overheads**, as the
   seventh round left them; and **the floor**, still the largest face.
+
+## The ninth round: the turn's rotation
+
+The coordinator asked whether rotation could be cheaper, the turn being
+the costly case (the cache refilled). Profiled first, on the entrance views
+(`--profile-turns`, new) and on the check's yaw sweeps (`--profile-views`,
+new; each view after a sweep's first is one 5° turn with the camera kept,
+the disc's own turn, now reported as its own group), and with `--fills`
+(new: each fill's cycles by the object's kind). A turn's transform was
+mostly not the products: the bounds (`bd_eval` and the rest) were the
+largest part, then the fills' stores and bookkeeping; a pyramid's fill took
+about 5K, a cuboid's 2K. All of it is exact: the model's pictures and every
+stage's output are unchanged. The figures, before and after, by stage and
+group, are in the journal's entry of 2026-11-06.
+
+Kept:
+
+- **The bounds from the cells, before the fill** (stage 3, above): a
+  candidate passed over on a turn is never filled, and a box's bounds are
+  seven or nine products of a cell by a coefficient instead of a 24-bit
+  evaluation of the corner and each edge. Kept at 64 times their sums, so a
+  step's three compares are still mostly of top bytes: the sums' own top
+  bytes are nearly always equal, and comparing them cost a step about 500
+  cycles, measured, against a shift an object on a turn.
+- **A step's candidates past the unfilled path**: a good cache has good
+  bounds, so a step's candidate takes one stamp's test, as before.
+- **A level camera's fills by patched bases**: each product 64 u m read at
+  f64's `u + 64 + m` and `u + 64 - m` with the cell in X and the bases
+  patched once a turn (`fill_patch`), into the cache directly, so the
+  indices' arithmetic and the copy from `fill_acc` go.
+- **A level camera's matrix by no products** (the yaw's rotation), its image
+  columns by two, its M c by four of `mul`, and the bounds' middle column
+  (L's and R's terms 0, T's -192) left as the last level camera's patch had
+  it. `bound_patch` writes a level camera's six other terms out and takes
+  any other camera's nine by one routine, for the bank's room.
+
+Counted and not built:
+
+- **Rotating the cached results by the turn's 5°**, x' = c x - s z, z' =
+  s x + c z on each cached vector: four products of a 24-bit coordinate by
+  a byte, three byte products each by quarter squares, so about twelve a
+  vector, where a level camera's fill takes four from the cells for a point
+  and two for an edge. And it isn't exact: M for yaw + 1 isn't the 5°
+  rotation of M for yaw in bytes, so the cache would drift from the model's
+  M v. The fill from the cells is the cheaper rotation.
+- **The polar form** (portalc's, `rtw-sources.md` 1.2): a turn becomes table
+  look-ups, but every step makes each point's polar form again (about 370
+  cycles a point by Rich's figures, against the step's 24-bit
+  subtractions now), it's good to about a pixel against the projection's
+  sixteenth, and the cone needs camera-space x and z, so it would be a
+  second path beside this one.
+- **Log and antilog products**: a quarter-square product is already three
+  table reads and subtractions a byte, exact; logs of the same width are no
+  fewer reads and miss.
+- **A pyramid's vertices by additions** (each after the first of its base
+  and its apex one axis from the one before): two products a vertex fewer,
+  for a 24-bit addition, saving a few dozen cycles a vertex.
+
+What's left:
+
+- **The bounds' own cost on a turn**: the shift to 64 times and the copies
+  of the cells, about a quarter of `bound_object`; a 64-times quarter-square
+  table wide enough for the coefficients (about 1.8K) would take the shift
+  away, which the bank's room doesn't take.
+- **A level cuboid's fill written out** (its corner and three edges, without
+  `transform_fill`'s loop), about a tenth of a turn's transform.
+- **A tilted camera's patch**: `bound_patch`'s one routine for nine terms
+  costs a pitched or rolled turn about 1.7K more in the matrix stage than
+  the old `bound_sel`, though its transform gains more.
 
 ## The floor (decision 8a)
 
