@@ -134,7 +134,7 @@ def cases(seed=1987):
     xb, yb = m.PROJ_XBAND, m.PROJ_YBAND
 
     def c24(v):
-        return max(-lim, min(lim - 1, v))
+        return max(-m.COORD_LIMIT, min(m.COORD_LIMIT - 1, v))
 
     zs = [m.ZNEAR, m.ZNEAR + 1, lim - 1]
     for k in range(m.ZNEAR.bit_length(), 24):
@@ -163,7 +163,8 @@ def cases(seed=1987):
                 z = int(m.ZNEAR * (742000 / m.ZNEAR) ** rnd.random())
             else:
                 z = rnd.randint(m.ZNEAR, lim - 1)
-            a, b = min(lim - 1, int(band * z)), min(lim - 1, int(min(band, yb) * z))
+            a = min(m.COORD_LIMIT - 1, int(band * z))
+            b = min(m.COORD_LIMIT - 1, int(min(band, yb) * z))
             proj.append((rnd.randint(-a, a), rnd.randint(-b, b), z))
     proj = [[x, y, z, *m.project(x, y, z)] for x, y, z in proj]
 
@@ -256,7 +257,7 @@ def survey(n=100000, seed=7):
     import random
     m = maths
     depth = (m.ZNEAR, 742000)
-    lim = m.ZLIMIT - 1
+    lim = m.COORD_LIMIT - 1
     assert variant()(12345, -678, 98765) == m.project(12345, -678, 98765)
     for name, make in SURVEYED:
         p = make()
