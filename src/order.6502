@@ -69,11 +69,12 @@ ENDSECTION
 
 SECTION ObjCode
 
-\ sort_forget: the sort remembers no compare: the memory cleared (cache_reset
-\ calls it, as an area is entered, so a frame doesn't).
+\ sort_forget: the sort remembers no compare (cache_reset calls it, as an
+\ area is entered): a new generation, which no remembered compare has, so the
+\ memory is cleared only as generations run out, not each entry.
 .sort_forget
-    STZ so_valid                        ; (the next sort starts a generation)
-    BRA so_clear
+    STZ so_valid                        ; (the next sort starts one more)
+    \ (on to so_new)
 
 \ so_new: the next generation; when they run out, the memory cleared and
 \ the first again.
@@ -81,6 +82,8 @@ SECTION ObjCode
     LDA so_gen : CLC : ADC #2 : STA so_gen
     BEQ so_clear
     RTS
+\ so_clear: the memory cleared, and the first generation: once at the start
+\ (area_init), before any generation of its can be trusted.
 .so_clear
 {
     ZA_AUTO2 at

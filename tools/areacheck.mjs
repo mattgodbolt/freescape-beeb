@@ -37,7 +37,7 @@ const opt = (name, dflt) => {
     return i < 0 ? dflt : args[i + 1];
 };
 if (!dir) {
-    console.error("usage: areacheck.mjs BUILD [--areas AREAS.json] [--db LOGIC] [--verbose]");
+    console.error("usage: areacheck.mjs BUILD [--areas AREAS.json] [--db LOGIC] [--verbose] [--profile [--fine] [--top N]]");
     process.exit(2);
 }
 const areasFile = opt("areas", "build/gen/areas.json");
@@ -85,6 +85,44 @@ load("OCHECK", "ObjCheck");
 load("ACONV", "AreaConv", has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : undefined);
 m.load(dbFile, 0x8000, S("AREA_DB_BANK"));
 
+// --profile: every instruction's cycles over all the areas' area_enter to
+// the label it's in (--fine: scoped labels too), the conversion's and the
+// pipeline's code apart
+const profile = args.includes("--profile") ? new Map() : null;
+let profiling = false;
+if (profile) {
+    const fine = args.includes("--fine");
+    const labels = [];
+    for (const a of JSON.parse(fs.readFileSync(symFile, "utf8")).assemblies)
+        for (const s of a.sections)
+            for (const [k, v] of Object.entries(s.labels ?? {}))
+                if (!k.includes("@") && (fine || !k.includes(".")))
+                    labels.push([v.value + (s.name === "ObjAndy" ? 0x10000 : s.name === "AreaConv" ? 0x20000 : 0), k]);
+    labels.sort((a, b) => a[0] - b[0]);
+    const labelOf = (key) => {
+        let lo = 0, hi = labels.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (labels[mid][0] <= key) lo = mid;
+            else hi = mid - 1;
+        }
+        return labels[lo]?.[1] ?? "?";
+    };
+    const convBank = has("AREA_CONV_BANK") ? S("AREA_CONV_BANK") : -1;
+    let lastKey = -1, lastT = 0;
+    m.tm.processor.debugInstruction.add((at) => {
+        const t = m.tm.elapsedCycles;
+        if (profiling && lastKey >= 0) {
+            const r = labelOf(lastKey);
+            profile.set(r, (profile.get(r) || 0) + (t - lastT));
+        }
+        const p = m.paged(at);
+        lastKey = at + (p === "andy" ? 0x10000 : p === convBank ? 0x20000 : 0);
+        lastT = t;
+        return false;
+    });
+}
+
 // Where the conversion may write.
 const allowed = [
     [0x10, 0x90],
@@ -92,6 +130,7 @@ const allowed = [
     [0xf4, 0xf5],
     [0xfe30, 0xfe31],
 ];
+allowed.push([S("acccon"), S("acccon") + 1]); // (the check's stubs page HAZEL in and out)
 for (const name of ["ObjArea", "ObjWork", "ObjMemo"]) allowed.push([sections[name].org, sections[name].guard]);
 const badWrites = [];
 m.tm.processor.debugWrite.add((addr) => {
@@ -142,7 +181,9 @@ for (const area of layout.areas) {
     junk((s) => (logic ? 0 : G(s)));
     m.poke(S("check_area"), area.index);
     badWrites.length = 0;
+    profiling = true;
     const { total } = await m.call(S("check_enter"));
+    profiling = false;
     cycles.push([total, area]);
     if (badWrites.length) fail(`${what}: wrote outside its memory at ${badWrites.map(hex).join(" ")}`);
     for (const name of arrays) {
@@ -172,6 +213,12 @@ console.log(
         `(${arrays.length} arrays); cycles: area_init ${init}, area_enter median ${median}, ` +
         `most ${most} (area ${mostArea.id})`,
 );
+if (profile) {
+    const all = [...profile.values()].reduce((a, b) => a + b, 0);
+    console.log(`areas: area_enter's cycles by label, a mean over the ${layout.areas.length} areas`);
+    for (const [r, c] of [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("top", 30))))
+        console.log(`  ${r.padEnd(28)} ${String(Math.round(c / layout.areas.length)).padStart(8)} ${(100 * c / all).toFixed(1).padStart(5)}%`);
+}
 if (failures) {
     console.log(`areas: ${failures} failures`);
     process.exit(1);

@@ -51,9 +51,10 @@
 \ How it converts, where it isn't objects.shape()'s way (tools/mkareas.py
 \ asserts each on every object): a slanted face's plane is the cross product
 \ at its loop's first corner, reduced by its components' greatest common
-\ divisor; a pyramid's side loses its apex corner when its apex edge has
-\ shrunk to a point, and its apex face goes when any apex edge has; each
-\ loop is found by a constant (lp_table's fixed order).
+\ divisor (the globals' kept from their last build: ac_plane_face); a
+\ pyramid's side loses its apex corner when its apex edge has shrunk to a
+\ point, and its apex face goes when any apex edge has; each loop is found
+\ by a constant (lp_table's fixed order).
 \ ***************************************************************************
 
 ROMSEL_COPY = &F4                   ; the OS's copy of romsel, kept as the OS keeps it
@@ -107,6 +108,23 @@ SECTION ObjWork
 .ac_fm      SKIP 1                  ; the vertices it uses
 .ac_v0      SKIP 3                  ; a slanted face's first vertex, cells
 .ac_nn      SKIP 6                  ; its normal, (v1 - v0) x (v2 - v1), 16-bit signed
+.ac_pm      SKIP 1                  ; the globals' next face's entry in the memo; &FF an area's
+ENDSECTION
+
+\ The memo of the globals' slanted faces (ac_plane_face), an entry a face in
+\ their order: its u and w, and what they made (pm_k: ac_plane_face's
+\ nonzero, &FF for none yet; pm_a, pm_b: the axis and n's top byte, or the
+\ plane's axes; pm_na, pm_nb: n reduced). Main RAM's &3000 on, as the sort's.
+PM_N = G_FACE                       ; (each slanted face is a face, or none)
+ASSERT PM_N <= 128                  ; (an entry's index is positive)
+SECTION ObjMemo
+.pm_u       SKIP 3 * PM_N
+.pm_w       SKIP 3 * PM_N
+.pm_k       SKIP PM_N
+.pm_a       SKIP PM_N
+.pm_b       SKIP PM_N
+.pm_na      SKIP PM_N
+.pm_nb      SKIP PM_N
 ENDSECTION
 
 \ The pointers: the record being read, and the colour stream.
@@ -126,9 +144,10 @@ SECTION AreaCode
     IF DEFINED(AREA_CONV_BANK)
         AC_PAGE AREA_CONV_BANK
     ENDIF
-    JSR ac_globals
+    JSR ac_first
     PLA : STA ROMSEL_COPY : STA romsel
     LDA #G_OBJ : STA ob_n
+    JSR so_clear                        ; (the memory as it starts: area_enter's cache_reset trusts it)
     JMP cache_reset
 }
 
@@ -175,9 +194,24 @@ ENDSECTION
 
 SECTION AreaConv
 
-\ ac_globals: the globals' records into slots from 0.
+\ ac_first: the memo emptied, then ac_globals.
+.ac_first
+{
+    LDA #&FF
+    LDX #PM_N - 1
+.forget
+    STA pm_k,X
+    DEX : BPL forget
+}
+\ ac_globals: the globals' records into slots from 0, their slanted faces
+\ by the memo.
 .ac_globals
 {
+    STZ ac_pm
+    JSR globals
+    LDA #&FF : STA ac_pm                    ; (an area's faces aren't the memo's)
+    RTS
+.globals
     LDA #LO(AG_ADDR) : STA ac_src
     LDA #HI(AG_ADDR) : STA ac_src+1
     LDA #AG_BANK : STA ac_bank
@@ -600,9 +634,16 @@ SECTION AreaConv
 \ + A, X long, its vertices from ac_g0: its plane from the cross product
 \ n = (v1 - v0) x (v2 - v1) of its loop's first three. None if n is 0; an
 \ axis test if one component isn't; else a plane test, n reduced.
+\
+\ The globals' faces are converted in one order every time, and the logic
+\ only moves the rig's parts and hides and shows them, which leaves each
+\ face's u and w as they were: so the k-th face of the globals' (ac_pm, from
+\ 0 in ac_globals) keeps its u and w and what they made in pm_*'s entry k,
+\ and the next build of the globals takes that when its u and w are the same,
+\ without the products and the reduction.
 .ac_plane_face
 {
-    ZA_AUTO1 colour, i1, i2, left, nonzero, axis, pa, pb
+    ZA_AUTO1 colour, i1, i2, left, nonzero, axis, pa, pb, slot, sign, na, nb
     ZA_AUTO 3, u, w
     STA ac_fl : STX ac_fn : STY colour
     \ the vertices it uses
@@ -627,36 +668,84 @@ SECTION AreaConv
     FOR k = 0..2
         LDA gv_x + k * N_GV,X : SEC : SBC gv_x + k * N_GV,Y : STA w + k
     NEXT
-    \ n_k = u_a w_b - u_b w_a, (k, a, b) a turn of (0, 1, 2); the last
-    \ non-zero component's axis kept
+    \ a global's face: its entry in the memo (slot), and what it made if its
+    \ u and w are the entry's
+    LDX ac_pm : CPX #PM_N : BCS no_memo     ; (an area's object: ac_pm &FF)
+    STX slot
+    INC ac_pm
+    LDA pm_k,X : BMI missed                 ; (none made yet: area_init's &FF)
+    FOR k = 0..2
+        LDA u + k : CMP pm_u + k * PM_N,X : BNE missed
+        LDA w + k : CMP pm_w + k * PM_N,X : BNE missed
+    NEXT
+    LDA pm_a,X : STA axis : STA pa
+    LDA pm_b,X : STA sign : STA pb
+    LDA pm_na,X : STA na
+    LDA pm_nb,X : STA nb
+    LDA pm_k,X
+    CMP #1 : BNE not_axis
+    JMP axis_test
+.not_axis
+    CMP #2 : BNE none
+    JMP plane_test
+.none
+    RTS
+.missed
+    FOR k = 0..2
+        LDA u + k : STA pm_u + k * PM_N,X
+        LDA w + k : STA pm_w + k * PM_N,X
+    NEXT
+    BRA products
+.no_memo
+    LDA #&FF : STA slot
+.products
+    \ n_k = u_a w_b - u_b w_a, (k, a, b) a turn of (0, 1, 2), a product
+    \ with a factor 0 not made; the last non-zero component's axis kept
     STZ nonzero
     FOR k = 0..2
-        LDA u + (k + 1) MOD 3 : LDX w + (k + 2) MOD 3 : JSR ac_mul
+        STZ ac_nn + 2 * k : STZ ac_nn + 2 * k + 1
+        LDA u + (k + 1) MOD 3 : BEQ first_none
+        LDX w + (k + 2) MOD 3 : BEQ first_none
+        JSR ac_mul
         LDA ac_mul.p : STA ac_nn + 2 * k
         LDA ac_mul.p + 1 : STA ac_nn + 2 * k + 1
-        LDA u + (k + 2) MOD 3 : LDX w + (k + 1) MOD 3 : JSR ac_mul
+    .first_none
+        LDA u + (k + 2) MOD 3 : BEQ second_none
+        LDX w + (k + 1) MOD 3 : BEQ second_none
+        JSR ac_mul
         LDA ac_nn + 2 * k : SEC : SBC ac_mul.p : STA ac_nn + 2 * k
         LDA ac_nn + 2 * k + 1 : SBC ac_mul.p + 1 : STA ac_nn + 2 * k + 1
-        ORA ac_nn + 2 * k : BEQ zero
+    .second_none
+        LDA ac_nn + 2 * k + 1 : ORA ac_nn + 2 * k : BEQ zero
         INC nonzero
         LDA #k : STA axis
     .zero
     NEXT
-    LDA nonzero : CMP #1 : BEQ axis_test
-    CMP #2 : BEQ plane_test
+    LDA nonzero
+    LDX slot : BMI kept
+    STA pm_k,X                              ; (what it makes, for the next build)
+.kept
+    CMP #1 : BEQ axis_found
+    CMP #2 : BEQ plane_found
     RTS                                     ; (none: n is 0)
+.axis_found
+    LDA axis : ASL A : TAY
+    LDA ac_nn + 1,Y : STA sign
+    LDX slot : BMI axis_test
+    LDA axis : STA pm_a,X
+    LDA sign : STA pm_b,X
 .axis_test
     \ on axis k: from above (T_AXHI + 2 k, 255 - v0's cell) if n_k > 0, else
     \ from below (T_AXLO + 2 k, the cell)
-    LDA axis : ASL A : STA ac_ft : TAY
+    LDA axis : ASL A : STA ac_ft
     LDX axis : LDA ac_v0,X
-    LDX ac_nn + 1,Y : BMI below
+    BIT sign : BMI below
     EOR #&FF
     INC ac_ft
 .below
     STA ac_fv
-    BRA add
-.plane_test
+    JMP add
+.plane_found
     \ the two non-zero axes, a < b
     LDA ac_nn + 0 : ORA ac_nn + 1 : BEQ a_is_1
     STZ pa
@@ -673,6 +762,14 @@ SECTION AreaConv
     LDA pa : ASL A : TAX
     LDA pb : ASL A : TAY
     JSR ac_reduce
+    LDA ac_reduce.na : STA na
+    LDA ac_reduce.nb : STA nb
+    LDX slot : BMI plane_test
+    LDA pa : STA pm_a,X
+    LDA pb : STA pm_b,X
+    LDA na : STA pm_na,X
+    LDA nb : STA pm_nb,X
+.plane_test
     \ the plane: its axes, n_a and n_b reduced, and v0's cells on them, 64 v
     \ (v >> 2 high, v << 6 low)
     LDY ac_next + 2
@@ -681,8 +778,8 @@ SECTION AreaConv
     LDA #T_PLANE : STA ac_ft
     LDA pa : STA pl_a,Y
     LDA pb : STA pl_b,Y
-    LDA ac_reduce.na : STA pl_na,Y
-    LDA ac_reduce.nb : STA pl_nb,Y
+    LDA na : STA pl_na,Y
+    LDA nb : STA pl_nb,Y
     LDX pa
     LDA ac_v0,X : LSR A : LSR A : STA pl_rah,Y
     LDA ac_v0,X : LSR A : ROR A : ROR A : AND #&C0 : STA pl_ral,Y
@@ -694,41 +791,45 @@ SECTION AreaConv
     JMP ac_face
 }
 
-\ ac_mul: p = A X, signed bytes, to 16 bits. Keeps Y.
+\ ac_mul: p = A X, signed bytes, neither 0, to 16 bits. Clobbers X, Y. By
+\ the maths' quarter squares (src/maths.6502's way, sq and ng in HAZEL):
+\ |a| |b| = f(|a| + |b|) - f(|b| - |a|), read through pointers |a| into the
+\ tables (the conversion writes nothing in sideways RAM, so it can't patch its
+\ code).
 .ac_mul
 {
-    ZA_AUTO1 fa, fb, sign
-    ZA_AUTO2 p
-    STZ p : STZ p+1
-    STA fa : STX fb
-    CMP #0 : BEQ done
-    CPX #0 : BEQ done
-    EOR fb : STA sign
-    LDA fa : BPL a_plus
-    EOR #&FF : INC A : STA fa
+    ZA_AUTO1 sign
+    ZA_AUTO2 p, sl, sh, nl, nh
+    STX p
+    TAX
+    EOR p : STA sign                    ; (bit 7: the product's sign)
+    TXA : BPL a_plus
+    EOR #&FF : INC A                    ; (|a|, 128 for -128)
 .a_plus
-    LDA fb : BPL b_plus
-    EOR #&FF : INC A : STA fb
+    STA sl : STA sh
+    EOR #&FF : STA nl : STA nh
+    LDA #HI(sq_lo) : STA sl+1
+    LDA #HI(sq_hi) : STA sh+1
+    LDA #HI(ng_lo) : STA nl+1
+    LDA #HI(ng_hi) : STA nh+1
+    LDA p : BPL b_plus
+    EOR #&FF : INC A
 .b_plus
-    \ |fa| |fb|, a bit of |fa| at a time, the product shifted down through A
-    \ and fa
-    LDA #0
-    LDX #8
-    LSR fa
-.bit
-    BCC no_add
-    CLC : ADC fb
-.no_add
-    ROR A : ROR fa
-    DEX : BNE bit
+    TAY
+    SEC
+    LDA (sl),Y : SBC (nl),Y
+    STA p
+    LDA (sh),Y : SBC (nh),Y             ; (the product is >= 0: no borrow)
+    BIT sign : BMI negative
     STA p+1
-    LDA fa : STA p
-    BIT sign : BPL done
+    RTS
+.negative
+    STA p+1
     LDA #0 : SEC : SBC p : STA p
     LDA #0 : SBC p+1 : STA p+1
-.done
     RTS
 }
+ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
 
 \ ac_reduce: n_a = ac_nn + X and n_b = ac_nn + Y (16-bit signed, neither
 \ 0) over their greatest common divisor, in na and nb (signed bytes:

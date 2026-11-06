@@ -63,6 +63,9 @@ fields a demo turns on the spot and goes on after a whole turn.
 8. The figures (`live_measure`), the panel as the beam allows
    (`docs/research/panel.md`), `frame_end`.
 
+With the logic, a frame whose buffer already holds its view skips 6 and
+7's halves (below, "The crosshair").
+
 A frame that's drawn is drawn whole (decision 30), so the figures are
 always the pipeline's cost. On the free disc, `live_keys` moves the camera
 in steps 1-4's place.
@@ -82,7 +85,9 @@ ends.
   again, and the logic moves the rig's parts as it loads one); with the
   logic, what's hidden of every object it indexes (`ix_flags AND
   IX_HIDDEN`, all `IX_MAX` of them, a superset of what the object pass
-  reads through `ob_ix`), and the crosshair (`CrossOn`, and `CrossX` and
+  reads through `ob_ix`; compared only when `logic_go_shown`, the one
+  writer of `ix_flags`, has run since, which sets `vw_flags`), and the
+  crosshair (`CrossOn`, and `CrossX` and
   `CrossY` while it's on). Nothing else a frame reads changes but as an
   area is entered (the patterns, the working copy, `raster_forget`). The
   panel round the view is no input: it's drawn into both buffers outside
@@ -302,6 +307,21 @@ background memory relies on (decision 20). `CrossOn`, `CrossX` and
 `CrossY` are the logic's (B, SPACE and the movement keys in shooting mode
 move them), so the logic's own `hook_crosshair` does nothing.
 `tools/mklive.py`'s `crosshair` is the model of it.
+
+**A frame of the crosshair alone** (`live_cross_only`, 2026-11-06): when
+nothing but the crosshair has changed since the view was last drawn into
+the buffer the frame will draw, the frame runs neither half; it takes that
+buffer's crosshair off and draws the new one, so the buffer holds what the
+rasteriser would have drawn, and then the crosshair. `lv_inputs` moves
+`vw_view` on whenever the camera, the area or the objects' flags differ,
+and each buffer keeps the `vw_view` its view was drawn under (`lv_bview`).
+Each buffer is drawn every other frame and `vw_view` moves on at most once
+a frame, so a buffer's stamp can't come round again unseen. Moving the
+crosshair after a step or a turn draws one whole frame, into the buffer
+that holds the older view; from then on each move is the crosshair alone.
+`tools/livecheck.mjs` counts these frames, holds each to the model's render
+as every frame is, and leaves out the BBC's timing of the halves they
+don't run.
 
 ### The glue
 
@@ -611,10 +631,10 @@ disc's demo.
   list (`hook_undraw`), the sensors' tests and shots, the rigs, the
   information screen, the game's end and a new game (the database and
   `LOGICW` would have to be kept to start again).
-- Shooting mode moves the crosshair a pass a frame, each a whole frame
-  drawn; it could be moved without a redraw, by taking it off and drawing
-  it again in a buffer that holds the frame's view, which would mean
-  drawing the frame into both buffers first.
+- Shooting mode moves the crosshair a pass a frame; since 2026-11-06 only
+  the first move after the view changes draws a whole frame (into the
+  buffer with the older view), and the rest move the crosshair alone ("The
+  crosshair", above).
 - A key that goes down while a frame is being drawn still waits for its
   end: a frame is a few fields, and the pass comes after it.
 - The first frame of a pass from rest comes a field after the pass (its

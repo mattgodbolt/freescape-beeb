@@ -8,6 +8,7 @@
 //
 //   node tools/livecheck.mjs [--disc build/live.ssd] [--live build/live/live.json]
 //                            --trace build/live/trace.json [--json OUT] [--verbose]
+//                            [--profile-rest [--fine] [--top N]]
 //   node tools/livecheck.mjs --free [--disc build/live-free.ssd] [--live ...]
 //                            [--walks 0,18,26,40,57] [--json OUT] [--verbose]
 //
@@ -134,6 +135,11 @@ const tracePath = opt("trace", "build/live/trace.json");
 const walkAt = opt("walks", "0,18,26,40,57").split(",").filter(Boolean).map(Number);
 const jsonOut = opt("json");
 const verbose = args.includes("--verbose");
+// --profile-rest: the cycles of each frame's "the rest" (its loop but its two
+// halves) by routine, the last label at or below each instruction that isn't
+// inside a scope (--fine: every label), summed by what the frame did; --top N
+const profileRest = args.includes("--profile-rest");
+const fineRest = args.includes("--fine");
 const CLOCK_SLACK = 8; // cycles: T2 counts microseconds, from its own phase
 const NAME = FREE ? "live-free" : "live";
 
@@ -203,6 +209,8 @@ const OBJECTS = sym("objects_frame"), FRONT_DONE = sym("live_front_done");
 const RASTER = sym("raster_frame"), FILL_DONE = sym("live_fill_done");
 const FB_BEGIN = sym("frame_begin"), FB_END = sym("frame_end");
 const LIVE_LOOP = sym("live_loop");
+const CROSS_ONLY = syms.live_cross_only ?? -1; // (the logic's disc's: frames of the crosshair alone)
+let crossOnly = 0;
 const LV_CAM = sym("lv_cam"), LV_AREA = sym("lv_area");
 const SPAN_US = sym("span_us"), T_FRONT = sym("T_FRONT"), T_FILL = sym("T_FILL");
 const CLOCK_TO = sym("clock_to"), CLOCK_READ = sym("clock.again");
@@ -276,10 +284,58 @@ let script = "start"; // what the script is doing (frames before it begins aren'
 let clockChecked = 0;
 let afterClock = null; // the span whose clock_to is running
 
+// --profile-rest's routines: each sideways section's labels keyed by its bank
+// (ANDY's as bank 16), so the banks' shared addresses are told apart
+const restRoutines = [];
+const restKey = (bank, addr) => (addr >= 0x8000 && addr < 0xc000 ? (bank < 0 ? 16 : bank) + 1 : 0) * 0x10000 + addr;
+if (profileRest) {
+    const bankOf = {
+        Logic: sym("BANK_DB"), LiveGlue: sym("BANK_GLUE"), LogicCode: sym("BANK_DATA"), LiveData: sym("BANK_DATA"),
+        PanelData: sym("BANK_DATA"), AreaConv: sym("BANK_DATA"), ObjCode: sym("BANK_OBJ"), ObjAndy: -1,
+        RasterRuns: sym("BANK_RASTER"), RasterCode: sym("BANK_RASTER"), RasterWork: sym("BANK_RASTER"),
+    };
+    const all = JSON.parse(fs.readFileSync(disc.replace(/\.ssd$/, ".json"), "utf8"));
+    for (const a of all.assemblies)
+        for (const s of a.sections)
+            for (const [k, v] of Object.entries(s.labels ?? {}))
+                if (!k.includes("@") && (fineRest || !k.includes(".")))
+                    restRoutines.push([restKey(bankOf[s.name] ?? 0, v.value), k]);
+    restRoutines.sort((a, b) => a[0] - b[0]);
+}
+const restRoutineOf = (key) => {
+    let lo = 0, hi = restRoutines.length - 1;
+    if (hi < 0 || key < restRoutines[0][0]) return "?";
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (restRoutines[mid][0] <= key) lo = mid;
+        else hi = mid - 1;
+    }
+    return restRoutines[lo][1];
+};
+let restAcc = new Map(), restInHalf = false, restLastKey = -1, restLastT = 0;
+
 cpu.debugInstruction.add((addr, opcode) => {
     // the bank paged at a hooked address, unless ANDY (ROMSEL's bit 7, over
     // a bank's first 4K) is there instead: none then
     const bank = cpu.isBankPagedAt(cpu.romsel & 15, addr) ? cpu.romsel & 15 : -1;
+    if (profileRest) {
+        const t = now();
+        if (restLastKey >= 0 && !restInHalf) {
+            const r = restRoutineOf(restLastKey);
+            restAcc.set(r, (restAcc.get(r) || 0) + (t - restLastT));
+        }
+        restLastKey = restKey(bank, addr);
+        restLastT = t;
+        if (addr === OBJECTS && bank === BANK_OBJ) restInHalf = true;
+        else if (addr === FRONT_DONE || addr === FILL_DONE) restInHalf = false;
+        else if (addr === RASTER && bank === BANK_RASTER) restInHalf = true;
+        // (a loop that drew nothing: the next frame's loop starts at its own)
+        else if (addr === LIVE_LOOP && current && current.tFront === undefined) restAcc = new Map();
+        else if (addr === FB_END && current && current.fill !== undefined) {
+            current.restProf = restAcc;
+            restAcc = new Map();
+        }
+    }
     if (opcode === JSR && word(addr + 1) === FB_BEGIN) calling = true;
     if (addr === LIVE_LOOP) {
         // (a loop that drew nothing leaves its frame unbegun)
@@ -315,8 +371,15 @@ cpu.debugInstruction.add((addr, opcode) => {
         onIdle();
     } else if (addr === CLOCK_READ) {
         lastClock = now(); // (the last of its tries is the one kept)
-    } else if (addr === OBJECTS && bank === BANK_OBJ && current) {
+    } else if ((addr === OBJECTS && bank === BANK_OBJ || addr === CROSS_ONLY) && current) {
         current.tFront = now();
+        // a frame of the crosshair alone (live_cross_only): its buffer has
+        // its view, so neither half runs
+        if (addr === CROSS_ONLY) {
+            current.crossOnly = true;
+            current.front = current.fill = 0;
+            crossOnly++;
+        }
         current.clockFront = lastClock;
         current.camera = camera();
         current.area = ram[LV_AREA];
@@ -375,7 +438,7 @@ cpu.debugInstruction.add((addr, opcode) => {
         else if (lastEndT !== null) current.loop = now() - lastEndT;
         lastEndT = now();
         // the BBC's own timing of each half, as its figures show it
-        for (const [half, at] of [["front", T_FRONT], ["fill", T_FILL]]) {
+        for (const [half, at] of current.crossOnly ? [] : [["front", T_FRONT], ["fill", T_FILL]]) {
             const us = ram[SPAN_US + at] | (ram[SPAN_US + at + 1] << 8) | (ram[SPAN_US + at + 2] << 16);
             const span = current[`${half}Span`];
             current[`${half}Bbc`] = 2 * us;
@@ -739,7 +802,10 @@ async function logicScript() {
     const LV_MINUTE = S("lv_minute"), LV_REQUEST = S("lv_request"), KEYS_MADE = S("keys_made");
     onLoop = () => {
         if (flagWrites) {
+            // (and vw_flags set, as the disc sets it after each logic_go_shown,
+            // for lv_inputs to read them)
             ram.set(flagWrites, S("ix_flags"));
+            ram[S("vw_flags")] = 0xff;
             visibility = flagWrites;
             flagWrites = null;
             idleSeen = false;
@@ -1399,11 +1465,23 @@ console.log(`${NAME}: ${probes.length} keys pressed with nothing left to draw: `
     ` fields; ${unchanged} changed nothing shown`);
 if (IDLE) console.log(`${NAME}: ${idles} idle loops, ${idlesOk} with the last frame's inputs, each ` +
     `${stats(idleLoops)} cycles from live_loop to live_idle; ${redrawn} frames drawn with the last frame's inputs`);
-console.log(`${NAME}: fields a frame, median / p90 / max:`);
+console.log(`${NAME}: fields a frame, median / p90 / max` +
+    (CROSS_ONLY >= 0 ? ` (${crossOnly} frames of the crosshair alone, its buffer holding its view)` : "") + ":");
 console.log(`  ${"frames".padEnd(10)} ${"n".padStart(4)}  ${"flip to flip".padEnd(20)} ${"loop".padEnd(20)} ` +
     `${"1-7 objects".padEnd(20)} ${"8-10 fill".padEnd(20)} ${"the rest".padEnd(20)}`);
 row("all", counted);
 for (const k of ["entrance", "standing", "walking", "turning", ...(FREE ? ["demo"] : [])]) row(k, counted.filter((f) => f.kind === k));
+if (profileRest)
+    for (const k of ["entrance", "standing", "walking", "turning"]) {
+        const fs_ = counted.filter((f) => f.kind === k && f.restProf);
+        if (!fs_.length) continue;
+        const sum = new Map();
+        for (const f of fs_) for (const [r, c] of f.restProf) sum.set(r, (sum.get(r) || 0) + c);
+        const total = [...sum.values()].reduce((a, b) => a + b, 0);
+        console.log(`${NAME}: the rest by routine, ${k} (${fs_.length} frames, ${Math.round(total / fs_.length)} cycles a frame):`);
+        for (const [r, c] of [...sum.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("top", 25))))
+            console.log(`  ${r.padEnd(28)} ${String(Math.round(c / fs_.length)).padStart(8)} ${(100 * c / total).toFixed(1).padStart(5)}%`);
+    }
 console.log(`${NAME}: ${emulated.toFixed(1)}s emulated in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (verbose)
     for (const f of counted)
