@@ -269,6 +269,46 @@ ASSERT im_fx1 = im_fx0 + 3 AND im_fx2 = im_fx1 + 3 AND im_fy1 = im_fy0 + 3 AND i
 ENDSECTION
 SECTION ObjCode
 
+\ BP_SITE site, f, k: bp_site's work for term site (bound f, axis k), written
+\ out, for a level camera's patch
+MACRO BP_SITE site, f, k
+    LDA bp_p+1 : BMI neg
+    LDA bp_p
+    STA site + BB_A0 : STA site + BB_A0 + BB_HI
+    EOR #&FF                                        ; 255 - phi
+    STA site + BB_B0 : STA site + BB_B0 + BB_HI
+    LDA #HI(sq_lo) : STA site + BB_A0 + 1
+    LDA #HI(sq_hi) : STA site + BB_A0 + BB_HI + 1
+    LDA #HI(ng_lo) : STA site + BB_B0 + 1
+    LDA #HI(ng_hi) : STA site + BB_B0 + BB_HI + 1
+    LDA #LO(bb_lo + k)
+    LDY bp_p : BEQ cell
+    LDA #LO(bb_hi + k)
+    BRA cell
+.neg
+    LDA bp_p : DEC A                                ; 255 + phi
+    STA site + BB_A0 : STA site + BB_A0 + BB_HI
+    EOR #&FF                                        ; -phi
+    STA site + BB_B0 : STA site + BB_B0 + BB_HI
+    LDA #HI(ng_lo) : STA site + BB_A0 + 1
+    LDA #HI(ng_hi) : STA site + BB_A0 + BB_HI + 1
+    LDA #HI(sq_lo) : STA site + BB_B0 + 1
+    LDA #HI(sq_hi) : STA site + BB_B0 + BB_HI + 1
+    LDA #LO(bb_lo + k)
+.cell
+    STA site + BB_UX
+    IF k > 0
+        LDA bp_p : ORA bp_p+1 : BEQ skip
+        LDA bb_bias + f : CLC : ADC #&20 : STA bb_bias + f
+        LDA #0
+        BRA put
+    .skip
+        LDA #BB_SKIP
+    .put
+        STA site + BB_SK
+    ENDIF
+ENDMACRO
+
 \ bound_patch: bound_box's terms (src/transform.6502's "The bounds") for M,
 \ as it's built: term k of bound f takes f's coefficient on M's column k,
 \ L 3 M0k + 2 M2k, R 2 M2k - 3 M0k, T M2k - 3 M1k, in 16 bits (each within
@@ -294,15 +334,15 @@ SECTION ObjCode
         \ L: c2 + a3
         LDA c2 : CLC : ADC a3 : STA bp_p
         LDA c2+1 : ADC a3+1 : STA bp_p+1
-        LDX #3 * BD_L + k : JSR bp_site
+        BP_SITE WHERE(k = 0, bb_t00, bb_t02), BD_L, k
         \ R: c2 - a3
         LDA c2 : SEC : SBC a3 : STA bp_p
         LDA c2+1 : SBC a3+1 : STA bp_p+1
-        LDX #3 * BD_R + k : JSR bp_site
+        BP_SITE WHERE(k = 0, bb_t10, bb_t12), BD_R, k
         \ T: c1 (M1k is 0)
         LDA c1 : STA bp_p
         LDA c1+1 : STA bp_p+1
-        LDX #3 * BD_T + k : JSR bp_site
+        BP_SITE WHERE(k = 0, bb_t20, bb_t22), BD_T, k
     NEXT
     \ the middle column, unless the last patch was a level camera's too
     LDA bp_level : BNE kept

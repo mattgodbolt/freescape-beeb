@@ -1181,3 +1181,19 @@ the line loop and the background's: inline, the first attempt overran the
 bank by about 3K. The slideshow's bank had no room for the code; its line
 heads, scratch bytes and the records went to main RAM, which leaves its bank
 exactly full. The fill's bank: 3,072 bytes free to 1,536.
+
+**The 64-times quarter squares for the bounds: not built.** Measured first
+by the cheaper way to the same end: an object's bounds kept at a 64th of the
+scale (no `BD_STORE` shifts at all) and the frame's three ceilings shifted
+down instead. `objectcheck`'s yaw sweeps went from 66,188 to 65,654 at the
+median, but its walks from 93,124 to 93,625: `objects_frame`'s
+`BD_BEYOND` reads every candidate's bounds every frame, and at a 64th of the
+scale their top byte holds two bits, so the compare falls through to the low
+two bytes nearly always, about 390 cycles a frame, besides the ceilings'
+shifts. The table would keep the scale, but makes each of `bound_box`'s nine
+terms a byte wider, about the cycles the shifts take. Reverted.
+
+**A level camera's bound patch written out again** (decision 76's largest
+cost, its commit reverted): `objectcheck`'s yaw sweeps 66,188 to 65,628 at
+the median, entrance views 119,104 to 118,538; 594 bytes of the front end's
+bank.
