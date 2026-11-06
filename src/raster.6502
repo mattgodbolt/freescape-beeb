@@ -48,6 +48,11 @@ RS_FACES    = 128                   ; faces in one frame, at most
 RS_VERTICES = 256                   ; vertices of all of them
 RS_PATTERNS = 64                    ; patterns (four bytes each)
 RS_HMAX     = 30000                 ; |rs_hx|, |rs_hy| at most
+\ The horizon's code (horizon_split's sloping and level cases, and the
+\ background's split of a gap): an includer that never sets rs_horizon,
+\ as the live disc doesn't (decision 8a: Driller's views have none), names
+\ RASTER_NO_HORIZON, and every line is sky end to end.
+RASTER_HORIZON = NOT(DEFINED(RASTER_NO_HORIZON))
 POOL_NODES  = 127                   ; gaps a pool holds (1..POOL_NODES; raster.md, "The span buffer")
 \ The painter build (docs/research/raster.md): the backmost face and the
 \ background through the span buffer, then the other faces back to front.
@@ -113,7 +118,9 @@ ENDSECTION
 \ background's split on each line, and the pools.
 SECTION RasterWork
 .head       SKIP VIEW_H
+IF RASTER_HORIZON
 .hsplit     SKIP VIEW_H
+ENDIF
     ALIGN 256
 .line7      SKIP 256                ; (n + 7) >> 4 (raster_init)
 .vk         SKIP RS_VERTICES        ; each vertex's line (raster_face)
@@ -148,7 +155,9 @@ SECTION RasterState
 .bg_was     SKIP 256
 .bg_sig     SKIP 16
 .f_dir      SKIP 1                  ; the way the last face's left chain walked
+IF RASTER_HORIZON
 .hz_sky     SKIP 1                  ; hsplit holds the all-sky splits
+ENDIF
 ENDSECTION
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * POOL_FIELD
@@ -242,7 +251,9 @@ IF NOT(DEFINED(RASTER_SQUARES))
     BRA q_high
 .q_done
 ENDIF
+IF RASTER_HORIZON
     STZ hz_sky
+ENDIF
     JSR raster_forget
     JMP writer_init
 }
@@ -1304,7 +1315,10 @@ NEXT
 \ stretch's); one filled by more than one piece is 0 as it fills (INSERT's
 \ unlink), so the records of a full line are the faces' and not this.
 
-ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, bg_k, bg_x, g_s, g_e, g_h
+ZA_AUTO1 bg_l, bg_r, bg_buf
+IF RASTER_HORIZON
+    ZA_AUTO1 bg_split, bg_k, bg_x, g_s, g_e, g_h
+ENDIF
 ZA_AUTO 4, bgv_l
 ZA_AUTO 4, bgv_la
 ZA_AUTO 4, bgv_lb
@@ -1331,7 +1345,12 @@ ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
     LDA #BG_SCREEN
 .main
     STA bg_buf
+IF RASTER_HORIZON
     JSR horizon_split
+ELSE
+    LDA rs_sky : STA bg_l
+    LDA rs_ground : STA bg_r
+ENDIF
     \ Both patterns' bytes for each phase, and their halves.
     LDA bg_l : ASL A : ASL A : TAX
     LDA bg_r : ASL A : ASL A : TAY
@@ -1392,7 +1411,9 @@ MACRO FILL k
     GS = pool_gs(k)
     GE = pool_ge(k)
     GH = pool_gh(k)
+IF RASTER_HORIZON
     LDA bg_split : CMP GE,X : BCC split
+ENDIF
     LDA GS,X : LSR A : BCC l_even
     BND_X GS
     LDA GH,X : AND #PIX_LEFT : ORA bgv_lb + k
@@ -1406,6 +1427,7 @@ MACRO FILL k
     ENTER_X GS
     PLANT_X GE
     GO_V bgv_l + k
+IF RASTER_HORIZON
     BRA done
 .split
     LDA GS,X : STA g_s
@@ -1414,9 +1436,11 @@ MACRO FILL k
     LDA #k : STA bg_k
     JSR fill_split
 .done
+ENDIF
 }
 ENDMACRO
 
+IF RASTER_HORIZON
 \ fill_split: the gap [g_s, g_e) of line r_y, its neighbours' halves in g_h,
 \ which ends right of the split, in phase bg_k's patterns: the left one's
 \ piece if it starts left of the split, then the right one's. Keeps X.
@@ -1457,6 +1481,7 @@ ENDMACRO
     LDX bg_x
     RTS
 }
+ENDIF
 
 \ Line r_y's background, from pool k's gaps; then the next line, the next
 \ copy's, which copies 0 to 2 fall into (VIEW_H is a multiple of 4, so the
@@ -1476,10 +1501,16 @@ MACRO BGLINE k, next
     JMP stepped
 .some
     TXA : ORA bg_buf : TAY              ; the line's record for this screen
+IF RASTER_HORIZON
     LDA hsplit,X : STA bg_split
+ENDIF
     LDA head,X : BPL gaps
     \ No face here: background alone, which the screen may hold already.
+IF RASTER_HORIZON
     LDA bg_split : INC A
+ELSE
+    LDA #VIEW_W + 1                     ; (all sky: the split at the right edge)
+ENDIF
     CMP bg_was,Y : BNE draw
     JMP stepped
 .draw
@@ -1510,6 +1541,7 @@ ENDMACRO
 .bg2 BGLINE 2, bg3
 .bg3 BGLINE 3, bg0
 
+IF RASTER_HORIZON
 \ ---------------------------------------------------------------------------
 \ horizon_split: which pattern is left of the split (bg_l, bg_r), and each
 \ line's split (hsplit).
@@ -1817,4 +1849,5 @@ ZA_AUTO2 d32_r
     DEC n : BNE bit
     RTS
 }
+ENDIF
 ENDSECTION
