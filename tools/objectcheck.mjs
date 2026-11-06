@@ -566,6 +566,10 @@ const report = (label, rows) => {
 };
 report("entrance views, each a turn (the cache refilled)", results.filter((r) => r.entrance));
 report("their walks, each a step (the cache kept)", results.filter((r) => /-w\d+$/.test(r.name)));
+// a yaw sweep's views after its first: each a turn of one step, 5 degrees,
+// from the view before, the camera where it was (the disc's turn: the cache
+// refilled, the sort's memory kept)
+report("yaw sweeps, each a 5-degree turn", results.filter((r) => /-y([1-9]|\d\d+)$/.test(r.name)));
 report("all views", results);
 console.log(
     `checked ${counts.views} views: ${counts.cands} candidates (${counts.passed} passed over as beyond the view), ` +

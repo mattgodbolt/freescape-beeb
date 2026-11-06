@@ -351,22 +351,11 @@ ENDMACRO
     LDA cd_obj,X : STA of_slot
     TAX
     \ (a good cache has good bounds: they're made first)
-    LDA ob_stamp,X : CMP cache_gen : BNE unfilled
+    LDA ob_stamp,X : CMP cache_gen : BNE of_unfilled
     BD_BEYOND BD_L
     BD_BEYOND BD_R
     BD_BEYOND BD_T
-    BRA filled
-.unfilled
-    LDA ob_bstamp,X : CMP cache_gen : BEQ bounded
-    JSR bound_object
-.bounded
-    BD_BEYOND BD_L
-    BD_BEYOND BD_R
-    BD_BEYOND BD_T
-    ASSERT BD_N = 3
-    JSR transform_fill
-    LDX of_slot
-.filled
+.of_filled
     LDY of_cand : LDA cd_vmask,Y
     JSR transform_object
 .of_transformed                     ; (tools/objectcheck.mjs reads the vertices here)
@@ -377,5 +366,17 @@ ENDMACRO
 .of_sort
     JSR sort_objects
     JMP emit_faces
+\ (out of the way of a step's candidates, whose caches are mostly good)
+.of_unfilled
+    LDA ob_bstamp,X : CMP cache_gen : BEQ bounded
+    JSR bound_object
+.bounded
+    BD_BEYOND BD_L
+    BD_BEYOND BD_R
+    BD_BEYOND BD_T
+    ASSERT BD_N = 3
+    JSR transform_fill
+    LDX of_slot
+    JMP of_filled
 
 ENDSECTION
