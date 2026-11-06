@@ -41,8 +41,6 @@ SECTION ObjWork
 .sk_sx      SKIP N_OBJ              ; its side of the camera on each axis (SK_*)
 .sk_sy      SKIP N_OBJ
 .sk_sz      SKIP N_OBJ
-.dl_rl      SKIP N_OBJ              ; each entry's row of the sort's memory
-.dl_rh      SKIP N_OBJ
 ENDSECTION
 
 \ The compares remembered (sort_objects): a compare of two objects' boxes
@@ -160,13 +158,11 @@ ENDMACRO
 \ sort_objects: the original's sort of the draw list into dl_ord, each
 \ pair's verdict from the memory when it has it (so_memo). A draw list the
 \ same as the last sort's, under the same generation, takes the last sort's
-\ order, since every compare is the same. Each entry's row of the memory
-\ (by its slot) is found once a frame (dl_rl, dl_rh), and a pass keeps its
-\ place in X.
+\ order, since every compare is the same. A pass keeps its place in X.
 .sort_objects
 {
     ZA_ENTRY
-    ZA_AUTO1 last, passes, changed, j, mslot, second, keyed, lo, span, axis
+    ZA_AUTO1 last, passes, changed, j, mslot, second, keyed, lo, span, axis, ca
     ZA_AUTO2 row
     LDX dl_n : BNE some
     RTS
@@ -228,9 +224,6 @@ ENDMACRO
     LDX dl_n : DEX
 .order
     TXA : STA dl_ord,X
-    LDY dl_obj,X
-    LDA so_row_lo,Y : STA dl_rl,X
-    LDA so_row_hi,Y : STA dl_rh,X
     DEX : BPL order
     STZ keyed
     LDX dl_n : DEX : BNE pairs
@@ -238,40 +231,77 @@ ENDMACRO
 .pairs
     STX last                            ; the pairs: 0 .. last - 1
     STX passes                          ; at most this many passes
+    \ A pass carries the entry it has kept moving right (a) from pair to
+    \ pair, with its row of the memory: a swap writes only b, left of it,
+    \ and a's own place is written when it stops (carried: a in ca, not in
+    \ dl_ord), or not at all if it never moved (in place: a at dl_ord,X).
 .pass
     STZ changed
     LDX #0
-.pair
+    LDY dl_ord : LDA dl_obj,Y : TAY
+.in_row
+    \ (Y: a's slot) a's row of the memory, a in place
+    LDA so_row_lo,Y : STA row
+    LDA so_row_hi,Y : STA row+1
+.in_pair
     \ remembered? (so_memo's row for a's slot, at b's)
-    LDY dl_ord,X                        ; a
-    LDA dl_rl,Y : STA row
-    LDA dl_rh,Y : STA row+1
     LDY dl_ord+1,X                      ; b
     LDA dl_obj,Y : TAY
     LDA (row),Y : EOR so_gen
-    CMP #2 : BCS compare                ; (another generation's, or none)
-.verdict
-    LSR A : BCC swap                    ; (C: keep)
-.next
-    INX : CPX last : BCC pair
+    CMP #2 : BCS in_compare             ; (another generation's, or none)
+.in_verdict
+    LSR A : BCS kept_in                 ; (C: keep)
+    \ swapped: b left of a, which is carried
+    LDA dl_ord,X : STA ca
+    LDA dl_ord+1,X : STA dl_ord,X
+    INC changed                         ; (fewer than 256 swaps a pass)
+    INX : CPX last : BCC c_pair
+    BRA c_done
+.kept_in
+    \ kept: b is the next pair's a, in place (Y its slot)
+    INX : CPX last : BCC in_row
+    BRA in_done
+.in_compare
+    LDA dl_ord,X : STA ca
+    JSR pair
+    BRA in_verdict
+.c_pair
+    LDY dl_ord+1,X                      ; b
+    LDA dl_obj,Y : TAY
+    LDA (row),Y : EOR so_gen
+    CMP #2 : BCS c_compare
+.c_verdict
+    LSR A : BCS kept_c
+    \ swapped again: b left, a still carried
+    LDA dl_ord+1,X : STA dl_ord,X
+    INX : CPX last : BCC c_pair
+.c_done
+    LDA ca : STA dl_ord,X               ; (X = last: a stops at the end)
+    BRA in_done
+.kept_c
+    \ kept: a stops here, and b is the next pair's a, in place
+    LDA ca : STA dl_ord,X
+    INX : CPX last : BCC in_row
+    BRA in_done
+.c_compare
+    JSR pair
+    BRA c_verdict
+.in_done
     LDA changed : BEQ sorted
-    DEC passes : BNE pass
+    DEC passes : BEQ sorted
+    JMP pass
 .sorted
     JMP so_save
-.swap
-    \ b, then a
-    LDA dl_ord,X : PHA
-    LDA dl_ord+1,X : STA dl_ord,X
-    PLA : STA dl_ord+1,X
-    INC changed                         ; (fewer than 256 swaps a pass)
-    BRA next
-.compare
+\ pair: entries ca (a) and dl_ord+1,X (b, of slot Y) compared and the
+\ verdict remembered in a's row (row) at b's slot: A 1 to keep, 0 to swap.
+\ Keeps X and Y.
+.pair
     STX j : STY mslot
     LDA keyed : BNE have_keys
     JSR sort_keys
     INC keyed
 .have_keys
-    LDY j : LDX dl_ord,Y
+    LDY j : LDX ca
     LDA dl_ord+1,Y : TAY
     STZ second
     SK_COMPARE sk_lx, sk_hx, sk_sx
@@ -286,7 +316,7 @@ ENDMACRO
     LDY mslot
     PHA : ORA so_gen : STA (row),Y : PLA
     LDX j
-    JMP verdict
+    RTS
 \ by axis: the header box's L and H arrays, for the cells' check
 .sc_ll
     EQUB LO(ob_lx), LO(ob_ly), LO(ob_lz)
