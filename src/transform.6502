@@ -501,25 +501,24 @@ ZA_AUTO 9, fill_acc
 
 \ fill_patch: a level camera's fills' bases (above, "A level camera's
 \ fills") for M, as it's built: + m's 64 + m, - m's 64 - m.
-MACRO LV_PATCH site, m, a0, a1, a2, b0, b1, b2
+MACRO LV_PATCH m, s, a0, a1, a2, b0, b1, b2, t, c0, c1, c2, d0, d1, d2
     LDA m : CLC : ADC #64
-    STA site + a0 : STA site + a1 : STA site + a2
+    STA s + a0 : STA s + a1 : STA s + a2
+    STA t + c0 : STA t + c1 : STA t + c2
     LDA #64 : SEC : SBC m
-    STA site + b0 : STA site + b1 : STA site + b2
+    STA s + b0 : STA s + b1 : STA s + b2
+    STA t + d0 : STA t + d1 : STA t + d2
 ENDMACRO
 .fill_patch
 {
     LDA mat_tilt : BEQ level
     RTS
 .level
-    LV_PATCH fill_point.lv_x0, M00, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
-    LV_PATCH fill_point.lv_z0, M20, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2
-    LV_PATCH fill_point.lv_x1, M02, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
-    LV_PATCH fill_point.lv_z1, M22, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2
-    LV_PATCH fill_edge.lv_xx, M00, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_xz, M20, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_zx, M02, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
-    LV_PATCH fill_edge.lv_zz, M22, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    \ each entry of M's patched into a point fill's site and an edge fill's
+    LV_PATCH M00, fill_point.lv_x0, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2, fill_edge.lv_xx, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M20, fill_point.lv_z0, LVZ_A0, LVZ_A1, LVZ_A2, LVZ_B0, LVZ_B1, LVZ_B2, fill_edge.lv_xz, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M02, fill_point.lv_x1, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2, fill_edge.lv_zx, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
+    LV_PATCH M22, fill_point.lv_z1, LVA_A0, LVA_A1, LVA_A2, LVA_B0, LVA_B1, LVA_B2, fill_edge.lv_zz, LVC_A0, LVC_A1, LVC_A2, LVC_B0, LVC_B1, LVC_B2
     RTS
 }
 
