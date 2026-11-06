@@ -236,10 +236,14 @@ In order. Formats are the model's; the 6502 matches them exactly.
       of the two patterns. Nothing on the screen is read, because the row
       is written whole.
     - No clear and no copy.
-    - Later, a run can be skipped when the buffer already holds it: the
-      back buffer still has the frame from two frames ago, and its span
-      lists can be kept (at `&3000-&3FFF`, which is per buffer by the X
-      bit) to compare against. Sky and ground mostly survive a step.
+    - A line is skipped when the buffer already holds it: the back buffer
+      still has the frame from two frames ago, and a record for each buffer
+      and line says what that left there when it was one run, the
+      background alone or one face's piece across the whole line, in what
+      byte (`docs/research/raster.md`, "What the screen already holds").
+      The sky and the floor mostly survive a step or a turn. Lines of more
+      than one run are written whole: their records would need room the
+      memory hasn't (`docs/research/raster.md`, round 5).
 11. **Flip** as soon as the CRTC isn't fetching the view: ACCCON D set to
     the buffer just drawn, at once by `frame_end` or by T1's interrupt
     as the view's last line goes (section 1, as built).

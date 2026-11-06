@@ -223,6 +223,17 @@ def sequences():
         "turning": [scene("turning", [], Horizon(832, 832, round(127 * math.cos(t / 9)), round(127 * math.sin(t / 9))),
                           random.Random(7)) for t in range(6)],
     }
+    # Lines one face takes whole, then the same lines filled by two pieces
+    # (the left one another face's), then whole again in the first face's
+    # bytes: each screen must write them again, as it holds two pieces.
+    # Rows 0-39 by a rectangle (the stretch), 40-79 by a face with a sloping
+    # side (the line loop's fresh path), the rest left to the sky.
+    sky, ground, p, q = [0x12, 0x34, 0x56, 0x78], [0x9a, 0xbc, 0xde, 0xf0], [0x11, 0x22, 0x44, 0x88], [0x33, 0x66, 0xcc, 0x99]
+    tall = [(0, 0), (XMAX, 0), (XMAX, SUB * 40), (0, SUB * 40)]
+    slope = [(0, SUB * 40), (XMAX, SUB * 40), (XMAX, SUB * 80), (XMAX // 2, SUB * 80 + 4), (0, SUB * 80)]
+    left = [(0, 0), (XMAX // 2 + 3, 0), (XMAX // 2 + 3, SUB * 80), (0, SUB * 80)]
+    out["whole-lines"] = [scene("whole-lines", ([] if t % 4 < 2 else [(q, left)]) + [(p, tall), (p, slope)],
+                                sky=sky, ground=ground) for t in range(10)]
     # The pitch moves the boxes, but the sky and ground stay as they were.
     for f in out["rise"]:
         f["sky"], f["ground"] = out["rise"][0]["sky"], out["rise"][0]["ground"]
@@ -507,11 +518,13 @@ def driller_views(db_path, out):
 
 def held_writes(frames):
     """The view's bytes each frame of a sequence writes, as the 6502's
-    records of the background have it (raster_background): the frames go
+    records of the lines have it (raster_background): the frames go
     alternately into each screen; a line no face touched is background
     alone, and isn't written when the screen being drawn held the same
     background there last time, in the same two patterns; other patterns
-    forget the screen's lines, and the first frame forgets both screens.
+    forget the screen's lines, and the first frame forgets both screens. A
+    line one face's piece takes whole isn't written when the screen holds
+    it in the same byte, from such a piece last time.
     In the painter's build the backmost face alone touches lines, and after
     the background the lines its painted faces' line ranges span (their
     hull) are no longer background alone. Sets each built frame's
@@ -533,11 +546,18 @@ def held_writes(frames):
             if sigs[build_][screen] != sig:
                 sigs[build_][screen] = sig
                 rec[screen][:] = [0] * VIEW_H
-            touched = []
-            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched)
+            touched, wholes = [], []
+            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched, wholes=wholes)
             skipped = 0
             for y in range(VIEW_H):
-                if touched[y]:
+                if wholes[y] is not None:
+                    # One face's piece took the line whole: in the byte the
+                    # screen holds there already, it isn't written.
+                    if rec[screen][y] == ("whole", wholes[y]):
+                        skipped += 1
+                    else:
+                        rec[screen][y] = ("whole", wholes[y])
+                elif touched[y]:
                     rec[screen][y] = 0
                 elif rec[screen][y] == splits[y][2] + 1:
                     skipped += 1

@@ -287,13 +287,15 @@ def rasterise(faces, sky, ground, horizon=None, stats=None):
     return lines
 
 
-def spans(faces, bg, capacity=None, crossings=None, touched=None):
+def spans(faces, bg, capacity=None, crossings=None, touched=None, wholes=None):
     """faces: [(pattern, [(x, y), ...]), ...] nearest first, vertices inside
     [0, 16 VIEW_W] x [0, 16 VIEW_H]; bg: a Background. Returns (lines,
     counts): lines[y] = [(x0, x1, pattern), ...] in order, covering
     [0, VIEW_W). touched, if given, is a list that gets, for each line,
     whether a face's span went into it (the 6502's head no longer
-    UNTOUCHED), which the background's records go by.
+    UNTOUCHED), which the background's records go by; wholes, if given,
+    for each line one face's piece took whole, its byte there (the
+    pattern's for the line's phase), and None for every other line.
 
     The algorithm is stage 8's, as the 6502 runs it: each line keeps its
     gaps (the runs nothing covers yet) in order, and each face's span on a
@@ -372,6 +374,9 @@ def spans(faces, bg, capacity=None, crossings=None, touched=None):
                 open_lines -= 1
             counts.gaps_peak = max(counts.gaps_peak, alive)
     counts.full_lines = VIEW_H - open_lines
+    if wholes is not None:
+        wholes[:] = [c[0][2][y & 3] if len(c) == 1 and c[0][:2] == (0, VIEW_W) else None
+                     for y, c in enumerate(covered)]
     lines = []
     for y in range(VIEW_H):
         left, right, split = horizon_split(bg, y)

@@ -119,6 +119,11 @@ IF NOT(DEFINED(RASTER_SQUARES))
 .rq_hi      SKIP 512
 ENDIF
 .pools      SKIP 4 * 4 * POOL_FIELD
+\ (Frame to frame, as RasterState's records, here for the room: the byte a
+\ line taken whole by one face's piece was written in, for each screen and
+\ line whose bg_was is LN_WHOLE; raster_background.)
+    ALIGN 256
+.ln_v       SKIP 256
 ENDSECTION
 IF DEFINED(RASTER_SQUARES)
     rq_lo = RASTER_SQUARES
@@ -253,6 +258,7 @@ ENDIF
     NEXT
     LDA #VIEW_H : STA nopen
     STZ rs_overflow
+    JSR background_set
     JSR writer_begin
 IF RASTER_PAINTER
     \ The backmost face into the span buffer, and the background round it.
@@ -606,7 +612,9 @@ MACRO INSERT k, next, stretch
     LDY r_prev : BNE unlink_mid
     LDY r_y
     LDA GN,X : STA head,Y : BNE unlinked     ; (Z from the LDA)
-    DEC nopen                           ; the line's last gap: it's full
+    DEC nopen                           ; the line's last gap: it's full,
+    TYA : ORA bg_buf : TAY              ; of more than one piece (its record)
+    LDA #0 : STA bg_was,Y
     JMP next
 .unlink_mid
     LDA GN,X : STA GN,Y
@@ -670,14 +678,24 @@ MACRO INSERT k, next, stretch
 .fresh_crossed
     JSR swap_chains
 .fresh_some
-    LDA r_a : BNE fresh_cut
+    LDA r_a : BEQ fresh_zero
+    JMP fresh_cut
+.fresh_zero
     LDA r_b : CMP #VIEW_W : BNE fresh_right
-    \ All of it.
+    \ All of it, unless the screen holds the line in this byte already
+    \ (raster_background's records: LN_WHOLE).
     STZ head,X
     DEC nopen
     STZ put_go + 1                      ; (the slot for pixel 0)
     PLANT_END
+    TXA : ORA bg_buf : TAY
+    LDA PV : CMP ln_v,Y : BNE whole_new
+    LDA bg_was,Y : CMP #LN_WHOLE : BEQ whole_held
+.whole_new
+    LDA PV : STA ln_v,Y
+    LDA #LN_WHOLE : STA bg_was,Y
     GO_V PV
+.whole_held
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_whole       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_whole
@@ -781,9 +799,16 @@ MACRO STRETCH k, entry
     JMP entry
 .fresh
     BIT st_kind : BMI left_gap : BVS right
-    \ the whole line
+    \ the whole line, unless the screen holds it (as INSERT's)
     STZ head,X
     DEC nopen
+    TXA : ORA bg_buf : TAY
+    LDA PV : CMP ln_v,Y : BNE whole_new
+    LDA bg_was,Y : CMP #LN_WHOLE : BNE whole_new
+    JMP next
+.whole_new
+    LDA PV : STA ln_v,Y
+    LDA #LN_WHOLE : STA bg_was,Y
     JMP go
 .right
     \ [0, b): the gap [b, W)
@@ -1257,9 +1282,13 @@ NEXT
 \ A line no face touched is background from end to end, and if the screen
 \ being drawn held the same background on it last time, it still does, so
 \ it isn't written. bg_was keeps, for each screen (ACCCON's X) and line,
-\ split + 1 when the line was background alone (0 otherwise), and bg_sig
-\ the two patterns' bytes those splits were drawn in; different patterns
-\ forget the screen's lines.
+\ split + 1 when the line was background alone, LN_WHOLE when one face's
+\ piece took it whole (in the byte ln_v keeps), and 0 otherwise; and bg_sig
+\ the two patterns' bytes the splits were drawn in, different patterns
+\ forgetting the screen's lines. A line taken whole is likewise not written
+\ when the screen holds it in the same byte (INSERT's fresh path and the
+\ stretch's); one filled by more than one piece is 0 as it fills (INSERT's
+\ unlink), so the records of a full line are the faces' and not this.
 
 ZA_AUTO1 bg_l, bg_r, bg_split, bg_buf, bg_k, bg_x, g_s, g_e, g_h
 ZA_AUTO 4, bgv_l
@@ -1270,10 +1299,24 @@ ZA_AUTO 4, bgv_ra
 ZA_AUTO 4, bgv_rb
 
 BG_SCREEN = 128                     ; bg_was's offset for the second screen
-ASSERT VIEW_H <= BG_SCREEN
+LN_WHOLE  = &FF                     ; bg_was: the line one piece in ln_v's byte
+ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
 
 .raster_background
+    STZ r_y
+    JMP bg0
+
+\ background_set (before the faces, which read and write the records):
+\ the screen drawn (ACCCON's X), where its lines' records are (bg_buf);
+\ the background's split on each line and its patterns' bytes; and if
+\ those aren't the patterns the screen's records were drawn in, its lines
+\ forgotten.
+.background_set
 {
+    LDA acccon : AND #ACCCON_X : BEQ main
+    LDA #BG_SCREEN
+.main
+    STA bg_buf
     JSR horizon_split
     \ Both patterns' bytes for each phase, and their halves.
     LDA bg_l : ASL A : ASL A : TAX
@@ -1286,16 +1329,11 @@ ASSERT VIEW_H <= BG_SCREEN
         AND #PIX_LEFT : STA bgv_ra + k
         LDA bgv_r + k : AND #PIX_RIGHT : STA bgv_rb + k
     NEXT
-    \ The screen drawn: its lines' records, and the patterns they were
-    \ drawn in.
+    \ The patterns the screen's lines' records were drawn in.
     LDX #0
-    LDA acccon : AND #ACCCON_X : BEQ main
+    LDA bg_buf : BEQ first
     LDX #8
-.main
-    TXA : BEQ first
-    LDA #BG_SCREEN
 .first
-    STA bg_buf
     LDY #0
     FOR k = 0..3
         LDA bgv_l + k : CMP bg_sig + k,X : BEQ same_l
@@ -1306,10 +1344,9 @@ ASSERT VIEW_H <= BG_SCREEN
     .same_r
     NEXT
     TYA : BEQ known
-    LDX bg_buf : JSR forget_screen
+    LDX bg_buf : JMP forget_screen
 .known
-    STZ r_y
-    JMP bg0
+    RTS
 }
 
 \ raster_forget: neither screen holds what the rasteriser last drew there
@@ -1420,12 +1457,11 @@ MACRO BGLINE k, next
         JSR row_setup
     .row
     ENDIF
-    TXA : ORA bg_buf : TAY              ; the line's record for this screen
     LDA head,X : BNE some
-    \ Faces filled it.
-    LDA #0 : STA bg_was,Y
+    \ Faces filled it (and its record says how: LN_WHOLE or 0).
     JMP stepped
 .some
+    TXA : ORA bg_buf : TAY              ; the line's record for this screen
     LDA hsplit,X : STA bg_split
     LDA head,X : BPL gaps
     \ No face here: background alone, which the screen may hold already.

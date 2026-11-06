@@ -1091,7 +1091,12 @@ async function freeScript() {
         await settle(`the tour at ${live.entrances[i].name}`);
         const next = (i + 1) % ENTRANCES;
         script = "entrance";
-        await press("SPACE");
+        // SPACE held goes on an entrance each time a loop sees it, so it's
+        // let go once the entrance has changed (within three fields): a view
+        // drawn sooner than the key is held would go on again.
+        session.keyDownRaw(BBC.SPACE);
+        for (let n = 0; n < 3 && ram[LV_ENTRANCE] === i; n++) await session.runFor(FIELD);
+        session.keyUpRaw(BBC.SPACE);
         await untilFrame((f) => f.entrance === next || f.entrance !== i, `SPACE at ${live.entrances[i].name}`);
         if (frames.at(-1).entrance === next) spaceOk++;
         else fail(`SPACE at ${live.entrances[i].name} went to ${live.entrances[frames.at(-1).entrance].name}`);

@@ -24,10 +24,12 @@ instruction-level profile, unless it says otherwise.
 - `node tools/rastercheck.mjs build/raster --verbose` prints each scene's
   cycles by part; `--json FILE` writes them with the model's counts;
   `--scene TEXT` picks scenes; `--scenes FILE` another scene file; `--hot
-  FILE` each instruction's cycles and executions by address, to read
-  against baron's listing (`baron -v` of `build/raster/check.6502`). Every
-  run prints the scenes' cycles as min, median, mean, p90 (nearest rank)
-  and max.
+  FILE` each instruction's cycles and executions by address (the scenes'
+  and the sequences'), to read against baron's listing (`baron -v` of
+  `build/raster/check.6502`). Every run prints the scenes' cycles as min,
+  median, mean, p90 (nearest rank) and max, and the sequences' frames after
+  each one's first two (where what the screens hold counts) the same way,
+  with their parts.
 - The scenes depend on `build/raster/limits`, the 6502's limits their views
   depend on (the pools' size, the patterns', the horizon's), which
   `mk/raster.mk` rewrites only when they change.
@@ -180,6 +182,18 @@ that overflowed before (330 and 1,040).
   patterns, or `raster_forget`, forget them. Every skip comes from these
   records; the screen is never read (the sources that read it measured a
   loss, `rtw-sources.md` 6).
+- **A line one face takes whole** (INSERT's fresh path for a span of
+  `[0, VIEW_W)`, and the stretch's whole lines) is likewise not written when
+  the screen holds it in the same byte: `bg_was` is `LN_WHOLE` for it and
+  `ln_v` keeps the byte (the pattern's for the line's phase, not its index,
+  so a pattern table changed without `raster_forget`, as the slideshow's,
+  can't fool it). The run's entry and plant are still set, as the stretch's
+  next lines may need them. A line more than one piece fills has its record
+  made 0 where it fills (INSERT's unlink of its last gap), so the
+  background's pass leaves a full line's record alone. The records are
+  checked against the patterns before the faces (`background_set`), so a
+  change of background forgets the lines before the faces mark them. This
+  is round 5, below.
 
 ## The interface for the frame
 
@@ -198,10 +212,13 @@ that overflowed before (330 and 1,040).
   and clobbers A, X, Y. It reads nothing else but ACCCON, and writes nothing
   else but the view (the check watches every write).
 - Sections: `RasterCode`, `RasterRuns` (page-aligned), `RasterWork` (per
-  frame, and the tables `raster_init` builds) and `RasterState` (frame to
-  frame) in one sideways bank, the inputs in main RAM (decision 20). The
-  slideshow (`src/slides.6502`) and the live disc (`src/live.6502`) put all
-  four in a bank one after another and assert they fit.
+  frame, the tables `raster_init` builds, and `ln_v`, which lasts from frame
+  to frame but is there for the bank's room) and `RasterState` (frame to
+  frame), the inputs in main RAM (decision 20). The live disc puts the first
+  three in its bank and `RasterState` in main RAM below `&3000`; the
+  slideshow (`src/slides.6502`) the same, as its bank, which holds its own
+  quarter squares, hasn't room for `RasterState` beside `ln_v`. Both assert
+  they fit.
 
 ## Checks
 
@@ -259,6 +276,13 @@ that overflowed before (330 and 1,040).
   (the first, whose image is the same, as only the early stop is lost) and
   the scene whose pools run out in a stretch (the room), which Driller's
   views never do.
+- Round 5's records (2026-11-06, the same way): the whole line held on its
+  byte alone (without `LN_WHOLE`), in INSERT's path and in the stretch's; a
+  line filled by more than one piece left with its record; and the
+  background's pass making every full line's record 0, as before. All four
+  fail `make raster`; the second only once the `whole-lines` sequence was
+  added (lines whole, then two pieces, then whole again in the first
+  bytes), which the other sequences and the live frames never do.
 - Driller's own entrance views (65, through the whole-view model's render)
   found a bug every synthetic scene had missed: taking out a line's first
   gap branched on the flags of `LDY r_y`, so on line 0 alone a span stopped
@@ -384,8 +408,61 @@ and `crossing-chains-shared` (over the edge behind, as the frame) fail
 the old code on both builds. Over the 65 views (the table above): all of
 them 7,761,617 cycles from 7,770,109.
 
+### Round 5: lines the screen holds (2026-11-06)
+
+Every measurement above draws each view fresh. The disc doesn't: each
+frame goes into the buffer that holds the frame two before, and in play
+that one mostly looks the same. Measured on the model over the live
+check's frames in order (eight of the logic disc's scenarios, about 1,240
+frames after each one's first two), against the frame two before: walking,
+66% of lines and 93% of bytes the same; turning, 69% and 91%. Most of those
+lines are one run: the sky, which the background's records already skipped,
+and the floor, one face across the whole line. Recording, for each screen
+and line, the line's write events in order and skipping one whose record
+matches at the same place, one event a line takes nearly all there is to
+take (walking 69.7 events a frame, with every one a line holds 80.0;
+turning 71.7 against 73.7), and of one-event lines the ones one face takes
+whole are 26.7 a frame walking and 52.9 turning (1,388 and 2,752 bytes).
+So the records say only that (above, "What the screen already holds"): a
+byte for each screen and line, `ln_v`, in the fill's bank, and a test where a fresh line is taken
+whole (INSERT's path and the stretch's).
+
+Measured (cycles, `tools/rastercheck.mjs`):
+
+| | before | after |
+|---|---|---|
+| Driller's 65 entrance views, each fresh: all / median / p90 / max | 7,761,617 / 109,641 / 183,419 / 321,877 | 7,820,772 / 109,796 / 184,644 / 322,585 |
+| the live frames in order, after each sequence's first two (291, six scenarios): median / mean / p90 / max | 75,803 / 90,730 / 149,332 / 321,763 | 68,936 / 79,444 / 142,190 / 322,471 |
+| ... the bytes' share | 30.9% | 21.0% |
+
+A view drawn fresh pays the test and the record on each line taken whole,
+0.8% in all. On the discs (fields a frame, median / p90 / max), the fill
+on the logic's disc: walking 1.15 / 2.72 / 8.29 to 0.85 / 2.5 / 8.29,
+turning 1.15 / 2.84 / 7.46 to 0.83 / 2.73 / 7.46, standing 3.49 / 3.52 /
+5.3 to 3.26 / 3.3 / 5.3, entrances 2.82 / 4.68 / 8.33 to 2.83 / 4.7 / 8.34;
+flip to flip, walking a median 2.41 to 2.0, turning 2.97 to 2.51. The free
+camera's tour, the fill a median 4.83 to 4.69; the slideshow, whose views
+are held, `raster_frame` a median 96,678 to 83,187 and 2.49 fields a frame
+to 2.16.
+
+What's still written though the screen holds it, on the same frames after
+the skip (the model, a frame's mean): 1,754 bytes written on 33.7 lines,
+1,350 of them the same as the screen's; 612 of those lie in the line's
+first run of last time and 563 in its last, mostly the floor beside an
+object that moved. Taking those would need each line's first and last runs
+recorded for each screen, and since a frame's pieces on a line come in the
+faces' order, not the line's, the old record is still wanted after the new
+one is known: two sets for each screen, about 1K besides `ln_v`, against
+the bank's room, for an estimated 3K cycles a frame less the trimming's
+test on every piece. Not built.
+
 ### Measured and not built
 
+- **Faces' lines already full** when the face comes, which its line loop
+  still steps through (2026-11-06, the model on Driller's views, a view's
+  mean): 2.6 before its first open line, 8.1 after its last, 0.6 between,
+  of 296 face-lines. Starting a face at its first open line would need its
+  edges' x there (a product an edge); not worth it.
 - **Edges shared between faces.** Of the 1,141 sloping edges the views'
   faces have (crossing a line), 219 (19%) have the same two endpoints as
   an earlier face's; the median view has 2. A cache would save about 2 set-ups and cost a
@@ -534,6 +611,10 @@ the same at p90. The painter's stays buildable and checked.
   two synthetic scenes beside the two pathological ones now overflow, and
   a face-line that doesn't fit isn't drawn, as decision 20 has it, in the
   model and the 6502 alike (above, "The span buffer").
+- **Lines one face takes whole aren't rewritten when the buffer holds
+  them** (decision 70, 2026-11-06, amending 20): round 5's records. The
+  picture is the same; the model's `held_writes` counts the bytes it
+  leaves.
 
 Nothing else in the rounds changes the picture or the model's method:
 the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
@@ -576,5 +657,23 @@ the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
 - **Both ways in one build**, chosen a frame by the faces' line ranges
   (the figures above): about 40K off the busiest view; it needs the span
   buffer's pools and the painter's code in the bank together.
-- **More of what the screen holds.** Only whole background lines are
-  skipped now, and Driller's views seldom have one (above).
+- **More of what the screen holds.** Lines of one run, the background's or
+  one face's, are skipped now (round 5); what's left of the bytes the
+  screen holds is mostly in the first and last runs of lines of more than
+  one, which want room (round 5, above). A view the same as the one its
+  screen holds (the crosshair moved, the camera still: the live check's
+  standing frames, 3.26 fields of fill a frame and 1.91 of the stages
+  before) could skip both halves, but only the live loop knows that its
+  inputs are those of two frames before (`lv_inputs` compares the last
+  frame's).
+- **Priced for Matt, not adopted** (2026-11-06, from the fresh views'
+  profile): half the vertical resolution, each line rasterised once and
+  written twice by row runs that store both lines' bytes (`STA a,Y : STA
+  a+1,Y`, the same 5 cycles a byte), would halve what's per line and per
+  face-line (insertion, the stretch, the steps, the runs' entries, rows and
+  the line loop: 51% of the fresh views' cycles) and part of the
+  background's, an estimated 28% off a fresh view, less on the frames round
+  5 helps; constant dithers line to line save the row fill nothing (each
+  phase's byte is loaded once a run either way), though they would bring a
+  column fill's byte to 5 cycles (`colfill.md`), about 10K off its median
+  price, still above this fill's.

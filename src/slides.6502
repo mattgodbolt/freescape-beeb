@@ -55,7 +55,8 @@ FOR i = 0..<LEN(SLIDE_BANKS)
 NEXT
 
 \ The rasteriser's sections, one after another in bank BANK_RASTER; its
-\ inputs (RasterIn) in main RAM, after SLIDES.
+\ inputs (RasterIn) and its state (RasterState, for the bank's room) in
+\ main RAM, after SLIDES.
 raster_runs_org = &8000
 SECTION RasterRuns, org = raster_runs_org, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
@@ -64,11 +65,11 @@ SECTION RasterCode, org = raster_code_org, guard = &C000, filename = "RCODE", cm
 ENDSECTION
 SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
 ENDSECTION
-SECTION RasterState, org = raster_work_end, guard = &C000, virtual = TRUE
-ENDSECTION
 SECTION TextRAM, org = slides_end, guard = &3000, virtual = TRUE
 ENDSECTION
 SECTION RasterIn, org = text_ram_end, guard = &3000, virtual = TRUE
+ENDSECTION
+SECTION RasterState, org = raster_in_end, guard = &3000, virtual = TRUE
 ENDSECTION
 
 \ SLIDES: the slideshow, all below &3000, which ACCCON's X moves to shadow
@@ -485,10 +486,13 @@ ENDSECTION
 SECTION RasterWork
 .raster_work_end
 ENDSECTION
+SECTION RasterIn
+.raster_in_end
+ENDSECTION
 SECTION RasterState
 .raster_state_end
 ENDSECTION
-ASSERT raster_state_end <= &C000
+ASSERT raster_work_end <= &C000 AND raster_state_end <= &3000
 SECTION TextRAM
 .text_ram_end
 ENDSECTION

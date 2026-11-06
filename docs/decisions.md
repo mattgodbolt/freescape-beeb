@@ -674,3 +674,17 @@ A candidate with every vertex where one of 3x + 2z, 2z - 3x or z - 3y
 pixel changes in the entrance views, their walks or against the ZX oracle;
 over the check's views a few lose a sliver of a cone face made from an
 object wholly beyond the view (journal, 2026-11-05).
+
+## 70. Lines one face takes whole aren't rewritten when the buffer holds them (2026-11-06, autonomous; amends 20)
+
+As decision 20 does for the background's lines, a line one face's piece
+covers from end to end isn't written when the buffer being drawn holds it in
+the same byte from such a piece last time, by a record for each buffer and
+line (`bg_was`'s `LN_WHOLE`, the byte in `ln_v`). The picture doesn't
+change; every frame is the model's byte for byte, and the model's
+`held_writes` counts the bytes the 6502 writes. Anything else that draws on
+the screens still calls `raster_forget`. The record's 256 bytes go in the
+fill's bank, and the slideshow's `RasterState` moves to main RAM to make
+room in its bank. Lines of more than one run stay written whole (their
+records would need room the memory hasn't). Figures: journal, 2026-11-06,
+"the fill's fifth round".
