@@ -24,10 +24,12 @@ instruction-level profile, unless it says otherwise.
 - `node tools/rastercheck.mjs build/raster --verbose` prints each scene's
   cycles by part; `--json FILE` writes them with the model's counts;
   `--scene TEXT` picks scenes; `--scenes FILE` another scene file; `--hot
-  FILE` each instruction's cycles and executions by address, to read
-  against baron's listing (`baron -v` of `build/raster/check.6502`). Every
-  run prints the scenes' cycles as min, median, mean, p90 (nearest rank)
-  and max.
+  FILE` each instruction's cycles and executions by address (the scenes'
+  and the sequences'), to read against baron's listing (`baron -v` of
+  `build/raster/check.6502`). Every run prints the scenes' cycles as min,
+  median, mean, p90 (nearest rank) and max, and the sequences' frames after
+  each one's first two (where what the screens hold counts) the same way,
+  with their parts.
 - The scenes depend on `build/raster/limits`, the 6502's limits their views
   depend on (the pools' size, the patterns', the horizon's), which
   `mk/raster.mk` rewrites only when they change.
@@ -180,6 +182,18 @@ that overflowed before (330 and 1,040).
   patterns, or `raster_forget`, forget them. Every skip comes from these
   records; the screen is never read (the sources that read it measured a
   loss, `rtw-sources.md` 6).
+- **A line one face takes whole** (INSERT's fresh path for a span of
+  `[0, VIEW_W)`, and the stretch's whole lines) is likewise not written when
+  the screen holds it in the same byte: `bg_was` is `LN_WHOLE` for it and
+  `ln_v` keeps the byte (the pattern's for the line's phase, not its index,
+  so a pattern table changed without `raster_forget`, as the slideshow's,
+  can't fool it). The run's entry and plant are still set, as the stretch's
+  next lines may need them. A line more than one piece fills has its record
+  made 0 where it fills (INSERT's unlink of its last gap), so the
+  background's pass leaves a full line's record alone. The records are
+  checked against the patterns before the faces (`background_set`), so a
+  change of background forgets the lines before the faces mark them. This
+  is round 5, below.
 
 ## The interface for the frame
 
@@ -198,10 +212,13 @@ that overflowed before (330 and 1,040).
   and clobbers A, X, Y. It reads nothing else but ACCCON, and writes nothing
   else but the view (the check watches every write).
 - Sections: `RasterCode`, `RasterRuns` (page-aligned), `RasterWork` (per
-  frame, and the tables `raster_init` builds) and `RasterState` (frame to
-  frame) in one sideways bank, the inputs in main RAM (decision 20). The
-  slideshow (`src/slides.6502`) and the live disc (`src/live.6502`) put all
-  four in a bank one after another and assert they fit.
+  frame, the tables `raster_init` builds, and `ln_v`, which lasts from frame
+  to frame but is there for the bank's room) and `RasterState` (frame to
+  frame), the inputs in main RAM (decision 20). The live disc puts the first
+  three in its bank and `RasterState` in main RAM below `&3000`; the
+  slideshow (`src/slides.6502`) the same, as its bank, which holds its own
+  quarter squares, hasn't room for `RasterState` beside `ln_v`. Both assert
+  they fit.
 
 ## Checks
 

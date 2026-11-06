@@ -27,8 +27,10 @@
 // (an instruction-level profile over the routines' labels), and the cost
 // model fitted to them; --json writes them with the model's counts
 // (docs/research/raster.md), and --hot each instruction's cycles and
-// executions by address, for a profile line by line against baron's
-// listing.
+// executions by address over the scenes and the sequences, for a profile
+// line by line against baron's listing. The sequences' frames after each
+// one's first two, where what the screens held counts, are summed up
+// apart, with their parts.
 //
 // Exits non-zero when any scene disagrees.
 import fs from "node:fs";
