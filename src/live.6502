@@ -913,7 +913,14 @@ SECTION LiveGlue
     LDA lo+1 : SEC : SBC #1 : STA lo+1
     LDA lo+2 : SBC #0 : STA lo+2
     STZ lo
+    \ (n of 1 or 0, the commonest, without the product)
+    LDA lo+1 : ORA lo+2 : BEQ timed
+    LDA lo+1 : AND lo+2 : CMP #&FF : BNE general
+    LDA #LO(-78) : STA lo+1                     ; (lo+2 is &FF already)
+    BRA timed
+.general
     JSR times78
+.timed
     \ the length: lo + ((d - lo) AND &FFFF)
     LDA d : SEC : SBC lo : STA d
     LDA d+1 : SBC lo+1 : STA d+1
