@@ -8,6 +8,7 @@
 //
 //   node tools/livecheck.mjs [--disc build/live.ssd] [--live build/live/live.json]
 //                            --trace build/live/trace.json [--json OUT] [--verbose]
+//                            [--profile-rest [--fine] [--top N]]
 //   node tools/livecheck.mjs --free [--disc build/live-free.ssd] [--live ...]
 //                            [--walks 0,18,26,40,57] [--json OUT] [--verbose]
 //

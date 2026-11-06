@@ -37,7 +37,7 @@ const opt = (name, dflt) => {
     return i < 0 ? dflt : args[i + 1];
 };
 if (!dir) {
-    console.error("usage: areacheck.mjs BUILD [--areas AREAS.json] [--db LOGIC] [--verbose]");
+    console.error("usage: areacheck.mjs BUILD [--areas AREAS.json] [--db LOGIC] [--verbose] [--profile [--fine] [--top N]]");
     process.exit(2);
 }
 const areasFile = opt("areas", "build/gen/areas.json");

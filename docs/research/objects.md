@@ -91,7 +91,9 @@ database it couldn't convert fails the build with the reason:
 - a slanted face's plane is the cross product at its loop's first corner,
   (v1 − v0) × (v2 − v1), whose edges are signed bytes, reduced by the
   greatest common divisor of its two non-zero components (Stein's way, and
-  a division by shifts), not Newell's normal over the whole loop;
+  a division by shifts), not Newell's normal over the whole loop (the
+  globals' kept from the last build when their edges are the same: "The
+  tenth round", below);
 - a pyramid's side loses its apex corner when the apex edge has shrunk to
   a point, and its apex face goes when any apex edge has, rather than
   removing repeated corners in general;
@@ -431,7 +433,8 @@ of the memory (`dl_rl`, `dl_rh`, found once a frame), with a pass's place
 in a register, and works out the entries' keys only when it doesn't. A turn
 keeps the cells, so a turning frame's compares are remembered; so is every
 repeat of a pair within a frame. `cache_reset` (a new area, or an object
-moved) clears the memory (`sort_forget`); `cache_empty` (a new orientation)
+moved) forgets the memory (`sort_forget`: a new generation, since the tenth
+round, so it isn't cleared each time); `cache_empty` (a new orientation)
 leaves it. And a draw list the same as the last sort's, slot for slot,
 under the same generation, has every compare the same, so it takes that
 sort's order (`so_save`, `so_lobj`, `so_lord`; a cleared memory forgets it).
@@ -993,6 +996,82 @@ What's left:
   costs a pitched or rolled turn about 1.7K more in the matrix stage than
   the old `bound_sel`, though its transform gains more.
 
+## The tenth round: the rest of the frame
+
+The coordinator asked for the costs outside the stages the other tracks
+had in hand (the cone, the projection, the fill): the floor, the sort, the
+2D clip and the live disc's "the rest", a frame's loop but its two halves.
+Profiled first: `livecheck.mjs --profile-rest` (new: each frame's rest by
+routine, summed by what the frame did) and `areacheck.mjs --profile` (new:
+`area_enter` by label). At an entrance most of the rest was the area's
+conversion (the slanted faces' planes, their cross products and greatest
+common divisors), the sort's memory cleared and the area's name and
+message drawn into the panel; a standing frame (with the logic, the
+crosshair moved and nothing else) ran both halves again for the view it
+had; walking and turning, the panel's scan of its cells, the camera's
+fractions and the inputs' compare were the largest parts. The figures,
+before and after, are in the journal's entry of 2026-11-06 (the tenth
+round). Nothing a stage outputs changes.
+
+Kept:
+
+- **The globals' slanted faces kept** (`src/area.6502`, the memo `pm_*`, in
+  `ObjMemo`): with the logic, each entry builds the globals' slots again,
+  as the logic moves the rig's parts as it loads an area; but it only moves
+  them and hides them, which leaves each face's edge vectors u and w as they
+  were. So the k-th slanted face of the globals' keeps its u and w and what
+  they made, and the next build takes that when they're the same, without
+  the products or the reduction.
+- **The conversion's products by quarter squares**: the maths' tables in
+  HAZEL, read through pointers (the conversion writes nothing in sideways
+  RAM, so it can't patch its code), and no product made with a factor 0.
+  The check's stubs page HAZEL in for the conversion, as the live disc has
+  it for good.
+- **The sort's memory not cleared as an area is entered**: a new area takes
+  a new generation, which no remembered compare has; the memory is cleared
+  at the start (`area_init`) and as the generations run out.
+- **The panel's scan from where it left off** (`src/panel.6502`):
+  `panel_sync` scanned every cell from the first on each call while any was
+  undrawn; it starts at `panel_left`, which `panel_set` lowers to any cell
+  it changes before it, so the cells before it are known to be shown as
+  wanted.
+- **The camera's fractions** (`lv_camera`'s `times_f`) by quarter squares,
+  and none made for a magnitude of 0 (a step's angles, a turn's position).
+- **The objects' flags compared only after `logic_go_shown`**, their one
+  writer (`vw_flags`).
+- **A frame of the crosshair alone** (`docs/research/live.md`, "The
+  crosshair"): when nothing but the crosshair has changed since the view
+  was drawn into the buffer the frame will draw, neither half runs.
+
+Measured and not kept:
+
+- **The sort's memory by slot**: when a ceiling cell moves, only the row and
+  column of each slot whose side changed cleared (a pair's verdict depends
+  on nothing but its two boxes and their sides), in place of a new
+  generation, with a new generation past a few such slots. Exact, and a
+  walk's worst step fell by nearly half, but the step at the 90th
+  percentile rose (a slot's row and column cost more to clear than a short
+  draw list costs to compare again), the mean moved a little, and it took
+  over a hundred bytes of the front end's bank.
+
+Counted and not built:
+
+- **A level cuboid's fill written out** (its corner and three edges without
+  `transform_fill`'s loop and `fill_edge`'s dispatch): a few hundred cycles
+  a cuboid on a turn, for a second copy of the level fills' code and of
+  their patch sites, which the bank's room doesn't take.
+- **`bp_site` leaving its pages alone** when phi's sign is the last patch's:
+  four stores a term, a turn's few hundred cycles.
+- **The crosshair's EOR** from its centre's address, each arm by a row or a
+  column from it: a few hundred cycles a frame.
+- **The panel's numbers** by decimal doubling, not repeated subtraction:
+  worth it on the free disc, whose position changes every step, more than on
+  the logic's.
+
+Not reached: the floor, whose cost is the guard band's and the cone's
+(`src/clip.6502`), and the 2D clip, spread over its passes and crossings
+with nothing large left in any one.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -1131,7 +1210,10 @@ ways):
 - **The logic's side**: a build with the logic (`OBJ_LOGIC`, `AREA_GLOBALS`)
   calls `area_enter` after each of its area loads, which builds the
   globals' slots from its records with the rig's parts where it put them.
-- **Area entry's cost** is mostly the slanted faces' planes (the cross
-  product's products, the greatest common divisor and the divisions) and
-  the reading of the records through main RAM; it now also clears the
-  sort's memory.
+- **Area entry's cost** is mostly the area's own slanted faces' planes
+  (the cross product's products, the greatest common divisor and the
+  divisions), the pyramids' vertices and the bookkeeping of each face and
+  slot, and the reading of the records through main RAM; the globals'
+  planes come from the memo, and the sort's memory is no longer cleared
+  (the tenth round, above). A memo of the area's own faces by their u and
+  w would take the repeated shapes too, for more of main RAM's room.

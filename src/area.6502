@@ -51,9 +51,10 @@
 \ How it converts, where it isn't objects.shape()'s way (tools/mkareas.py
 \ asserts each on every object): a slanted face's plane is the cross product
 \ at its loop's first corner, reduced by its components' greatest common
-\ divisor; a pyramid's side loses its apex corner when its apex edge has
-\ shrunk to a point, and its apex face goes when any apex edge has; each
-\ loop is found by a constant (lp_table's fixed order).
+\ divisor (the globals' kept from their last build: ac_plane_face); a
+\ pyramid's side loses its apex corner when its apex edge has shrunk to a
+\ point, and its apex face goes when any apex edge has; each loop is found
+\ by a constant (lp_table's fixed order).
 \ ***************************************************************************
 
 ROMSEL_COPY = &F4                   ; the OS's copy of romsel, kept as the OS keeps it
