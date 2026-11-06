@@ -52,78 +52,58 @@ SECTION ObjCode
 {
     ZA_ENTRY
     ZA_AUTO1 q, rest
-    \ (a loop: the three axes, X = k, Y = 2 k, and the cull's slot k at
-    \ object_pass.slot0 + OP_SLOT k)
-    LDX #0
-.axis
-    TXA : ASL A : TAY
-    \ q = c DIV 64, and rest non-zero if c isn't a multiple of 64
-    LDA cam_x + 1,Y
-    CMP #64 : BCC near
-    LDA #255 : STA q : STA rest : BRA got
-.near
-    STA q
-    LDA cam_x,Y
-    ASL A : ROL q
-    ASL A : ROL q
-    STA rest
-.got
-    LDA q : CMP #255 : BCC f_ok
-    LDA #254
-.f_ok
-    STA cell_f,X
-    STA thr,Y                       ; T_AXLO + 2 k: seen if f < P
-    LDA rest : CMP #1               ; C set if c isn't a multiple of 64
-    LDA q : ADC #0 : BCC e_ok
-    LDA #255
-.e_ok
-    STA cell_e,X
-    EOR #&FF : STA thr + 1,Y        ; T_AXHI + 2 k: seen if 255 - e < 255 - P
-    \ the cull, on the matrix's ahead row, as object_pass's slot k: a box
-    \ goes if its H < f + 1 (ahead along the axis), or its L >= e (ahead
-    \ against it), or the slot is skipped
-    LDY slot_at,X
-    LDA mat + 6,X
-    BMI behind
-    CMP #CULL_K : BCC skip
-    LDA cell_f,X : INC A : STA object_pass.slot0 + 4,Y
-    LDA #OP_BCC : STA object_pass.slot0 + 5,Y
-    LDA bh_lo,X : STA object_pass.slot0 + 1,Y
-    LDA bh_hi,X : STA object_pass.slot0 + 2,Y
-    BRA test
-.behind
-    CMP #(256 - CULL_K) AND &FF : BEQ minus
-    BCS skip
-.minus
-    LDA cell_e,X : STA object_pass.slot0 + 4,Y
-    LDA #OP_BCS : STA object_pass.slot0 + 5,Y
-    LDA bl_lo,X : STA object_pass.slot0 + 1,Y
-    LDA bl_hi,X : STA object_pass.slot0 + 2,Y
-.test
-    LDA #OP_LDA_ABSX : STA object_pass.slot0,Y
-    BRA done
-.skip
-    LDA #OP_BRA : STA object_pass.slot0,Y
-    LDA #OP_SLOT - 2 : STA object_pass.slot0 + 1,Y
-.done
-    INX : CPX #3 : BEQ axes
-    JMP axis
-.axes
+    FOR k = 0..2
+        \ q = c DIV 64, and rest non-zero if c isn't a multiple of 64
+        LDA cam_x + 2 * k + 1 : CMP #64 : BCC near
+        LDA #255 : STA q : STA rest : BRA got
+    .near
+        STA q
+        LDA cam_x + 2 * k
+        ASL A : ROL q
+        ASL A : ROL q
+        STA rest
+    .got
+        LDA q : CMP #255 : BCC f_ok
+        LDA #254
+    .f_ok
+        STA cell_f + k
+        STA thr + 2 * k             ; T_AXLO + 2 k: seen if f < P
+        LDA rest : CMP #1           ; C set if c isn't a multiple of 64
+        LDA q : ADC #0 : BCC e_ok
+        LDA #255
+    .e_ok
+        STA cell_e + k
+        EOR #&FF : STA thr + 2 * k + 1   ; T_AXHI + 2 k: seen if 255 - e < 255 - P
+        \ the cull, on the matrix's ahead row, as object_pass's slot k: a box
+        \ goes if its H < f + 1 (ahead along the axis), or its L >= e (ahead
+        \ against it), or the slot is skipped
+        SLOT = WHERE(k = 0, object_pass.slot0, WHERE(k = 1, object_pass.slot1, object_pass.slot2))
+        LDA mat + 6 + k : BMI behind
+        CMP #CULL_K : BCC skip
+        LDA cell_f + k : INC A : STA SLOT + 4
+        LDA #OP_BCC : STA SLOT + 5
+        LDA #LO(ob_bhx + k * N_OBJ) : STA SLOT + 1
+        LDA #HI(ob_bhx + k * N_OBJ) : STA SLOT + 2
+        BRA test
+    .behind
+        CMP #(256 - CULL_K) AND &FF : BEQ minus
+        BCS skip
+    .minus
+        LDA cell_e + k : STA SLOT + 4
+        LDA #OP_BCS : STA SLOT + 5
+        LDA #LO(ob_blx + k * N_OBJ) : STA SLOT + 1
+        LDA #HI(ob_blx + k * N_OBJ) : STA SLOT + 2
+    .test
+        LDA #OP_LDA_ABSX : STA SLOT
+        BRA done
+    .skip
+        LDA #OP_BRA : STA SLOT
+        LDA #OP_SLOT - 2 : STA SLOT + 1
+    .done
+    NEXT
     LDA #255 : STA thr + T_PLANE    ; never by compare: plane_test decides
     STZ thr + T_ALWAYS              ; (tval 255)
     RTS
-\ by axis: its slot's offset in object_pass, and the boxes' high and low
-\ cells it compares
-.slot_at
-    EQUB (0..2) * OP_SLOT
-.bh_lo
-    EQUB LO(ob_bhx + (0..2) * N_OBJ)
-.bh_hi
-    EQUB HI(ob_bhx + (0..2) * N_OBJ)
-.bl_lo
-    EQUB LO(ob_blx + (0..2) * N_OBJ)
-.bl_hi
-    EQUB HI(ob_blx + (0..2) * N_OBJ)
 }
 ASSERT CULL_K > 0 AND CULL_K < 128
 ASSERT ob_bhy = ob_bhx + N_OBJ AND ob_bhz = ob_bhy + N_OBJ
