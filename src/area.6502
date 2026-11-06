@@ -562,11 +562,13 @@ SECTION AreaConv
     ASL A : ADC at : ASL A : ASL A : ASL A : TAY     ; 24 (type - 4)
     LDX ac_g0
     TXA : CLC : ADC #8 : STA end
+    \ (C stays clear: no coordinate passes 254, tools/mkareas.py asserts, and
+    \ the loop's CPX leaves it clear while X is below end)
 .vertex
     FOR k = 0..2
         STY at
         LDA ac_pyr_rec + k,Y : TAY
-        LDA rec,Y : CLC : ADC ac_lo + k : STA gv_x + k * N_GV,X
+        LDA rec,Y : ADC ac_lo + k : STA gv_x + k * N_GV,X
         LDY at
     NEXT
     INY : INY : INY
