@@ -223,6 +223,17 @@ def sequences():
         "turning": [scene("turning", [], Horizon(832, 832, round(127 * math.cos(t / 9)), round(127 * math.sin(t / 9))),
                           random.Random(7)) for t in range(6)],
     }
+    # Lines one face takes whole, then the same lines filled by two pieces
+    # (the left one another face's), then whole again in the first face's
+    # bytes: each screen must write them again, as it holds two pieces.
+    # Rows 0-39 by a rectangle (the stretch), 40-79 by a face with a sloping
+    # side (the line loop's fresh path), the rest left to the sky.
+    sky, ground, p, q = [0x12, 0x34, 0x56, 0x78], [0x9a, 0xbc, 0xde, 0xf0], [0x11, 0x22, 0x44, 0x88], [0x33, 0x66, 0xcc, 0x99]
+    tall = [(0, 0), (XMAX, 0), (XMAX, SUB * 40), (0, SUB * 40)]
+    slope = [(0, SUB * 40), (XMAX, SUB * 40), (XMAX, SUB * 80), (XMAX // 2, SUB * 80 + 4), (0, SUB * 80)]
+    left = [(0, 0), (XMAX // 2 + 3, 0), (XMAX // 2 + 3, SUB * 80), (0, SUB * 80)]
+    out["whole-lines"] = [scene("whole-lines", ([] if t % 4 < 2 else [(q, left)]) + [(p, tall), (p, slope)],
+                                sky=sky, ground=ground) for t in range(10)]
     # The pitch moves the boxes, but the sky and ground stay as they were.
     for f in out["rise"]:
         f["sky"], f["ground"] = out["rise"][0]["sky"], out["rise"][0]["ground"]

@@ -804,3 +804,42 @@ point's polar form, it's good to a pixel, and the cone needs camera
 space); log products (no fewer reads, and inexact). The front end's bank,
 which ANDY had freed, has less room: the bounds' and the level fills' code
 took most of what it had.
+
+## 2026-11-06: the fill's fifth round
+
+The fill was the frame's largest part on the disc. Every earlier round
+measured it on views drawn fresh, where its cost is close to its design's
+floor; the disc's frames aren't fresh. Each goes into the buffer that holds
+the frame two before, and measured on the model over the live check's
+frames in order, walking keeps 66% of lines and 93% of bytes from that one,
+turning 69% and 91%. Most such lines are one run: the sky, which the
+background's records already skipped, and the floor across the whole line.
+So a line one face takes whole is now not written when the buffer holds it
+in that byte (decision 70, amending 20; `docs/research/raster.md`, round
+5): a record a buffer and line, in the fill's bank, and the background's
+records checked before the faces rather than after. The picture doesn't
+change, and the model counts what each held frame writes; a new sequence
+in `make raster` (lines whole, then two pieces, then whole again) catches
+the one mutation the others missed.
+
+Fields a frame on the logic's disc (median / p90 / max), the fill: walking
+1.15 / 2.72 / 8.29 to 0.85 / 2.5 / 8.29, turning 1.15 / 2.84 / 7.46 to 0.83 /
+2.73 / 7.46, standing 3.49 to 3.26, entrances 2.82 to 2.83 at the median;
+flip to flip, walking 2.41 to 2.0 and turning 2.97 to 2.51. Fresh views pay
+0.8% for the test (Driller's 65, a median 109,641 to 109,796 cycles). The
+slideshow, whose views are held, went from 2.49 fields a frame to 2.16. The
+slideshow's bank had no room for the record beside its own squares, so its
+rasteriser state went to main RAM, as the live disc's is. The free
+camera's tour held SPACE for three fields, and a view drawn faster than
+that went on twice; it now lets go once the entrance changes.
+
+What's left of the bytes the buffer holds is mostly in the first and last
+runs of lines with an object on the floor, about 1,200 bytes a frame, and
+taking them would want two more records a buffer the bank hasn't room for.
+The faces' own work was looked at again and has nothing big left: lines
+already full that a face still steps through are 11 of its 296 face-lines
+a view. A still camera with the crosshair moving redraws a view its buffer
+already holds (the check's standing frames, 5.4 fields flip to flip); only
+the live loop could know to skip both halves. Half the vertical resolution
+is priced at about 28% off a fresh view, for Matt; constant dithers line
+to line save this fill nothing.
