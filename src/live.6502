@@ -444,6 +444,13 @@ ENDIF
 .live_draw
 IF NOT(LIVE_LOGIC)
     JSR panel_values                            ; (the camera's moved, or the area's changed)
+ELSE
+    \ only the crosshair moved, and the buffer frame_begin gives holds this
+    \ view already: the crosshair moved alone
+    LDA draw_buffer : EOR #1 : TAX
+    LDA lv_bview,X : CMP vw_view : BNE live_whole
+    JMP live_cross_only
+.live_whole
 ENDIF
     \ stages 1-7
     LDX #LV_CAM_BYTES - 1
@@ -475,6 +482,8 @@ ENDIF
     PAGE_IN BANK_GLUE
     LDX #T_FILL : JSR clock_to
 IF LIVE_LOGIC
+    LDX draw_buffer : LDA vw_view : STA lv_bview,X
+.live_cross_on
     JSR lv_cross_on                             ; (and the crosshair now, if it's shown)
 ENDIF
     JSR live_measure
@@ -487,6 +496,16 @@ ENDIF
 .live_frame_done                                ; (tools/livecheck.mjs: the frame's made)
     JSR frame_end
     JMP live_loop
+IF LIVE_LOGIC
+\ live_cross_only: a frame whose buffer has its view (lv_bview): no stages,
+\ the buffer's crosshair taken off and this one's drawn, so the buffer
+\ holds what the rasteriser would draw, and then its crosshair.
+.live_cross_only                                ; (tools/livecheck.mjs: a frame of the crosshair alone)
+    JSR frame_begin
+    PAGE_IN BANK_GLUE
+    JSR lv_cross_off
+    JMP live_cross_on
+ENDIF
 NAMED_CELLS = PF_NAME + PN_NAME                 ; (the cells before the name's end: the message's in them)
 ASSERT PF_MESSAGE < PF_NAME
 
@@ -511,6 +530,9 @@ LV_CAM_BYTES = P% - lv_cam
 .lv_named       SKIP 1      ; non-zero once the area's lines are drawn
 .vw_new         SKIP 1      ; non-zero: the frame's inputs aren't the last frame's (lv_inputs)
 .vw_none        SKIP 1      ; non-zero until the first frame's
+.vw_flags       SKIP 1      ; non-zero: logic_go_shown has made ix_flags since lv_inputs last read them
+.vw_view        SKIP 1      ; moves on as the view's inputs but the crosshair change (lv_inputs)
+.lv_bview       SKIP 2      ; each buffer's: vw_view as its view was last drawn
 ENDSECTION
 ASSERT cam_y = cam_x + 2 AND cam_z = cam_x + 4 AND cam_yaw = cam_x + 6
 ASSERT cam_pitch = cam_x + 7 AND cam_roll = cam_x + 8 AND LV_CAM_BYTES = 9
@@ -653,6 +675,7 @@ ENDSECTION
     JSR logic_go_colours
 .shown
     JSR logic_go_shown
+    LDA #&FF : STA vw_flags
     PAGE_IN BANK_DATA
     JMP panel_values
 }
@@ -747,6 +770,7 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 .held
     LDA lv_loaded : BNE away
     JSR logic_go_shown                          ; (with an area's change, once it's entered)
+    LDA #&FF : STA vw_flags
     PAGE_IN BANK_DATA
     JSR panel_values                            ; (likewise)
 .away
@@ -929,8 +953,12 @@ SECTION LiveData
 \ live_init: the background; no area yet, the game not over, no figures.
 .live_init
     STZ rs_sky : STZ rs_ground : STZ rs_horizon
-    LDA #&FF : STA lv_area : STA vw_none : STA panel_area
+    LDA #&FF : STA lv_area : STA vw_none : STA vw_flags : STA panel_area
     STZ lv_entered : STZ panel_over
+    \ (no buffer's view is any vw_view's for a long while: each is drawn
+    \ every other frame, and vw_view moves on at most once a frame)
+    STZ vw_view
+    LDA #&80 : STA lv_bview : STA lv_bview+1
     JMP panel_blank
 
 \ live_lines: the area whose name the panel shows (lv_area's), and with the
@@ -966,8 +994,11 @@ SECTION LiveGlue
 \ through ob_ix) and the crosshair (CrossOn, and CrossX and CrossY if it's
 \ on). A frame differing is always drawn after it, so the record is the
 \ last frame's. Nothing else the frame reads changes but as an area is
-\ entered (the patterns, the working copy).
-VW_CAM   = 0                    ; vw_rec: lv_cam's bytes ...
+\ entered (the patterns, the working copy). With the logic, vw_view moves
+\ on whenever any of them but the crosshair differs: a frame whose buffer's
+\ view was drawn under the same vw_view (lv_bview) needs only its crosshair
+\ moved (live_cross_only).
+VW_CAM   = 0                   ; vw_rec: lv_cam's bytes ...
 VW_AREA  = LV_CAM_BYTES         ; ... lv_entered ...
 IF LIVE_LOGIC
     VW_CROSS = VW_AREA + 1      ; ... CrossOn (0 or 1), CrossX, CrossY (0 when off) ...
@@ -984,21 +1015,14 @@ ASSERT VW_CAM = 0 AND IX_MAX <= 128
     STZ vw_none
     LDX #LV_CAM_BYTES - 1
 .camera
-    LDA lv_cam,X : JSR vw_byte
+    LDA lv_cam,X : CMP vw_rec,X : BNE camera_new
+.camera_next
     DEX : BPL camera
     LDX #VW_AREA : LDA lv_entered : JSR vw_byte
 IF LIVE_LOGIC
-    INX
-    LDA CrossOn : BEQ off
-    LDA #1 : JSR vw_byte
-    INX : LDA CrossX : JSR vw_byte
-    INX : LDA CrossY : JSR vw_byte
-    BRA flags
-.off
-    JSR vw_byte                                 ; (A is 0)
-    INX : LDA #0 : JSR vw_byte
-    INX : LDA #0 : JSR vw_byte
-.flags
+    \ (ix_flags change only by logic_go_shown, which sets vw_flags)
+    LDA vw_flags : BEQ flags_kept
+    STZ vw_flags
     LDX #IX_MAX - 1
 .flag
     LDA ix_flags,X : AND #IX_HIDDEN
@@ -1007,8 +1031,27 @@ IF LIVE_LOGIC
     LDA #&FF : STA vw_new
 .same
     DEX : BPL flag
-ENDIF
+.flags_kept
+    \ the view itself changed (all but the crosshair): a new one, vw_view
+    LDA vw_new : BEQ view_kept
+    INC vw_view
+.view_kept
+    LDX #VW_CROSS
+    LDA CrossOn : BEQ off
+    LDA #1 : JSR vw_byte
+    INX : LDA CrossX : JSR vw_byte
+    INX : LDA CrossY : JMP vw_byte
+.off
+    JSR vw_byte                                 ; (A is 0)
+    INX : LDA #0 : JSR vw_byte
+    INX : LDA #0 : JMP vw_byte
+ELSE
     RTS
+ENDIF
+.camera_new
+    STA vw_rec,X
+    LDA #&FF : STA vw_new
+    BRA camera_next
 \ vw_byte: A, the input at vw_rec + X, against the record: if it differs,
 \ the record takes it and vw_new is set. Keeps X and Y.
 .vw_byte

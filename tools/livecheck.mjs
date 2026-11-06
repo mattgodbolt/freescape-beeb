@@ -208,6 +208,8 @@ const OBJECTS = sym("objects_frame"), FRONT_DONE = sym("live_front_done");
 const RASTER = sym("raster_frame"), FILL_DONE = sym("live_fill_done");
 const FB_BEGIN = sym("frame_begin"), FB_END = sym("frame_end");
 const LIVE_LOOP = sym("live_loop");
+const CROSS_ONLY = syms.live_cross_only ?? -1; // (the logic's disc's: frames of the crosshair alone)
+let crossOnly = 0;
 const LV_CAM = sym("lv_cam"), LV_AREA = sym("lv_area");
 const SPAN_US = sym("span_us"), T_FRONT = sym("T_FRONT"), T_FILL = sym("T_FILL");
 const CLOCK_TO = sym("clock_to"), CLOCK_READ = sym("clock.again");
@@ -368,8 +370,15 @@ cpu.debugInstruction.add((addr, opcode) => {
         onIdle();
     } else if (addr === CLOCK_READ) {
         lastClock = now(); // (the last of its tries is the one kept)
-    } else if (addr === OBJECTS && bank === BANK_OBJ && current) {
+    } else if ((addr === OBJECTS && bank === BANK_OBJ || addr === CROSS_ONLY) && current) {
         current.tFront = now();
+        // a frame of the crosshair alone (live_cross_only): its buffer has
+        // its view, so neither half runs
+        if (addr === CROSS_ONLY) {
+            current.crossOnly = true;
+            current.front = current.fill = 0;
+            crossOnly++;
+        }
         current.clockFront = lastClock;
         current.camera = camera();
         current.area = ram[LV_AREA];
@@ -428,7 +437,7 @@ cpu.debugInstruction.add((addr, opcode) => {
         else if (lastEndT !== null) current.loop = now() - lastEndT;
         lastEndT = now();
         // the BBC's own timing of each half, as its figures show it
-        for (const [half, at] of [["front", T_FRONT], ["fill", T_FILL]]) {
+        for (const [half, at] of current.crossOnly ? [] : [["front", T_FRONT], ["fill", T_FILL]]) {
             const us = ram[SPAN_US + at] | (ram[SPAN_US + at + 1] << 8) | (ram[SPAN_US + at + 2] << 16);
             const span = current[`${half}Span`];
             current[`${half}Bbc`] = 2 * us;
@@ -792,7 +801,10 @@ async function logicScript() {
     const LV_MINUTE = S("lv_minute"), LV_REQUEST = S("lv_request"), KEYS_MADE = S("keys_made");
     onLoop = () => {
         if (flagWrites) {
+            // (and vw_flags set, as the disc sets it after each logic_go_shown,
+            // for lv_inputs to read them)
             ram.set(flagWrites, S("ix_flags"));
+            ram[S("vw_flags")] = 0xff;
             visibility = flagWrites;
             flagWrites = null;
             idleSeen = false;
@@ -1447,7 +1459,8 @@ console.log(`${NAME}: ${probes.length} keys pressed with nothing left to draw: `
     ` fields; ${unchanged} changed nothing shown`);
 if (IDLE) console.log(`${NAME}: ${idles} idle loops, ${idlesOk} with the last frame's inputs, each ` +
     `${stats(idleLoops)} cycles from live_loop to live_idle; ${redrawn} frames drawn with the last frame's inputs`);
-console.log(`${NAME}: fields a frame, median / p90 / max:`);
+console.log(`${NAME}: fields a frame, median / p90 / max` +
+    (CROSS_ONLY >= 0 ? ` (${crossOnly} frames of the crosshair alone, its buffer holding its view)` : "") + ":");
 console.log(`  ${"frames".padEnd(10)} ${"n".padStart(4)}  ${"flip to flip".padEnd(20)} ${"loop".padEnd(20)} ` +
     `${"1-7 objects".padEnd(20)} ${"8-10 fill".padEnd(20)} ${"the rest".padEnd(20)}`);
 row("all", counted);
