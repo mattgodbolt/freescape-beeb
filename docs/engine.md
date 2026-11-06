@@ -91,7 +91,9 @@ which owns the machine and makes no OS call.
   measuring. Read them between frames.
 - **The keys** (`src/input.6502`): the interrupt reads Driller's keys
   from the System VIA into `keys` (held) and `keys_made` (gone down since
-  `key_take`), a bit each: `K_FORWARD` and the rest.
+  `key_take`), a bit each: `K_FORWARD` and the rest. It reads them only
+  while one is held or auto-scan has found one, and then a keyboard
+  column's keys only when CA2 says the column has one down (2026-11-06).
 - **Zero page**: `frame_ready`, `draw_buffer` and `view_shown` are
   fixed below `ZP_FIXED`; baron's pool is the rest up to `&FB`.
 - **The test scene** (`src/main.6502`, until the renderer replaces it):
@@ -295,7 +297,8 @@ come with it, to see where the cycles go.
 
 - Zero page: baron's allocator (`ZA_AUTO`), with long-lived state in fixed
   locations.
-- `&0400-&0CFF`, the OS's pages: the engine's variables (`Work`) and the
+- `&0400-&0CFF`, the OS's pages: the engine's variables (`Work`), the
+  globals' records their slots were built from (`AreaKeep`), and the
   rasteriser's input, which the object pipeline's output lies over.
 - Page `&0D` below `&0D9F` (the Master's extended vectors, which a soft
   BREAK reads): the live disc's start, which runs once, once the disc is

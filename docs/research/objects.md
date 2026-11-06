@@ -1143,6 +1143,66 @@ Not reached: the floor, whose cost is the guard band's and the cone's
 (`src/clip.6502`), and the 2D clip, spread over its passes and crossings
 with nothing large left in any one.
 
+## The eleventh round: the whole frame on the disc
+
+The coordinator asked for more speed anywhere, measured as the live disc's
+whole frame, flip to flip. Profiled first on the disc (`livecheck.mjs
+--profile-rest`, and new: the interrupt's own cycles, from `irq_handler` to
+its `RTI`, the vertical sync's apart from T1's) and on the check
+(`objectcheck.mjs --profile-walks`, `--profile-views`). Outside the two
+halves the largest costs were the vertical sync's interrupt, which read
+every key it maps one by one in nearly every field a key was held; at an
+entrance, the panel waiting for the beam to draw
+the area's name and message, and the globals' conversion, which every entry
+made again with the logic; and every frame, the crosshair's EOR, taken off
+and put on. Nothing any stage outputs changes, and no picture. The figures,
+before and after, are in the journal's entry of 2026-11-06, "the eleventh
+round".
+
+Kept:
+
+- **The globals' slots kept when their records are those they were built
+  from** (`src/area.6502`'s `ag_same`, the copy `ag_kept` in `AreaKeep`,
+  after `Work` in the OS's pages on the disc): a build from the same
+  records makes the same slots in the same places, the globals' coming
+  first from the spaces' starts, and nothing but the conversion writes
+  them. On the check's runs the records were the same at all but the first
+  entry; a rig placed moves its parts, and then the next entry builds them
+  again. `areacheck.mjs` changes a byte of the copy for every other area,
+  so half its areas build the globals again over junk and half keep them.
+- **The panel drawn during an area's conversion** and its window widened
+  (`docs/research/panel.md`): the values are set before the conversion,
+  which calls `panel_sync` after each record, and a cell may begin once the
+  beam has passed the screen's last line, not only in the view's lines; a
+  glyph cell writes the buffer selected as it makes each line. No frame
+  waits for the beam any more on the check's runs.
+- **The keys read by column** (`src/input.6502`): with auto-scan off CA2 is
+  high while the column on port A has a key down, as the OS's own scan reads
+  it, so a column's keys are read only when its probe raises CA2's flag.
+- **The crosshair's EOR** by each byte column's address made once, every
+  pixel the centre's parity.
+- **`clock_to`** without the product by 78 for a span of one field or none.
+- **A level camera's cuboid** filled by its corner and then its three edges
+  straight into `fill_edge`'s level paths, past `transform_fill`'s edge loop
+  and `fill_edge`'s dispatch.
+
+Counted and not built:
+
+- **The lines whose first or last run the buffer holds** (raster.md's round
+  5 estimate, the largest saving left that was found): the records (a byte
+  end and a pattern byte for each screen, line and end) would take most of
+  the fill's bank's room (`raster_work_end` to `&C000`), and the trimming
+  goes in each of INSERT's and the stretch's four copies and in the
+  background's gaps, more code than the rest of that room; and the model's
+  `held_writes` would count the same. The journal's entry has the bytes.
+- **The globals' records compared by checksum**: a collision would keep the
+  wrong slots; the whole copy (`G_BYTES`) is exact.
+- **The vertical sync's byte loop** (`keys_made`, `keys`, `keys_any`)
+  unrolled, and `keys_any` from the scan: under a hundred cycles a field.
+- **`drawable`'s products** decided first by the operands' bit lengths:
+  most of the products' cases have sums within one bit, so it would take
+  little of the few hundred cycles a step its products cost.
+
 ## The floor (decision 8a)
 
 The coordinator asked how much of each stage the floor takes: the area's
@@ -1286,5 +1346,7 @@ ways):
   divisions), the pyramids' vertices and the bookkeeping of each face and
   slot, and the reading of the records through main RAM; the globals'
   planes come from the memo, and the sort's memory is no longer cleared
-  (the tenth round, above). A memo of the area's own faces by their u and
-  w would take the repeated shapes too, for more of main RAM's room.
+  (the tenth round, above), and the globals' slots are kept while their
+  records are the same (the eleventh round). A memo of the area's own
+  faces by their u and w would take the repeated shapes too, for more of
+  main RAM's room.

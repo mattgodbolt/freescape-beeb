@@ -433,7 +433,7 @@ logic's code and variables unused.
 | ANDY (ROMSEL's bit 7, over `BANK_OBJ`'s first 4K) | the object pipeline's rarely run code (`ObjAndy`, `OANDY`, decision 52: `docs/research/objects.md`, "ANDY"), which its code calls through trampolines in `ObjMore`; the loader puts it in once the OS is gone (`LIVE_LATE`) |
 | HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), which the loader unpacks once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies and the fill read the maths' quarter squares here (`LOGIC_SQUARES`, `RASTER_SQUARES`) |
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
-| `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it) |
+| `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it), then `AreaKeep` (the globals' records their slots were last built from: `src/area.6502`'s `ag_kept`, 2026-11-06) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
 | page `&0D`, below `&0D9F` | `start`, with `lv_start` and `clock_init`, which run once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
 | main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`), the area's working copy (`ObjArea`) and the objects' bounds (`ObjBound`, kept with the cache), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`, which the loader puts there) in the cache's place |
@@ -494,7 +494,7 @@ below the bytes (2026-11-01).
   not ANDY, is in view there (`tools/livecheck.mjs`, jsbeeb's
   `isBankPagedAt`; `tools/run6502.mjs`'s `paged`).
 - **Not used yet**, measured on jsbeeb with the OS gone (below):
-  - the OS's pages: from `work_end` to `RASTER_IN_ORG`; page `&0D` from
+  - the OS's pages: from `area_keep_end` to `RASTER_IN_ORG`; page `&0D` from
     `live_boot_end` to `&0D9F` (a soft BREAK reads the Master's extended
     vectors from `&0D9F` on, and pages 2 and 3, so those stay the MOS's),
     and below it once `start` is done; page 1 below the stack's deepest;

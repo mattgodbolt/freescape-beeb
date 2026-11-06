@@ -952,3 +952,71 @@ unchanged pages, the crosshair's EOR and the panel's numbers, each a few
 hundred cycles. The room: `AreaConv` took 273 bytes of its bank's (705
 left); `ObjMemo` 363 bytes, leaving 41 of main RAM's `&3000` up to
 `SCREEN`; `LiveGlue` 54; the front end's bank is unchanged.
+
+## 2026-11-06: the eleventh round
+
+The coordinator asked for more speed wherever it could be found, measured
+as the live disc's whole frame. Profiled on the disc first, with
+`livecheck.mjs` now timing the interrupt itself (`irq_handler` to its
+`RTI`): the vertical sync's took 1,376 / 1,392 / 1,413 cycles (median / p90
+/ most) whenever it read the keys, which it did in most fields of the
+check's runs, as a key held means reading every key it maps, each by two
+accesses to the System VIA at 1MHz. At an entrance the rest of the frame
+(140,502 cycles) was the area's conversion, the panel's cells (830 cycles a
+glyph) and the panel waiting for the beam (panel_sync's loop, about 22K a
+frame); every frame the crosshair's EOR took 1,413 cycles, off and on.
+
+What went in (`docs/research/objects.md`, "The eleventh round"), each
+committed apart, none changing what any stage outputs or the picture:
+
+- the panel: its values set before an area's conversion, which draws cells
+  as the beam allows after each record; the beam's window widened to the
+  lines past the screen's last as well as the view's (the panel's rows are
+  met again only after `FLIP_LINE`); a glyph cell writes the buffer
+  selected as it makes each line and copies them into the other;
+- the keys read by column: each column looked at once, its keys only when
+  CA2 says it has one down;
+- the crosshair's EOR by its columns' addresses, made once each;
+- `clock_to` without its product for a span of one field or none;
+- a level camera's cuboid's edges straight into the level fills;
+- the globals' slots kept when their records are those they were last built
+  from (`G_BYTES` of them copied into `AreaKeep`, after `Work` in the OS's
+  pages; on the check's runs they were the same at 159 of 160 entries).
+
+The live disc's check, fields a frame, median / p90 / max, before and after:
+
+| | flip to flip, before | after | the rest, before | after |
+|---|---|---|---|---|
+| all (3,928 / 3,964 frames) | 2 / 5.51 / 20.95 | 1.93 / 5.28 / 19.14 | 0.14 / 0.56 / 7.62 | 0.1 / 0.53 / 5.18 |
+| entrance (75) | 9.28 / 13.99 / 20.95 | 8.45 / 12.56 / 19.14 | 3.43 / 4.63 / 7.62 | 2.42 / 3.24 / 5.18 |
+| standing (669) | 0.52 / 2.6 / 9.44 | 0.53 / 2.57 / 8.57 | 0.22 / 0.33 / 3.59 | 0.21 / 0.32 / 2.49 |
+| walking | 1.92 / 4.62 / 13.67 | 1.86 / 4.54 / 13.61 | 0.12 / 0.57 / 5 | 0.1 / 0.55 / 4.24 |
+| turning | 2.43 / 5.7 / 12.93 | 2.31 / 5.58 / 12.47 | 0.11 / 0.42 / 5.11 | 0.09 / 0.41 / 4.69 |
+
+The pieces, on the same runs: the vertical sync reading the keys 1,376 /
+1,392 / 1,413 cycles to 834 / 1,020 / 1,264 (it read them in 16,481 of
+18,987 fields; on the free disc 1,375 to 803 at the median); a glyph cell
+830 / 1,091 / 1,102 to 688 / 872 / 912, and 66 waits for the beam to none;
+the crosshair's EOR 1,413 cycles a walking frame to 1,004; `clock_to` 570
+to 379. `objectcheck`: a 5° turn's transform 15,035 / 34,906 / 57,887 to
+14,406 / 33,433 / 55,180 and its total 66,056 / 144,940 / 222,527 to
+65,460 / 143,791 / 219,883; an entrance view's total median 119,704 to
+118,016. `areacheck` with the logic: `area_enter` a median 81,062 before;
+after, 83,082 over the areas that find a byte of the globals' records
+changed (the check changes one for every other area) and 56,835 over those
+that keep them. `make check` passes.
+
+The room it took: `AreaKeep` `G_BYTES` + 1 bytes of the OS's pages
+(`work_end` to `RASTER_IN_ORG`); `ag_same` in `ObjMore`; the keys' column
+table and two bytes of `Work`; the front end's bank, `AreaConv`'s and
+`LiveGlue`'s by a few bytes each way.
+
+Counted and not built: the lines whose first or last run the buffer holds
+(raster.md, round 5: about 3K cycles a walking frame, the largest found),
+whose records, a byte end and a pattern byte for each of 2 screens, 104
+lines and both ends, are 832 bytes against the fill's bank's 1,272 free
+(`raster_work_end` to `&C000`), before the trimming code in INSERT's and
+the stretch's four copies each and the background's gaps; the globals
+compared by a checksum (inexact); the vertical sync's byte loop unrolled
+(under a hundred cycles a field); `drawable`'s products decided by bit
+lengths first (little of a few hundred cycles a step).

@@ -49,9 +49,9 @@ the whole frame. Driller is Incentive Software's.*
 
 **How fast:** measured on the disc's check (journal, 2026-11-06), the
 whole frame, flip to flip, walking through Driller's areas takes a median
-of about 2 fields (about 25 frames a second) and turning about 2.5
-(about 20), as the fill no longer rewrites lines the buffer holds; wide
-open views, like the entrances, take longer, about 9
+of under 1.9 fields (about 27 frames a second) and turning about 2.3
+(about 22), as the fill no longer rewrites lines the buffer holds; wide
+open views, like the entrances, take longer, about 8.5
 fields at the median. Standing still
 draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
