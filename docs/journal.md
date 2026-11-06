@@ -804,3 +804,49 @@ point's polar form, it's good to a pixel, and the cone needs camera
 space); log products (no fewer reads, and inexact). The front end's bank,
 which ANDY had freed, has less room: the bounds' and the level fills' code
 took most of what it had.
+
+## 2026-11-06: the cone, the vertex pass and the projection
+
+The coordinator asked for the cone, the vertex pass and the projection to
+be made faster. Profiled on the walks' steps, the three stages' cycles are
+spread thin: no routine is more than a few per cent of a step, and the
+cone's largest part, its lines from images, is two products of sixteen bits
+by sixteen a line that every corner's f needs. What went in
+(`docs/research/objects.md`, "The tenth round") is exact, every stage of
+every check view still the model's, and touches `src/clip.6502` alone:
+`vertex_code3` by 24-bit sums' N EOR V, `image_line`'s A W and B H written
+out, `side_cut`'s shifts written out, `cone_line`'s and `drawable`'s zero
+flags from bytes already in hand, and the band test's commonest path last.
+
+Measured by `objectcheck` on the full check (median / p90 / max / mean,
+cycles), before and after:
+
+| | before | after |
+|---|---|---|
+| a step (260 walk views), total | 94,044 / 140,806 / 174,866 / 92,816 | 92,681 / 138,413 / 172,970 / 91,589 |
+| ... its cone | 24,871 / 59,284 / 83,980 / 30,673 | 23,967 / 57,184 / 82,012 / 29,746 |
+| ... its vertices | 10,181 / 18,449 / 25,171 / 10,462 | 10,136 / 18,356 / 25,036 / 10,404 |
+| ... its drawn test | 4,087 / 7,898 / 14,597 / 4,403 | 3,808 / 7,472 / 14,102 / 4,178 |
+| a 5° turn (639 yaw-sweep views), total | 67,428 / 146,761 / 223,907 / 79,268 | 66,055 / 144,931 / 222,514 / 78,027 |
+| ... its cone | 25,077 / 50,014 / 91,484 / 27,470 | 24,087 / 48,475 / 88,594 / 26,402 |
+| an entrance view, total | 121,266 / 200,345 / 288,376 / 129,741 | 119,692 / 198,686 / 286,456 / 128,480 |
+| all 3,265 views, total | 89,946 / 185,767 / 317,297 / 102,972 | 88,236 / 183,933 / 316,058 / 101,729 |
+
+The projection's stage is unchanged. On the live disc's check, stages 1-7
+in fields a frame (median / p90 / max): walking 0.75 / 1.99 / 4.91 to 0.73 /
+1.95 / 4.87, turning 1.40 / 2.85 / 5.07 to 1.38 / 2.83 / 5.04, entrances
+2.53 / 5.26 / 7.26 to 2.50 / 5.24 / 7.21. The front end's bank and ANDY each
+have a little more room than before, `ObjMore` a little less (`side_cut`'s
+jump tables). `make check` passes.
+
+Not kept, or not built: a unit line's terms in the passes without products
+(a few dozen cycles a step: its vertices are mostly on the sides it's square
+to, whose terms were already skipped); `pmul` written into the projection's
+blocks (each copy would need the case's eight patches again); and coarser
+lines from images, `IMAGE_BITS` 8, which would halve the lines' and passes'
+products (about 3K a step at the mean by the counts) but in the model moves
+1,182 pixels over the entrance views and their walks, up to 148 in one view,
+a near wall's edge off by two pixels and liable to wobble as the camera
+moves; not proposed. A step's largest unworked block is now the faces
+projected whole (`poly_face`, the drawn test, the 2D clip), nearly as large
+as the cone at the median.

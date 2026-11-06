@@ -293,7 +293,7 @@ M, below). A polygon object's vertices go first, then its faces:
   `drawable` and `commit`.
 - **Any other polygon: the cone** (`cone_face`, the model's
   `clip.cone_clip`). Every vertex in one of the half-spaces x < −z, x > z,
-  2y > z, 2y < −z, z ≤ 0 (`vertex_code3`, each a 32-bit sum's sign; each
+  2y > z, 2y < −z, z ≤ 0 (`vertex_code3`, each a 24-bit sum's sign, N EOR V; each
   misses the view's pyramid wherever the point is) drops it; the AND stops
   once it's 0. Else each edge's
   plane through the eye becomes a line on the screen, kept if it cuts the
@@ -992,6 +992,77 @@ What's left:
 - **A tilted camera's patch**: `bound_patch`'s one routine for nine terms
   costs a pitched or rolled turn about 1.7K more in the matrix stage than
   the old `bound_sel`, though its transform gains more.
+
+## The tenth round: the cone, the vertex pass and the projection
+
+The coordinator asked for the cone (the largest stage of a step), the
+vertex pass and the projection to be made faster. Profiled first, on the
+walks' steps (`--profile-walks`, `--fine`) and on a heavy cone view, with
+each routine's entries counted as well as its cycles. The profile is flat:
+no routine of the three stages is more than a few per cent of a step. The
+cone's largest part is its lines from images (`image_line`, `im_term`,
+`im_w`, about a quarter of the cone), then `side_cut`, the passes and
+`image_edge`; a cone face costs several times a face projected whole. All
+of what went in is exact: no model change, every stage of every check view
+still the model's. The figures, before and after, by stage and group, are
+in the journal's entry of 2026-11-06, "the cone, the vertex pass and the
+projection".
+
+Kept:
+
+- **`vertex_code3` by 24-bit sums**: each half-space's test is a sum's
+  sign, N EOR V past the 24 bits, with no sign bytes made; and z - 2y < 0
+  exactly when h - y < 0 (h = z >> 1, z = 2h + r), so 2y isn't made either.
+- **`image_line`'s A W and B H written out** (`IM_W`; `im_w` stays for
+  `edge_line`), with `im_term`'s coefficient `im_c` being `im_ab`, so that A
+  isn't copied.
+- **`side_cut`'s shifts written out**, entered by a jump on the shift.
+- **`cone_line`'s zero flags** as the coefficient's bytes ORed while it's
+  patched, not from the line's bytes again.
+- **`drawable`'s zero flags** as the ORs of dx's and dy's bytes.
+- **The band test**: its commonest case (z's top byte non-zero) last, with
+  no branch out (a page crossed on that branch cost a cycle a vertex when
+  the code moved); and below `BAND_MID` (k at most 16) by v's top byte being
+  0 or &FF and its middle byte EOR that being under 2^(k - 8), two tables
+  fewer. Rare in the check's views, so worth little but room.
+
+Measured and not kept:
+
+- **A unit line's terms without products** (`cone_eval`, A or B of 1: f
+  plus or less the coordinate): a few dozen cycles a step at the mean. A
+  unit line's vertices are mostly on the sides it's square to, whose terms
+  were already skipped (a zero coefficient), and the extra test cost the
+  rest.
+
+Counted and not built:
+
+- **The projection's `pmul` written into its blocks**: the case patches
+  `pmul`'s eight operands once for x and y both; a copy written into a block
+  would need its own eight patches by every case that reaches it, which
+  costs more than the call it saves.
+- **Coarser lines from images** (`IMAGE_BITS` 8, A and B a byte each, so
+  `im_term`, `cone_eval`'s terms and `im_w` take half their products, about
+  3K a step at the mean by the counts): measured in the model, 1,182 of
+  3,515,200 pixels differ over the entrance views and their walks, in 111
+  views, up to 148 in one (a wall's edge two pixels off at the top of the
+  view), the draw order the same; 10 bits, 205 pixels, and 12 bits, 19. The
+  error grows with the distance from the image the line goes through, which
+  can be many views' widths away inside the band, so a near wall's edge
+  would wobble as the camera moves. Not proposed.
+- **The projection reading the vertex arrays** rather than copies in
+  `proj_v`: its shifts work in place, so the bytes it shifts would be copied
+  anyway.
+
+What's left:
+
+- **The lines' products**: C = -(A px + B py) is two products of sixteen
+  bits by sixteen, and every corner's f needs it; only coarser lines (above)
+  make them cheaper.
+- **The passes' copies** (`cone_pass` writes each vertex kept to the other
+  half) and `side_cut`'s division by reciprocal, a few hundred cycles each.
+- **The faces projected whole** (`poly_face`, `drawable`, the 2D clip) are
+  together nearly as large as the cone at a step's median; no round has had
+  them as its own.
 
 ## The floor (decision 8a)
 

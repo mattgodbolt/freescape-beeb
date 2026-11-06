@@ -875,9 +875,9 @@ ENDMACRO
     LDY out_vn : LDX out_vn : INX
     DIFF2D dx, out_vxl, out_vxh
     DIFF2D dy, out_vyl, out_vyh
-    \ dxz, dyz: non-zero if dx, dy are zero; sxy: their signs EORed (bit 7)
-    LDA dx : ORA dx+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dxz
-    LDA dy : ORA dy+1 : CMP #1 : LDA #0 : ROL A : EOR #1 : STA dyz
+    \ dxz, dyz: zero if dx, dy are zero; sxy: their signs EORed (bit 7)
+    LDA dx : ORA dx+1 : STA dxz
+    LDA dy : ORA dy+1 : STA dyz
     LDA dx+1 : EOR dy+1 : STA sxy
     STZ sized
     LDA out_vn : CLC : ADC #2 : STA i
@@ -886,15 +886,15 @@ ENDMACRO
     DIFF2D ex, out_vxl, out_vxh
     DIFF2D ey, out_vyl, out_vyh
     \ dx ey zero? then dy ex must be too, else it's off the line
-    LDA dxz : BNE e1_zero
+    LDA dxz : BEQ e1_zero
     LDA ey : ORA ey+1 : BEQ e1_zero
     \ dx ey not zero: dy ex must be, with the same sign, for it to be on the line
-    LDA dyz : BNE off_line
+    LDA dyz : BEQ off_line
     LDA ex : ORA ex+1 : BEQ off_line
     LDA ey+1 : EOR ex+1 : EOR sxy : BMI off_line
     JMP sizes                       ; (the same sign)
 .e1_zero
-    LDA dyz : BNE next
+    LDA dyz : BEQ next
     LDA ex : ORA ex+1 : BNE off_line
 .next
     INC i : LDA i : CMP end : BEQ on_line
@@ -1321,44 +1321,55 @@ OC_BEHIND = 32
 
 \ vertex_code3: A = vertex Y's code3 (the model's): which of x < -z, x > z,
 \ 2y > z, 2y < -z and z <= 0 it's in (OC_LEFT, OC_RIGHT, OC_TOP, OC_BOTTOM,
-\ OC_BEHIND), each a 32-bit sum's sign. X and Y are kept.
+\ OC_BEHIND). Each is a sum's sign, of 24-bit numbers, which N EOR V gives
+\ past their range; and z - 2y < 0 when h - y < 0, z + 2y < 0 when h + y <
+\ 0, h = z >> 1 (z = 2h + r, r 0 or 1). X and Y are kept.
 .vertex_code3
 {
-    ZA_AUTO1 code, xs, zs
-    ZA_AUTO 4, y2
+    ZA_AUTO1 code
+    ZA_AUTO 3, h
     STZ code
-    LDA vx2,Y : ASL A : SEXT : STA xs
-    LDA vz2,Y : ASL A : SEXT : STA zs
-    LDA vy0,Y : ASL A : STA y2
-    LDA vy1,Y : ROL A : STA y2+1
-    LDA vy2,Y : ROL A : STA y2+2
-    SEXT : STA y2+3                     ; (C: 2y's sign, which is y's)
     \ x + z < 0
     LDA vx0,Y : CLC : ADC vz0,Y
     LDA vx1,Y : ADC vz1,Y
     LDA vx2,Y : ADC vz2,Y
-    LDA xs : ADC zs : BPL not_left
+    BVC left_signed
+    EOR #&80
+.left_signed
+    BPL not_left
     LDA #OC_LEFT : TSB code
 .not_left
     \ z - x < 0
     LDA vz0,Y : SEC : SBC vx0,Y
     LDA vz1,Y : SBC vx1,Y
     LDA vz2,Y : SBC vx2,Y
-    LDA zs : SBC xs : BPL not_right
+    BVC right_signed
+    EOR #&80
+.right_signed
+    BPL not_right
     LDA #OC_RIGHT : TSB code
 .not_right
-    \ z - 2y < 0
-    LDA vz0,Y : SEC : SBC y2
-    LDA vz1,Y : SBC y2+1
-    LDA vz2,Y : SBC y2+2
-    LDA zs : SBC y2+3 : BPL not_top
+    \ h - y < 0
+    LDA vz2,Y : CMP #&80 : ROR A : STA h+2
+    LDA vz1,Y : ROR A : STA h+1
+    LDA vz0,Y : ROR A : STA h
+    SEC : SBC vy0,Y
+    LDA h+1 : SBC vy1,Y
+    LDA h+2 : SBC vy2,Y
+    BVC top_signed
+    EOR #&80
+.top_signed
+    BPL not_top
     LDA #OC_TOP : TSB code
 .not_top
-    \ z + 2y < 0
-    LDA vz0,Y : CLC : ADC y2
-    LDA vz1,Y : ADC y2+1
-    LDA vz2,Y : ADC y2+2
-    LDA zs : ADC y2+3 : BPL not_bottom
+    \ h + y < 0
+    LDA h : CLC : ADC vy0,Y
+    LDA h+1 : ADC vy1,Y
+    LDA h+2 : ADC vy2,Y
+    BVC bottom_signed
+    EOR #&80
+.bottom_signed
+    BPL not_bottom
     LDA #OC_BOTTOM : TSB code
 .not_bottom
     \ z <= 0
@@ -2139,6 +2150,19 @@ ENDMACRO
     RTS
 }
 
+\ IM_W v, out: im_w's, written out for image_line: out (32-bit) = v (16-bit
+\ signed) times W. Clobbers A, X, Y.
+MACRO IM_W v, out
+    MULK v, 13, im_t
+    LDA v+1 : BPL positive
+    LDA im_t+2 : SEC : SBC #13 : STA im_t+2
+.positive
+    LDA im_t+2 : CMP #&80 : ROR A : STA out+3
+    LDA im_t+1 : ROR A : STA out+2
+    LDA im_t : ROR A : STA out+1
+    LDA #0 : ROR A : STA out
+ENDMACRO
+
 \ image_line: line slot X through vertex im_p's image (vsx, vsy) square to
 \ (im_a, im_b), each 24-bit signed (the model's clip.image_line): A and B
 \ those shifted right together until both fit IMAGE_BITS bits, or a unit
@@ -2256,13 +2280,14 @@ ENDMACRO
     LDA im_b+1 : STA lnb0,X : STA im_bb
     LDA im_b+2 : STA lnb1,X : STA im_bb+1
 .have
-    \ C = -(A px + B py), then A W and B H
+    \ A W and B H, then C = -(A px + B py) (im_term, whose coefficient im_c
+    \ is im_ab, which it may negate)
+    IM_W im_ab, im_aw
+    IM_W im_bb, im_bh
     STZ im_cf : STZ im_cf+1 : STZ im_cf+2 : STZ im_cf+3
     LDY im_p
     LDA vsxl,Y : STA im_x
     LDA vsxh,Y : STA im_x+1
-    LDA im_ab : STA im_c
-    LDA im_ab+1 : STA im_c+1
     JSR im_term
     LDY im_p
     LDA vsyl,Y : STA im_x
@@ -2270,12 +2295,6 @@ ENDMACRO
     LDA im_bb : STA im_c
     LDA im_bb+1 : STA im_c+1
     JSR im_term
-    LDA im_ab : STA im_c
-    LDA im_ab+1 : STA im_c+1
-    LDX #0 : JSR im_w
-    LDA im_bb : STA im_c
-    LDA im_bb+1 : STA im_c+1
-    LDX #4 : JSR im_w                   ; (im_bh)
     LDX slot
 .corners
     \ f at (0, 0), (W, 0), (W, H) and (0, H), for slot X: C, C + A W, C + A
@@ -2319,7 +2338,8 @@ IM_SHIFTS = {r0, r1, r2, r3, l4, l3, l2, l1}
 ZA_AUTO 4, im_cf                        ; C
 ZA_AUTO 8, im_aw                        ; A W, then B H
 im_bh = im_aw + 4
-ZA_AUTO2 im_ab, im_bb, im_c             ; A, B, and a coefficient (im_term, im_w)
+ZA_AUTO2 im_ab, im_bb                   ; A and B
+im_c = im_ab                            ; a coefficient (im_term, im_w)
 ZA_AUTO2 im_x                           ; a coordinate of the image (im_term)
 ASSERT IMAGE_LINES AND IMAGE_BITS = 14  ; (A and B to 15 bits signed; s at most 7)
 ASSERT 2 * (1 << IMAGE_BITS) * (PROJ_XC + IM_UV + CLIP_W) < &80000000   ; (f fits 32 bits)
@@ -2371,40 +2391,40 @@ ASSERT 2 * (1 << IMAGE_BITS) * (PROJ_XC + IM_UV + CLIP_W) < &80000000   ; (f fit
 ZA_AUTO1 ce_lo
 
 \ cone_line: line X's |A| and |B| patched into the readers, their signs in
-\ ce_as and ce_bs (bit 7), and whether each is non-zero in ce_az and ce_bz
-\ (bit 7). X is kept.
+\ ce_as and ce_bs (bit 7), and |A| and |B|'s bytes ORed in ce_az and ce_bz
+\ (zero if the coefficient is). X is kept.
 .cone_line
 {
-    LDA lna0,X : ORA lna1,X : CMP #1 : ROR ce_az
-    LDA lnb0,X : ORA lnb1,X : CMP #1 : ROR ce_bz
     LDA lna1,X : STA ce_as : BPL a_pos
-    LDA #0 : SEC : SBC lna0,X : PHA
+    LDA #0 : SEC : SBC lna0,X : TAY
     LDA #0 : SBC lna1,X
     BRA a_got
 .a_pos
-    LDA lna0,X : PHA
-    LDA lna1,X
+    LDY lna0,X
 .a_got
     STA ce_ah.p1+1 : STA ce_ah.p3+1
+    STA ce_az
     EOR #&FF
     STA ce_ah.p2+1 : STA ce_ah.p4+1
-    PLA
+    TYA
     STA ce_al.p1+1 : STA ce_al.p3+1
+    TSB ce_az
     EOR #&FF
     STA ce_al.p2+1 : STA ce_al.p4+1
     LDA lnb1,X : STA ce_bs : BPL b_pos
-    LDA #0 : SEC : SBC lnb0,X : PHA
+    LDA #0 : SEC : SBC lnb0,X : TAY
     LDA #0 : SBC lnb1,X
     BRA b_got
 .b_pos
-    LDA lnb0,X : PHA
-    LDA lnb1,X
+    LDY lnb0,X
 .b_got
     STA ce_bh.p1+1 : STA ce_bh.p3+1
+    STA ce_bz
     EOR #&FF
     STA ce_bh.p2+1 : STA ce_bh.p4+1
-    PLA
+    TYA
     STA ce_bl.p1+1 : STA ce_bl.p3+1
+    TSB ce_bz
     EOR #&FF
     STA ce_bl.p2+1 : STA ce_bl.p4+1
     RTS
@@ -2494,12 +2514,12 @@ ENDMACRO
 .ce_in
     CE_BASE 0 : JSR ce_x
 .ce_y
-    BIT ce_bz : BPL ce_none             ; (B zero: nothing to add)
+    LDX ce_bz : BEQ ce_none             ; (B zero: nothing to add)
     CE_TERM pa_yl, pa_yh, ce_bl, ce_bh, ce_bs
 .ce_y_done
     RTS
 .ce_x
-    BIT ce_az : BPL ce_y_done
+    LDX ce_az : BEQ ce_y_done
     CE_TERM pa_xl, pa_xh, ce_al, ce_ah, ce_as
     RTS
 CE_JUMPS = {ce_in, ce_left, ce_right, ce_top, ce_bottom, ce_c0, ce_c1, ce_c2, ce_c3}
@@ -2900,17 +2920,7 @@ SECTION ObjMore
 .got_a
     \ k = bitlen(a) - 8 (s + 1), and an's low byte, as clip_cut's: from a's
     \ high byte shifted down s, or its low byte shifted up 1 - k
-    LDA sc_a+1 : BEQ small
-    TAY : LDA proj_bl2,Y : LSR A : STA sc_k     ; 1 to 7
-    TAY : DEY
-    LDA sc_a+1 : STA sc_r
-    LDA sc_a
-    CPY #0 : BEQ indexed
-.right
-    LSR sc_r : ROR A
-    DEY : BNE right
-    BRA indexed
-.small
+    LDY sc_a+1 : BNE large
     LDY sc_a : CPY #1 : BNE fraction
     \ a of 1 (a unit line from images): d is f(K) itself (UNIT_SIDES)
     LDA dv : STA sc_l
@@ -2924,6 +2934,26 @@ SECTION ObjMore
 .left
     ASL A
     DEY : BNE left
+    BRA indexed
+.up
+    EOR #&FF : TAY : INY                ; -(k + 3), 1 to 4
+.lift
+    ASL dv : ROL dv+1
+    DEY : BNE lift
+    BRA shifted
+.large
+    STY sc_r
+    LDX proj_bl2,Y                      ; 2k, k 1 to 7
+    TXA : LSR A : STA sc_k
+    LDA sc_a
+    JMP (sc_right - 2,X)                ; (right k - 1)
+    ZA_CANJUMP SC_RIGHT
+.r6 LSR sc_r : ROR A
+.r5 LSR sc_r : ROR A
+.r4 LSR sc_r : ROR A
+.r3 LSR sc_r : ROR A
+.r2 LSR sc_r : ROR A
+.r1 LSR sc_r : ROR A
 .indexed
     TAY : LDA clip_m,Y
     QS_SET                              ; (cone_qs: by M)
@@ -2935,16 +2965,17 @@ SECTION ObjMore
     LDY dv+2 : STY dv+1
     LDY dv+3 : STY dv+2
 .bits
-    TAY : BEQ shifted
-.down
-    LSR dv+2 : ROR dv+1 : ROR dv
-    DEY : BNE down
-    BRA shifted
-.up
-    EOR #&FF : TAY : INY                ; -(k + 3), 1 to 4
-.lift
-    ASL dv : ROL dv+1
-    DEY : BNE lift
+    ASL A : TAX
+    JMP (sc_down,X)
+    ZA_CANJUMP SC_DOWN
+.d7 LSR dv+2 : ROR dv+1 : ROR dv
+.d6 LSR dv+2 : ROR dv+1 : ROR dv
+.d5 LSR dv+2 : ROR dv+1 : ROR dv
+.d4 LSR dv+2 : ROR dv+1 : ROR dv
+.d3 LSR dv+2 : ROR dv+1 : ROR dv
+.d2 LSR dv+2 : ROR dv+1 : ROR dv
+.d1 LSR dv+2 : ROR dv+1 : ROR dv
+.d0
 .shifted
     \ its product with R = 256 + M (f M, and f a byte up), plus 2^12, then
     \ >> 13 as << 3 and two bytes down
@@ -2997,6 +3028,13 @@ SECTION ObjMore
     LDA sc_fixl,X : STA pa_xl,Y
     LDA sc_fixh,X : STA pa_xh,Y
     RTS
+\ the shifts' entries: a right k - 1 (from k = 1), and f right 0 to 7
+SC_RIGHT = {indexed, r1, r2, r3, r4, r5, r6}
+.sc_right
+    EQUW indexed, r1, r2, r3, r4, r5, r6
+SC_DOWN = {d0, d1, d2, d3, d4, d5, d6, d7}
+.sc_down
+    EQUW d0, d1, d2, d3, d4, d5, d6, d7
 \ by side: its tag, and its other coordinate (y on the top and bottom, x
 \ on the right and left)
 .sc_tag
@@ -3022,21 +3060,15 @@ SECTION ObjCode
 \ nearer than ZNEAR (z's top two bytes zero, or z negative), or x beyond
 \ 2^(n + BAND_XS) or y beyond 2^(n + BAND_YS) either way, n = bitlen(z). v
 \ is within 2^k when v + 2^k has no bit from k + 1 up: the band_* tables,
-\ indexed by 2n, have that bias and the mask of those bits for each of v's
-\ top two bytes, read 32 on (2 bitlen(z's top byte) indexing them) or 16 on
-\ (2 bitlen(its middle byte)). From BAND_MID up, k is past 15 for both x and
-\ y, so the top byte alone decides. X is kept.
+\ indexed by 2n, have that bias and the mask of those bits for v's top
+\ byte, read 32 on (2 bitlen(z's top byte) indexing them) or 16 on (2
+\ bitlen(its middle byte)). From BAND_MID up, k is past 15 for both x and
+\ y, so the top byte alone decides; below it, k is 16 at most, and v's top
+\ two bytes, v >> 8, are within 2^(k - 8) when the top one is 0 or &FF and
+\ the middle one EOR it is under 2^(k - 8). The commonest, z's top byte
+\ non-zero, is last, with no branch out. X is kept.
 MACRO BAND_TEST
-    LDY vz2,X : BEQ near : BMI off_top
-    LDA proj_bl2,Y : TAY                ; 2n - 32
-    LDA vx2,X : CLC : ADC band_xb2 + 32,Y : AND band_xm2 + 32,Y : BNE off_top
-    LDA vy2,X : CLC : ADC band_yb2 + 32,Y : AND band_ym2 + 32,Y : BNE off_top
-    CLC
-    BRA done
-.off_top
-    SEC
-    BRA done
-.near
+    LDY vz2,X : BNE top
     LDY vz1,X : BEQ off                 ; (z < 256: nearer than ZNEAR)
     CPY #BAND_MID : BCC low
     LDA proj_bl2,Y : TAY                ; 2n - 16
@@ -3046,20 +3078,28 @@ MACRO BAND_TEST
     BRA done
 .low
     LDA proj_bl2,Y : TAY                ; 2n - 16
-    LDA vx1,X : CLC : ADC band_xb1 + 16,Y : STA band_t
-    LDA vx2,X : ADC band_xb2 + 16,Y : AND band_xm2 + 16,Y : BNE off
-    LDA band_t : AND band_xm1 + 16,Y : BNE off
-    LDA vy1,X : CLC : ADC band_yb1 + 16,Y : STA band_t
-    LDA vy2,X : ADC band_yb2 + 16,Y : AND band_ym2 + 16,Y : BNE off
-    LDA band_t : AND band_ym1 + 16,Y : BNE off
+    LDA vx2,X : BEQ x_sized
+    CMP #&FF : BNE off
+.x_sized
+    EOR vx1,X : AND band_xl + 16,Y : BNE off
+    LDA vy2,X : BEQ y_sized
+    CMP #&FF : BNE off
+.y_sized
+    EOR vy1,X : AND band_yl + 16,Y : BNE off
     CLC
     BRA done
 .off
     SEC
+    BRA done
+.top
+    BMI off
+    LDA proj_bl2,Y : TAY                ; 2n - 32
+    LDA vx2,X : CLC : ADC band_xb2 + 32,Y : AND band_xm2 + 32,Y : BNE off
+    LDA vy2,X : CLC : ADC band_yb2 + 32,Y : AND band_ym2 + 32,Y : BNE off
+    CLC
 .done
 ENDMACRO
 ASSERT ZNEAR = 256                      ; (BAND_TEST's: not nearer, a top byte non-zero)
-ZA_AUTO1 band_t
 \ z's middle byte from BAND_MID up (z's top byte 0): n at least 14, so k
 \ past 15 for x and y both, and the band's low bytes (biases and masks) 0
 BAND_MID = 1 << (16 - 1 - BAND_YS - 8)
@@ -3466,29 +3506,29 @@ ASSERT CONE                             ; (the model's render.CONE: the 6502 has
 ASSERT BEHIND_EDGES AND FRONT_FIRST AND SIDE_CROSSINGS AND JOINS AND RECIP_2D   ; (and these)
 ASSERT SIDE_RECIP
 \ The band (band_test), indexed by 2 bitlen(z) from ZNEAR's: for k = n +
-\ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on each of the top two
-\ bytes and the mask of the bits from k + 1 up.
+\ BAND_XS (x) and n + BAND_YS (y), the bias 2^k on the top byte and the
+\ mask of its bits from k + 1 up (z's top byte non-zero, or its middle
+\ byte from BAND_MID); and below BAND_MID, the mask of the middle byte's
+\ bits from k up (BAND_TEST's low path).
 BAND_I0 = 2 * 9
 ASSERT ZNEAR >= 1 << 8 AND ZNEAR < 1 << 9
 BAND_N = (BAND_I0..47) DIV 2
 BAND_KX = BAND_N + BAND_XS
 BAND_KY = BAND_N + BAND_YS
-band_xb1 = P% - BAND_I0
-    EQUB WHERE(BAND_KX >= 8 AND BAND_KX <= 15, 1 << (BAND_KX - 8), 0)
 band_xb2 = P% - BAND_I0
     EQUB WHERE(BAND_KX >= 16 AND BAND_KX <= 22, 1 << (BAND_KX - 16), 0)
-band_xm1 = P% - BAND_I0
-    EQUB WHERE(BAND_KX <= 15, (&FF << (BAND_KX - 7)) AND &FF, 0)
 band_xm2 = P% - BAND_I0
     EQUB WHERE(BAND_KX <= 15, &FF, WHERE(BAND_KX <= 22, (&FF << (BAND_KX - 15)) AND &FF, 0))
-band_yb1 = P% - BAND_I0
-    EQUB WHERE(BAND_KY >= 8 AND BAND_KY <= 15, 1 << (BAND_KY - 8), 0)
+band_xl = P% - BAND_I0
+    EQUB WHERE(BAND_KX <= 15, (&FF << (BAND_KX - 8)) AND &FF, 0)
 band_yb2 = P% - BAND_I0
     EQUB WHERE(BAND_KY >= 16 AND BAND_KY <= 22, 1 << (BAND_KY - 16), 0)
-band_ym1 = P% - BAND_I0
-    EQUB WHERE(BAND_KY <= 15, (&FF << (BAND_KY - 7)) AND &FF, 0)
 band_ym2 = P% - BAND_I0
     EQUB WHERE(BAND_KY <= 15, &FF, WHERE(BAND_KY <= 22, (&FF << (BAND_KY - 15)) AND &FF, 0))
+band_yl = P% - BAND_I0
+    EQUB WHERE(BAND_KY <= 15, (&FF << (BAND_KY - 8)) AND &FF, 0)
+\ (the low path's: n at least 9 and k at most 16 below BAND_MID)
+ASSERT 9 + BAND_YS >= 8 AND 13 + BAND_XS <= 16 AND BAND_MID = 1 << (13 - 8)
 
 ENDSECTION
 \ What ANDY's code reaches in the bank, which must be past the bank's first
@@ -3498,4 +3538,4 @@ ASSERT umul8 >= obj_andy_reach AND umul16 >= obj_andy_reach AND lerp >= obj_andy
 ASSERT cone_qs >= obj_andy_reach AND edge_axis >= obj_andy_reach AND im_w >= obj_andy_reach
 ASSERT image_line >= obj_andy_reach AND vertex_shared >= obj_andy_reach AND drawable >= obj_andy_reach
 ASSERT commit >= obj_andy_reach AND dedupe_stage >= obj_andy_reach AND dedupe >= obj_andy_reach
-ASSERT stage_pa >= obj_andy_reach AND bit8 >= obj_andy_reach AND band_xb1 + BAND_I0 >= obj_andy_reach
+ASSERT stage_pa >= obj_andy_reach AND bit8 >= obj_andy_reach AND band_xb2 + BAND_I0 >= obj_andy_reach
