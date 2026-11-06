@@ -93,7 +93,7 @@ const allowed = [
     [S("acccon"), S("acccon") + 1],
     [S("romsel"), S("romsel") + 1],
 ];
-for (const name of ["RasterCheck", "RasterCode", "RasterIn", "RasterRuns", "RasterWork", "RasterState"]) {
+for (const name of ["RasterCheck", "RasterCode", "RasterIn", "RasterRuns", "RasterWork", "RasterState", "RasterEnds"]) {
     const a = sections[name];
     allowed.push([a.org, a.guard]);
 }
@@ -223,7 +223,8 @@ async function frame(s, shadow, fresh) {
     // The frame's own work (the lines' heads, the vertices' lines, the
     // pools) must be made by the frame: whatever it held is poisoned.
     poison++;
-    for (const [at, n] of work) m.write(at, Array.from({ length: n }, (_, i) => (i * 97 + poison * 31 + 0x5b) & 255), BANK);
+    for (const [at, n] of work)
+        m.write(at, Array.from({ length: n }, (_, i) => (i * 97 + poison * 31 + 0x5b) & 255), at >= 0x8000 ? BANK : "main");
 
     // Profile: each instruction's cycles to its routine's bucket.
     const prof = {};

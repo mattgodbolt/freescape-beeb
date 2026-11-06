@@ -226,6 +226,10 @@ SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cm
 ENDSECTION
 SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
 ENDSECTION
+\ (what each screen holds, frame to frame, after the work: raster_init
+\ forgets it)
+SECTION RasterEnds, org = raster_work_end, guard = &C000, virtual = TRUE
+ENDSECTION
 SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
 ENDSECTION
 SECTION PanelData, org = live_data_end, guard = &C000, filename = "PDATA", cmos = TRUE
@@ -237,8 +241,7 @@ ENDSECTION
 INCLUDE "../build/live/data.6502"
 
 \ Main RAM below &3000. First the rasteriser's state, which it reads and
-\ writes whatever ACCCON's X (the buffer it draws), on a page as its ALIGN
-\ asks, so none is lost to it; LIVE straight after.
+\ writes whatever ACCCON's X (the buffer it draws); LIVE straight after.
 RASTER_STATE_ORG = &0E00
 SECTION RasterState, org = RASTER_STATE_ORG, guard = &3000, virtual = TRUE
 ENDSECTION
@@ -1914,6 +1917,9 @@ ENDSECTION
 SECTION RasterWork
 .raster_work_end
 ENDSECTION
+SECTION RasterEnds
+.raster_ends_end
+ENDSECTION
 SECTION RasterState
 .raster_state_end
 ENDSECTION
@@ -1961,7 +1967,8 @@ ASSERT obj_work_end <= &E000
 \ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
 \ The banks: each section after the last in its bank, below &C000.
-ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= &C000
+ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= raster_ends_end
+ASSERT raster_ends_end <= &C000
 ASSERT live_data_end <= panel_data_end AND panel_data_end <= area_conv_end AND area_conv_end <= &C000
 \ The panel's packed picture where nothing is till clear_work clears it,
 \ after panel_init: the transform's cache (which is virtual: !BOOT loads

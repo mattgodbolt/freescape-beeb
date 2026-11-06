@@ -234,6 +234,19 @@ def sequences():
     left = [(0, 0), (XMAX // 2 + 3, 0), (XMAX // 2 + 3, SUB * 80), (0, SUB * 80)]
     out["whole-lines"] = [scene("whole-lines", ([] if t % 4 < 2 else [(q, left)]) + [(p, tall), (p, slope)],
                                 sky=sky, ground=ground) for t in range(10)]
+    # A box that moves over a floor (rows 0-59) and the sky, at times at
+    # the view's sides, leaning, the whole width or gone: lines whose first
+    # and last pieces each screen holds in part (RasterEnds), by the faces'
+    # paths, the stretch's and the background's, and lines whole after
+    # lines of three pieces.
+    floor = [(0, 0), (XMAX, 0), (XMAX, SUB * 60), (0, SUB * 60)]
+    spots = [(400, 900, 0), (480, 980, 0), (560, 1100, 0), (0, 500, 0), (0, 420, 0), None, (900, XMAX, 0),
+             (700, XMAX, 0), (300, 700, 0), (200, 1200, 90), None, (420, 800, -60), (0, 200, 0), (0, XMAX, 0),
+             (520, 950, 40), (440, 1000, 0)]
+    def box(x0, x1, lean):
+        return [(x0, SUB * 30), (x1, SUB * 30), (clamp((x1 + lean, 0))[0], SUB * 90), (clamp((x0 + lean, 0))[0], SUB * 90)]
+    out["moving"] = [scene("moving", ([] if s is None else [(q, box(*s))]) + [(p, floor)], sky=sky, ground=ground)
+                     for s in spots]
     # The pitch moves the boxes, but the sky and ground stay as they were.
     for f in out["rise"]:
         f["sky"], f["ground"] = out["rise"][0]["sky"], out["rise"][0]["ground"]
@@ -516,58 +529,59 @@ def driller_views(db_path, out):
     print(f"{len(scenes)} of Driller's entrance views, checked against the model's brute force")
 
 
+END_FORGOTTEN = (0, None, writer.VIEW_BYTES, None)
+
+
+def ends_held(rec, y, runs):
+    """The whole bytes of line y's pieces (runs, in order, as spans gives
+    them) that the screen holds already, by its record for the line (rec[y]:
+    the first piece's end and byte, the last piece's start and byte, in whole
+    bytes; END_FORGOTTEN holds nothing), as the 6502's end_first, end_last
+    and end_both leave them out: where the record's byte is the piece's, the
+    first piece's from the line's start to the record's end, the last's from
+    the record's start to the line's end. Records the line's pieces."""
+    fe0, fv0, ls0, lv0 = rec[y]
+    (_, x1, pf), (x0, _, pl) = runs[0], runs[-1]
+    fv, lv = pf[y & 3], pl[y & 3]
+    fe, ls = x1 >> 1, (x0 + 1) >> 1
+    skip_f = min(fe, fe0) if fv == fv0 else 0
+    skip_l = writer.VIEW_BYTES - max(ls, ls0) if lv == lv0 else 0
+    rec[y] = (fe, fv, ls, lv)
+    if len(runs) == 1:
+        return min(writer.VIEW_BYTES, skip_f + skip_l)
+    return skip_f + skip_l
+
+
 def held_writes(frames):
     """The view's bytes each frame of a sequence writes, as the 6502's
-    records of the lines have it (raster_background): the frames go
-    alternately into each screen; a line no face touched is background
-    alone, and isn't written when the screen being drawn held the same
-    background there last time, in the same two patterns; other patterns
-    forget the screen's lines, and the first frame forgets both screens. A
-    line one face's piece takes whole isn't written when the screen holds
-    it in the same byte, from such a piece last time.
-    In the painter's build the backmost face alone touches lines, and after
-    the background the lines its painted faces' line ranges span (their
-    hull) are no longer background alone. Sets each built frame's
-    "written", and its painter's."""
-    recs = {"span": [[0] * VIEW_H, [0] * VIEW_H], "painter": [[0] * VIEW_H, [0] * VIEW_H]}
-    sigs = {"span": [None, None], "painter": [None, None]}
+    records of what each screen holds have it (src/raster.6502's
+    RasterEnds): the frames go alternately into each screen, the first
+    frame forgetting both; a line's first piece leaves out the whole bytes
+    from the line's start that the screen held in the same byte, and its
+    last piece those to its end (ends_held), so a line the screen holds whole
+    isn't written at all. In the painter's build the backmost face and the
+    background go through the span buffer, and after the background the
+    lines its painted faces' line ranges span (their hull) are forgotten.
+    Sets each built frame's "written", and its painter's."""
+    recs = {"span": [[END_FORGOTTEN] * VIEW_H, [END_FORGOTTEN] * VIEW_H],
+            "painter": [[END_FORGOTTEN] * VIEW_H, [END_FORGOTTEN] * VIEW_H]}
     for t, f in enumerate(frames):
         screen = t % 2
         bg = Background(tuple(f["sky"]), tuple(f["ground"]),
                         None if f["horizon"] is None else Horizon(*f["horizon"]))
         faces = [(tuple(g["pattern"]), [tuple(v) for v in g["vertices"]]) for g in f["faces"]]
-        splits = [horizon_split(bg, y) for y in range(VIEW_H)]
-        sig = (splits[0][0], splits[0][1])
         for build_, front, bytes_ in (("span", faces, f["counts"]["bytes"]),
                                       ("painter", faces[-1:], f["painter"]["counts"]["bytes"])):
             rec = recs[build_]
             if t == 0:
-                rec[0][:] = rec[1][:] = [0] * VIEW_H
-            if sigs[build_][screen] != sig:
-                sigs[build_][screen] = sig
-                rec[screen][:] = [0] * VIEW_H
-            touched, wholes = [], []
-            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched, wholes=wholes)
-            skipped = 0
-            for y in range(VIEW_H):
-                if wholes[y] is not None:
-                    # One face's piece took the line whole: in the byte the
-                    # screen holds there already, it isn't written.
-                    if rec[screen][y] == ("whole", wholes[y]):
-                        skipped += 1
-                    else:
-                        rec[screen][y] = ("whole", wholes[y])
-                elif touched[y]:
-                    rec[screen][y] = 0
-                elif rec[screen][y] == splits[y][2] + 1:
-                    skipped += 1
-                else:
-                    rec[screen][y] = splits[y][2] + 1
+                rec[0][:] = rec[1][:] = [END_FORGOTTEN] * VIEW_H
+            lines, _ = spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL)
+            skipped = sum(ends_held(rec[screen], y, runs) for y, runs in enumerate(lines))
             if build_ == "painter":
                 lines = [first_line(y) for _, vs in faces[:-1] if len(vs) >= 3 for y in (min(p[1] for p in vs), max(p[1] for p in vs))]
                 for y in range(min(lines[0::2], default=VIEW_H), max(lines[1::2], default=0)):
-                    rec[screen][y] = 0
-            written = bytes_ - writer.VIEW_BYTES * skipped
+                    rec[screen][y] = END_FORGOTTEN
+            written = bytes_ - skipped
             if build_ == "span":
                 f["written"] = written
             else:

@@ -95,7 +95,7 @@ ends.
 - **The last frame handed over is enough.** The buffer not shown may hold
   an older view: it's never shown without a frame drawn into it first, as
   only `frame_end` hands a buffer over, and each buffer's own records (the
-  rasteriser's backgrounds, `bg_was`; the crosshair it holds, `lv_xon`)
+  rasteriser's lines' ends, `RasterEnds`; the crosshair it holds, `lv_xon`)
   are kept by buffer. So no frame is drawn to make the buffers alike
   first, which would hold a key up by a frame.
 - **Each pass on a reading of the keys made after the last.** A pass that

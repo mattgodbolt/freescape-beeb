@@ -331,11 +331,12 @@ come with it, to see where the cycles go.
   logic and the fill too, and its doubled bit lengths (`proj_bl2`) the
   fill's edge set-up (`RASTER_BL2`). HAZEL holds the filing system's workspace until
   the OS is gone, so nothing goes in before.
-- The fill's bank (6) holds the row runs, its code and its work. Its
+- The fill's bank (6) holds the row runs, its code, its work and what each
+  buffer holds of each line's ends (`RasterEnds`, decision 100). Its
   routines are fewer on the live disc (no horizon: decision 71), and the
-  room it has is from `raster_work_end` to `&C000` (`docs/research/raster.md`,
-  "Round 6"); the 96 bytes after each row's run in the row runs' pages are
-  room besides.
+  room it has is from `raster_ends_end` to `&C000` (`docs/research/raster.md`,
+  "Round 6" and "Round 7"); the 96 bytes after each row's run in the row
+  runs' pages are room besides.
 - Sideways RAM banks 4-7: the code, and the database. The player logic
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,

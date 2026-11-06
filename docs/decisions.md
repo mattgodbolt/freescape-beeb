@@ -732,3 +732,18 @@ projection's patch of `pmul` (a project), the 2D clip's passes (a pass),
 Nothing any stage outputs changes. Each is a commit of its own, and the cost
 of each is in the journal, 2026-11-06, "the twelfth round"; a change can be
 reverted alone if its cycles are worth more than its bytes.
+
+## 100. A line's first and last pieces leave out what the buffer holds (2026-11-06, autonomous; amends 70)
+
+Decision 70's records of whole lines become records of each line's ends:
+for each buffer and line, the first piece's byte and where its whole bytes
+end, the last piece's byte and where they start (`RasterEnds`). A first
+piece in the same byte isn't written as far as the buffer holds it from the
+line's start, nor a last piece from where it holds it to the line's end; a
+line held whole is the case decision 70 took. The picture doesn't change;
+every frame is the model's byte for byte, and the model's `held_writes`
+counts the bytes the 6502 writes. The records take 1K of the fill's bank
+(and the slideshow's main RAM), and replace decision 70's. A view drawn
+into a buffer that holds nothing of it (an entrance) pays the records'
+tests on every line's ends, 6% of the fill there; walking and turning gain
+more (`docs/research/raster.md`, "Round 7", and the journal, 2026-11-06).

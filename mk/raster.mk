@@ -39,6 +39,10 @@ define RASTER_CHECK_6502
 INCLUDE "../../src/defs.6502"
 ZA_POOL &00..&8F
 RASTER_BANK = 4
+\ The line heads and the row runs' scratch bytes out of the bank, as the
+\ live disc has them, in RasterState's page after its state.
+RASTER_HEAD = &1780
+RASTER_SCRATCH = RASTER_HEAD + VIEW_H
 
 \ The stubs the harness calls: each pages in the bank and the screen
 \ check_acccon names, and puts ACCCON back after.
@@ -67,7 +71,9 @@ SECTION RasterCheck, org = &0E00, guard = &0F00, filename = "RCHECK", cmos = TRU
 ENDSECTION
 SECTION RasterIn, org = &0F00, guard = &1700, virtual = TRUE
 ENDSECTION
-SECTION RasterState, org = &1700, guard = &1900, virtual = TRUE
+SECTION RasterState, org = &1700, guard = &1800, virtual = TRUE
+ENDSECTION
+SECTION RasterEnds, org = &1800, guard = &1C00, virtual = TRUE
 ENDSECTION
 \ The bank's sections one after another, as the slideshow has them.
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
@@ -88,7 +94,10 @@ ENDSECTION
 SECTION RasterWork
 .raster_work_end
 ENDSECTION
-ASSERT raster_work_end <= &C000
+SECTION RasterState
+.raster_state_end
+ENDSECTION
+ASSERT raster_work_end <= &C000 AND raster_state_end <= RASTER_HEAD
 endef
 export RASTER_CHECK_6502
 

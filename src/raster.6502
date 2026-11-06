@@ -26,7 +26,7 @@
 \ Entry points:
 \   raster_init     once, before the first frame
 \   raster_forget   when something else has drawn on the screens: neither
-\                   is known to hold any background line (raster_background)
+\                   is known to hold anything (RasterEnds)
 \   raster_frame    the frame in rs_* (below) into the screen ACCCON's X
 \                   selects, with HAZEL paged if the sections are there
 \ Each clobbers A, X and Y, and writes nothing but its own sections, its
@@ -139,11 +139,6 @@ IF NOT(DEFINED(RASTER_SQUARES))
 .rq_hi      SKIP 512
 ENDIF
 .pools      SKIP 4 * 4 * POOL_FIELD
-\ (Frame to frame, as RasterState's records, here for the room: the byte a
-\ line taken whole by one face's piece was written in, for each screen and
-\ line whose bg_was is LN_WHOLE; raster_background.)
-    ALIGN 256
-.ln_v       SKIP 256
 ENDSECTION
 IF DEFINED(RASTER_SQUARES)
     rq_lo = RASTER_SQUARES
@@ -157,16 +152,27 @@ IF DEFINED(RASTER_HEAD)
 ENDIF
 ASSERT LO(bl2) = 0                  ; (edge_setup's index is the byte alone)
 
-\ What lasts from frame to frame: each screen's lines' backgrounds
-\ (raster_background).
+\ What lasts from frame to frame.
 SECTION RasterState
-    ALIGN 256
-.bg_was     SKIP 256
-.bg_sig     SKIP 16
 .f_dir      SKIP 1                  ; the way the last face's left chain walked
 IF RASTER_HORIZON
 .hz_sky     SKIP 1                  ; hsplit holds the all-sky splits
 ENDIF
+ENDSECTION
+
+\ What each screen holds (frame to frame; the includer puts the section
+\ where it has room): for each screen and line (line OR bg_buf), its first
+\ piece's byte and the row run's slot after its whole bytes, and its last
+\ piece's byte and the slot of its first whole byte. A line's first piece
+\ isn't written where the screen holds it already in the same byte, nor its
+\ last (the END_* macros, below). Forgotten, a line's first slot is 0 and its
+\ last RR_END, which hold nothing.
+SECTION RasterEnds
+    ALIGN 256
+.re_fe      SKIP 256
+.re_fv      SKIP 256
+.re_ls      SKIP 256
+.re_lv      SKIP 256
 ENDSECTION
 
 FUNCTION pool_gs(k) = pools + (4 * k + 0) * POOL_FIELD
@@ -318,11 +324,13 @@ IF RASTER_PAINTER
     STA pt_bot
     BRA paint
 .painted
+    \ The lines painted over hold more than their records say: forgotten.
     LDA pt_top : ORA bg_buf : TAX
     LDA pt_bot : ORA bg_buf : STA pt_bot
 .mark
     CPX pt_bot : BCS marked
-    STZ bg_was,X
+    STZ re_fe,X
+    LDA #RR_END : STA re_ls,X
     INX : BRA mark
 .marked
     JMP writer_end
@@ -556,6 +564,111 @@ ENDMACRO
 MACRO GO_V v
     LDY r_y : LDA v : JSR put_go
 ENDMACRO
+\ A line's first and last pieces, by what the screen holds (RasterEnds):
+\ end_first, end_last and end_both write the piece of line r_y in byte A
+\ that's the line's first, its last, or both (the whole line), as GO_V
+\ would, but where the screen's record for the line has the same byte, the
+\ bytes the record says the screen holds are left out of the run: from the
+\ line's start for its first piece, to its end for its last; a run left with
+\ nothing isn't entered. Each records the piece, keeps X and clobbers A and
+\ Y. (tools/rasterscenes.py's held_writes counts what they write.)
+ZA_AUTO1 r_t, r_ev
+\ end_first: [0, hi) with hi < VIEW_W, its plant made (r_pcur, which the
+\ stretch's next lines keep); its entry made here.
+.end_first
+{
+    STA r_ev
+    LDA r_y : ORA bg_buf : TAY
+    LDA r_ev : CMP re_fv,Y : BNE new
+    LDA re_fe,Y : BEQ from0             ; (none: forgotten, or no whole byte)
+    CMP r_pcur : BCS held               ; the screen holds every whole byte
+    STA put_go + 1
+    BRA record
+.new
+    STA re_fv,Y
+.from0
+    STZ put_go + 1                      ; (the slot for pixel 0)
+.record
+    LDA r_pcur : STA re_fe,Y
+    LDY r_y : LDA r_ev
+    JMP put_go
+.held
+    LDA r_pcur : STA re_fe,Y
+    RTS
+}
+\ end_last: [lo, VIEW_W) with lo > 0, its entry made (put_go's, which the
+\ stretch's next lines keep); its plant made here.
+.end_last
+{
+    STA r_ev
+    LDA r_y : ORA bg_buf : TAY
+    LDA r_ev : CMP re_lv,Y : BNE new
+    LDA re_ls,Y : CMP put_go + 1 : BCC held : BNE trim
+    CMP #RR_END : BNE held              ; (at the entry: nothing left, unless none)
+.trim
+    STA r_t
+    LDA put_go + 1 : STA re_ls,Y
+    LDA r_t
+.plant
+    CMP r_pcur : BEQ go
+    JSR replant
+.go
+    LDY r_y : LDA r_ev
+    JMP put_go
+.new
+    STA re_lv,Y
+    LDA put_go + 1 : STA re_ls,Y
+    LDA #RR_END : BRA plant
+.held
+    LDA put_go + 1 : STA re_ls,Y
+    RTS
+}
+\ end_both: [0, VIEW_W); its entry and plant made here. A line the screen
+\ holds whole in this byte (its first piece's run to RR_END) is left as it
+\ is, records and all, as END_WHOLE finds first.
+.end_both
+{
+    STA r_ev
+    LDA r_y : ORA bg_buf : TAY
+    LDA r_ev : CMP re_fv,Y : BNE f_new
+    LDA re_fe,Y : CMP #RR_END : BEQ held
+    STA put_go + 1                      ; (0 if forgotten)
+    BRA f_record
+.f_new
+    STA re_fv,Y
+    STZ put_go + 1
+.f_record
+    LDA #RR_END : STA re_fe,Y
+    LDA r_ev : CMP re_lv,Y : BNE l_new
+    LDA re_ls,Y : CMP put_go + 1 : BEQ l_held : BCC l_held
+    STA r_t
+    LDA #0 : STA re_ls,Y
+    LDA r_t
+.plant
+    CMP r_pcur : BEQ go
+    JSR replant
+.go
+    LDY r_y : LDA r_ev
+    JMP put_go
+.l_new
+    STA re_lv,Y
+    LDA #0 : STA re_ls,Y
+    LDA #RR_END : BRA plant
+.l_held
+    LDA #0 : STA re_ls,Y
+.held
+    RTS
+}
+\ END_WHOLE v: line r_y, in X too, whole in byte v: end_both, but first
+\ inline the commonest case, a line the screen holds whole in v.
+MACRO END_WHOLE v
+    TXA : ORA bg_buf : TAY
+    LDA v : CMP re_fv,Y : BNE call
+    LDA re_fe,Y : CMP #RR_END : BEQ done
+.call
+    LDA v : JSR end_both
+.done
+ENDMACRO
 
 \ A shared byte inline (writer.6502's put_bnd): BND_ZP v or BND_X arr puts
 \ in Y its offset from r_bp0 or r_bp1, for odd pixel boundary v (or arr,X)
@@ -619,6 +732,8 @@ MACRO INSERT k, next, stretch
     JMP cut_left
 .at_start
     \ The piece starts at the gap's start: its shared byte, if s is odd.
+    \ From 0 (its entry the run's first slot, 0) it's the line's first piece,
+    \ and not its last (a line that's had a face has no gap [0, W)).
     LSR A : BCC left_even
     BND_X GS
     LDA GH,X : AND #PIX_LEFT : ORA PVB
@@ -627,27 +742,38 @@ MACRO INSERT k, next, stretch
     LDA r_b : CMP GE,X : BCS whole
     \ [s, b): the gap becomes [b, e), waiting on the byte at b.
     ENTER_X GS
+    BEQ left_first                      ; (Z from rr_en's load)
     PLANT_ZP r_b
     LDA r_b : STA GS,X
     LDA GH,X : AND #PIX_RIGHT : ORA PVA : STA GH,X
     GO_V PV
     JMP next
+.left_first
+    PLANT_ZP r_b
+    LDA r_b : STA GS,X
+    LDA GH,X : AND #PIX_RIGHT : ORA PVA : STA GH,X
+    LDA PV : JSR end_first
+    JMP next
 .whole
-    \ [s, e): the gap goes, with its shared byte at e if e is odd.
+    \ [s, e): the gap goes, with its shared byte at e if e is odd; to the
+    \ line's end, it's the line's last piece.
     LDA GE,X : LSR A : BCC right_even
     BND_X GE
     LDA GH,X : AND #PIX_RIGHT : ORA PVA
     BND_PUT
+    BRA right_odd
 .right_even
+    CMP #VIEW_W DIV 2 : BEQ whole_last
+.right_odd
     ENTER_X GS
+    BEQ whole_first
     PLANT_X GE
     GO_V PV
+.unlink
     LDY r_prev : BNE unlink_mid
     LDY r_y
     LDA GN,X : STA head,Y : BNE unlinked     ; (Z from the LDA)
-    DEC nopen                           ; the line's last gap: it's full,
-    TYA : ORA bg_buf : TAY              ; of more than one piece (its record)
-    LDA #0 : STA bg_was,Y
+    DEC nopen                           ; the line's last gap: it's full
     JMP next
 .unlink_mid
     LDA GN,X : STA GN,Y
@@ -657,14 +783,27 @@ MACRO INSERT k, next, stretch
     LDA GN,X : BEQ out2
     TAX
     JMP found
+.whole_first
+    PLANT_X GE
+    LDA PV : JSR end_first
+    BRA unlink
+.whole_last
+    ENTER_X GS
+    LDA PV : JSR end_last
+    BRA unlink
 .out2
     JMP next
 .cut_left
     \ The span starts inside the gap.
     LDA r_b : CMP GE,X : BCC split
     \ [a, e): the gap becomes [s, a), waiting on the byte at a; and the
-    \ shared byte at e if e is odd.
-    LDA GE,X : LSR A : BCC cut_even
+    \ shared byte at e if e is odd. To the line's end, it's the last piece.
+    LDA GE,X : LSR A : BCS cut_odd
+    CMP #VIEW_W DIV 2 : BNE cut_even
+    ENTER_ZP r_a
+    LDA PV : JSR end_last
+    BRA cut_done
+.cut_odd
     BND_X GE
     LDA GH,X : AND #PIX_RIGHT : ORA PVA
     BND_PUT
@@ -672,18 +811,21 @@ MACRO INSERT k, next, stretch
     ENTER_ZP r_a
     PLANT_X GE
     GO_V PV
+.cut_done
     LDA GE,X : CMP r_b                  ; (C: the span ends in this gap)
     LDA r_a : STA GE,X
     LDA GH,X : AND #PIX_LEFT : ORA PVB : STA GH,X
     BCS out2
     STX r_prev
-    LDA GN,X : BEQ out2
+    LDA GN,X : BEQ out3
     TAX
     JMP found
+.out3
+    JMP next
 .split
     \ [a, b) inside the gap, unless it's empty: the gap splits into [s, a)
     \ and a new [b, e).
-    LDA r_a : CMP r_b : BCS out2
+    LDA r_a : CMP r_b : BCS out3
     LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
     INC gtop + k
     LDA r_b : STA GS,Y
@@ -715,36 +857,25 @@ MACRO INSERT k, next, stretch
     JMP fresh_cut
 .fresh_zero
     LDA r_b : CMP #VIEW_W : BNE fresh_right
-    \ All of it, unless the screen holds the line in this byte already
-    \ (raster_background's records: LN_WHOLE).
+    \ All of it, but what the screen holds already (end_both).
     STZ head,X
     DEC nopen
-    STZ put_go + 1                      ; (the slot for pixel 0)
-    PLANT_END
-    TXA : ORA bg_buf : TAY
-    LDA PV : CMP ln_v,Y : BNE whole_new
-    LDA bg_was,Y : CMP #LN_WHOLE : BEQ whole_held
-.whole_new
-    LDA PV : STA ln_v,Y
-    LDA #LN_WHOLE : STA bg_was,Y
-    GO_V PV
-.whole_held
+    END_WHOLE PV
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_whole       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_whole
     LDY #ST_WHOLE : JMP fresh_on
 .fresh_right
     \ [0, b): the gap [b, W) waits on the byte at b.
-    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow
+    LDY gtop + k : CPY #POOL_HELD + 1 : BCS overflow2
     INC gtop + k
     LDA r_b : STA GS,Y
     LDA #VIEW_W : STA GE,Y
     LDA PVA : STA GH,Y
     LDA #0 : STA GN,Y
     TYA : STA head,X
-    STZ put_go + 1
     PLANT_ZP r_b
-    GO_V PV
+    LDA PV : JSR end_first
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_right       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_right
@@ -759,8 +890,7 @@ MACRO INSERT k, next, stretch
     LDA PVB : STA GH,Y
     TYA : STA head,X
     ENTER_ZP r_a
-    PLANT_END
-    GO_V PV
+    LDA PV : JSR end_last
     LDA sa0 + 1 : AND sb0 + 1 : BNE on_left       ; (both chains vertical: STEP_G is 0)
     JMP next
 .on_left
@@ -832,17 +962,12 @@ MACRO STRETCH k, entry
     JMP entry
 .fresh
     BIT st_kind : BMI left_gap : BVS right
-    \ the whole line, unless the screen holds it (as INSERT's)
+    \ the whole line, but what the screen holds (as INSERT's)
     STZ head,X
     DEC nopen
-    TXA : ORA bg_buf : TAY
-    LDA PV : CMP ln_v,Y : BNE whole_new
-    LDA bg_was,Y : CMP #LN_WHOLE : BNE whole_new
+    STX r_y
+    END_WHOLE PV
     JMP next
-.whole_new
-    LDA PV : STA ln_v,Y
-    LDA #LN_WHOLE : STA bg_was,Y
-    JMP go
 .right
     \ [0, b): the gap [b, W)
     LDY gtop + k : CPY #POOL_HELD + 1 : BCS over
@@ -852,7 +977,9 @@ MACRO STRETCH k, entry
     LDA PVA : STA GH,Y
     LDA #0 : STA GN,Y
     TYA : STA head,X
-    BRA go
+    STX r_y
+    LDA PV : JSR end_first
+    JMP next
 .left_gap
     BVS mid
     \ [a, W): the gap [0, a)
@@ -862,7 +989,9 @@ MACRO STRETCH k, entry
     LDA r_a : STA GE,Y
     LDA PVB : STA GH,Y
     TYA : STA head,X
-    BRA go
+    STX r_y
+    LDA PV : JSR end_last
+    JMP next
 .over
     \ (as INSERT's overflow: the line isn't drawn)
     LDA #&FF : STA rs_overflow
@@ -1313,16 +1442,11 @@ NEXT
 \ On each line the pixels left of its split (hsplit) take bg_l and the rest
 \ bg_r.
 \
-\ A line no face touched is background from end to end, and if the screen
-\ being drawn held the same background on it last time, it still does, so
-\ it isn't written. bg_was keeps, for each screen (ACCCON's X) and line,
-\ split + 1 when the line was background alone, LN_WHOLE when one face's
-\ piece took it whole (in the byte ln_v keeps), and 0 otherwise; and bg_sig
-\ the two patterns' bytes the splits were drawn in, different patterns
-\ forgetting the screen's lines. A line taken whole is likewise not written
-\ when the screen holds it in the same byte (INSERT's fresh path and the
-\ stretch's); one filled by more than one piece is 0 as it fills (INSERT's
-\ unlink), so the records of a full line are the faces' and not this.
+\ A line no face touched is background from end to end, and a gap from
+\ the line's start or to its end is the line's first or last piece: as the
+\ faces' pieces, they leave out what the screen being drawn (ACCCON's X)
+\ holds already in the same byte, by its records (RasterEnds, end_*), so a
+\ line the screen holds whole isn't written at all.
 
 ZA_AUTO1 bg_l, bg_r, bg_buf
 IF RASTER_HORIZON
@@ -1335,9 +1459,8 @@ ZA_AUTO 4, bgv_r
 ZA_AUTO 4, bgv_ra
 ZA_AUTO 4, bgv_rb
 
-BG_SCREEN = 128                     ; bg_was's offset for the second screen
-LN_WHOLE  = &FF                     ; bg_was: the line one piece in ln_v's byte
-ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
+BG_SCREEN = 128                     ; the records' offset for the second screen
+ASSERT VIEW_H <= BG_SCREEN
 
 .raster_background
     STZ r_y
@@ -1345,9 +1468,7 @@ ASSERT VIEW_H <= BG_SCREEN AND VIEW_W + 1 < LN_WHOLE
 
 \ background_set (before the faces, which read and write the records):
 \ the screen drawn (ACCCON's X), where its lines' records are (bg_buf);
-\ the background's split on each line and its patterns' bytes; and if
-\ those aren't the patterns the screen's records were drawn in, its lines
-\ forgotten.
+\ the background's split on each line and its patterns' bytes.
 .background_set
 {
     LDA acccon : AND #ACCCON_X : BEQ main
@@ -1371,23 +1492,6 @@ ENDIF
         AND #PIX_LEFT : STA bgv_ra + k
         LDA bgv_r + k : AND #PIX_RIGHT : STA bgv_rb + k
     NEXT
-    \ The patterns the screen's lines' records were drawn in.
-    LDX #0
-    LDA bg_buf : BEQ first
-    LDX #8
-.first
-    LDY #0
-    FOR k = 0..3
-        LDA bgv_l + k : CMP bg_sig + k,X : BEQ same_l
-        STA bg_sig + k,X : INY
-    .same_l
-        LDA bgv_r + k : CMP bg_sig + 4 + k,X : BEQ same_r
-        STA bg_sig + 4 + k,X : INY
-    .same_r
-    NEXT
-    TYA : BEQ known
-    LDX bg_buf : JMP forget_screen
-.known
     RTS
 }
 
@@ -1397,14 +1501,15 @@ ENDIF
     ZA_ENTRY
     LDX #0 : JSR forget_screen
     LDX #BG_SCREEN
-\ forget_screen: no line of the screen whose records start at X is known.
+\ forget_screen: the screen whose records start at X holds nothing known.
 .forget_screen
 {
     LDY #VIEW_H DIV 8
-    LDA #0
+    LDA #RR_END
 .line
     FOR i = 0..7
-        STA bg_was + i * (VIEW_H DIV 8),X
+        STZ re_fe + i * (VIEW_H DIV 8),X
+        STA re_ls + i * (VIEW_H DIV 8),X
     NEXT
     INX : DEY : BNE line
     RTS
@@ -1421,21 +1526,37 @@ MACRO FILL k
     GE = pool_ge(k)
     GH = pool_gh(k)
 IF RASTER_HORIZON
-    LDA bg_split : CMP GE,X : BCC split
+    LDA bg_split : CMP GE,X : BCS left
+    JMP split
+.left
 ENDIF
+    \ (A line with a face has no gap [0, W): a gap from 0 is the line's
+    \ first piece, and one to W its last.)
     LDA GS,X : LSR A : BCC l_even
     BND_X GS
     LDA GH,X : AND #PIX_LEFT : ORA bgv_lb + k
     BND_PUT
 .l_even
-    LDA GE,X : LSR A : BCC l_end
+    LDA GE,X : LSR A : BCC r_even
     BND_X GE
     LDA GH,X : AND #PIX_RIGHT : ORA bgv_la + k
     BND_PUT
+    BRA l_end
+.r_even
+    CMP #VIEW_W DIV 2 : BEQ last
 .l_end
     ENTER_X GS
+    BEQ first                           ; (from 0: the run's first slot)
     PLANT_X GE
     GO_V bgv_l + k
+    BRA done
+.first
+    PLANT_X GE
+    LDA bgv_l + k : JSR end_first
+    BRA done
+.last
+    ENTER_X GS
+    LDA bgv_l + k : JSR end_last
 IF RASTER_HORIZON
     BRA done
 .split
@@ -1444,8 +1565,8 @@ IF RASTER_HORIZON
     LDA GH,X : STA g_h
     LDA #k : STA bg_k
     JSR fill_split
-.done
 ENDIF
+.done
 }
 ENDMACRO
 
@@ -1467,7 +1588,7 @@ IF RASTER_HORIZON
 .l_even
     LDA bg_split : STA r_hi
     LDA bgv_l,X : ZA_INDEXEDBY 0..3
-    JSR put_run
+    JSR put_end
     LDA bg_split : STA r_lo
     LSR A : BCC r_piece
     LDA bgv_la,X : ZA_INDEXEDBY 0..3
@@ -1482,13 +1603,33 @@ IF RASTER_HORIZON
 .r_piece
     LDA g_e : STA r_hi
     LDA bgv_r,X : ZA_INDEXEDBY 0..3
-    JSR put_run
+    JSR put_end
     LDA g_e : LSR A : BCC done
     LDA g_h : AND #PIX_RIGHT : ORA bgv_ra,X : ZA_INDEXEDBY 0..3
     LDY g_e : JSR put_bnd
 .done
     LDX bg_x
     RTS
+}
+
+\ put_end: as put_run, the piece [r_lo, r_hi) of line r_y in byte A, but
+\ the line's first or last piece by what the screen holds (END_*). Keeps X.
+.put_end
+{
+    STA r_v
+    LDA r_lo : BNE not_first
+    LDA r_hi : CMP #VIEW_W : BEQ both
+    PLANT_ZP r_hi
+    LDA r_v : JMP end_first
+.both
+    LDA r_v : JMP end_both
+.not_first
+    LDA r_hi : CMP #VIEW_W : BNE middle
+    ENTER_ZP r_lo
+    LDA r_v : JMP end_last
+.middle
+    LDA r_v
+    JMP put_run
 }
 ENDIF
 
@@ -1509,27 +1650,25 @@ MACRO BGLINE k, next
     \ Faces filled it (and its record says how: LN_WHOLE or 0).
     JMP stepped
 .some
-    TXA : ORA bg_buf : TAY              ; the line's record for this screen
 IF RASTER_HORIZON
     LDA hsplit,X : STA bg_split
 ENDIF
     LDA head,X : BPL gaps
-    \ No face here: background alone, which the screen may hold already.
+    \ No face here: background alone, but what the screen holds already
+    \ (end_both); or with the split inside the line, [0, W) with no
+    \ neighbours, node 0 (raster_frame), which has no next.
 IF RASTER_HORIZON
-    LDA bg_split : INC A
-ELSE
-    LDA #VIEW_W + 1                     ; (all sky: the split at the right edge)
+    LDA bg_split : CMP #VIEW_W : BNE node0
 ENDIF
-    CMP bg_was,Y : BNE draw
+    END_WHOLE bgv_l + k
     JMP stepped
-.draw
-    STA bg_was,Y
-    \ [0, W) with no neighbours: node 0 (raster_frame), which has no next.
+IF RASTER_HORIZON
+.node0
     LDX #0
     BRA gap
+ENDIF
 .gaps
     TAX
-    LDA #0 : STA bg_was,Y
 .gap
     FILL k
     LDA pool_gn(k),X : TAX : BEQ stepped

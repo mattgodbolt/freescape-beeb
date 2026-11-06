@@ -55,8 +55,8 @@ FOR i = 0..<LEN(SLIDE_BANKS)
 NEXT
 
 \ The rasteriser's sections, one after another in bank BANK_RASTER; its
-\ inputs (RasterIn) and its state (RasterState, for the bank's room) in
-\ main RAM, after SLIDES.
+\ inputs (RasterIn), its state (RasterState) and what the screens hold
+\ (RasterEnds), for the bank's room, in main RAM after SLIDES.
 raster_runs_org = &8000
 SECTION RasterRuns, org = raster_runs_org, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
@@ -70,6 +70,8 @@ ENDSECTION
 SECTION RasterIn, org = text_ram_end, guard = &3000, virtual = TRUE
 ENDSECTION
 SECTION RasterState, org = raster_in_end, guard = &3000, virtual = TRUE
+ENDSECTION
+SECTION RasterEnds, org = raster_state_end, guard = &3000, virtual = TRUE
 ENDSECTION
 
 \ SLIDES: the slideshow, all below &3000, which ACCCON's X moves to shadow
@@ -473,6 +475,14 @@ ENDSECTION
 .slides_end
 ENDSECTION
 
+\ The fill's line heads and its row runs' scratch bytes in main RAM, for
+\ the bank's room (src/raster.6502, src/writer.6502).
+SECTION RasterState
+.slide_head     SKIP VIEW_H
+.slide_scratch  SKIP 8
+ENDSECTION
+RASTER_HEAD = slide_head
+RASTER_SCRATCH = slide_scratch
 INCLUDE "raster.6502"
 INCLUDE "writer.6502"
 
@@ -492,7 +502,10 @@ ENDSECTION
 SECTION RasterState
 .raster_state_end
 ENDSECTION
-ASSERT raster_work_end <= &C000 AND raster_state_end <= &3000
+SECTION RasterEnds
+.raster_ends_end
+ENDSECTION
+ASSERT raster_work_end <= &C000 AND raster_state_end <= raster_ends_end AND raster_ends_end <= &3000
 SECTION TextRAM
 .text_ram_end
 ENDSECTION

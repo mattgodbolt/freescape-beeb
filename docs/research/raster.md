@@ -177,25 +177,23 @@ that overflowed before (330 and 1,040).
   gap wholly left of the split (every gap when there's no horizon, as in
   Driller's views) is one piece inline; one the split crosses or that lies
   right of it goes through `fill_split`. Copies 0 to 2 fall into the next.
-- **What the screen already holds.** A line no face touched is background
-  from end to end; if the screen being drawn (ACCCON's X) held the same
-  background on it last time, it isn't written. `bg_was` keeps split + 1 for
-  each screen and line, `bg_sig` the patterns those were drawn in; other
-  patterns, or `raster_forget`, forget them. Every skip comes from these
-  records; the screen is never read (the sources that read it measured a
-  loss, `rtw-sources.md` 6).
-- **A line one face takes whole** (INSERT's fresh path for a span of
-  `[0, VIEW_W)`, and the stretch's whole lines) is likewise not written when
-  the screen holds it in the same byte: `bg_was` is `LN_WHOLE` for it and
-  `ln_v` keeps the byte (the pattern's for the line's phase, not its index,
-  so a pattern table changed without `raster_forget`, as the slideshow's,
-  can't fool it). The run's entry and plant are still set, as the stretch's
-  next lines may need them. A line more than one piece fills has its record
-  made 0 where it fills (INSERT's unlink of its last gap), so the
-  background's pass leaves a full line's record alone. The records are
-  checked against the patterns before the faces (`background_set`), so a
-  change of background forgets the lines before the faces mark them. This
-  is round 5, below.
+- **What the screen already holds** (rounds 5 and 7, below). For each
+  screen (ACCCON's X) and line, `RasterEnds` keeps the line's first piece's
+  byte and the row run's slot after its whole bytes, and its last piece's
+  byte and the slot of its first whole byte. A line's first piece (from
+  pixel 0: a face's, the stretch's or a background gap's) whose byte is the
+  record's enters its run at the record's slot rather than at 0, and its
+  last piece (to `VIEW_W`) plants its RTS at the record's slot rather than at
+  the end; a piece of the whole line does both (`end_first`, `end_last`,
+  `end_both`), and a line the screen holds whole in its byte isn't written
+  at all, which `END_WHOLE` finds inline. A run left with nothing isn't
+  entered. The byte is the pattern's for the line's phase, not its index, so
+  a pattern table changed without `raster_forget`, as the slideshow's, can't
+  fool it. Every skip comes from these records; the screen is never read (the
+  sources that read it measured a loss, `rtw-sources.md` 6). `raster_forget`
+  makes every first slot 0 and every last `RR_END`, which hold nothing. A
+  first piece needs its plant made before it (the stretch's next lines keep
+  it) and a last its entry.
 
 ## The interface for the frame
 
@@ -214,13 +212,15 @@ that overflowed before (330 and 1,040).
   and clobbers A, X, Y. It reads nothing else but ACCCON, and writes nothing
   else but the view (the check watches every write).
 - Sections: `RasterCode`, `RasterRuns` (page-aligned), `RasterWork` (per
-  frame, the tables `raster_init` builds, and `ln_v`, which lasts from frame
-  to frame but is there for the bank's room) and `RasterState` (frame to
-  frame), the inputs in main RAM (decision 20). The live disc puts the first
-  three in its bank and `RasterState` in main RAM below `&3000`; the
-  slideshow (`src/slides.6502`) the same, as its bank, which holds its own
-  quarter squares, hasn't room for `RasterState` beside `ln_v`. Both assert
-  they fit.
+  frame, and the tables `raster_init` builds), `RasterState` (frame to
+  frame) and `RasterEnds` (what each screen holds, frame to frame, four
+  pages), the inputs in main RAM (decision 20). The live disc puts the first
+  three and `RasterEnds` in its bank and `RasterState` in main RAM below
+  `&3000`; the slideshow (`src/slides.6502`) puts `RasterState` and
+  `RasterEnds` in main RAM, with its line heads and scratch bytes
+  (`RASTER_HEAD`, `RASTER_SCRATCH`), as its bank holds its own quarter
+  squares; the check build puts them in main RAM too. Each asserts they
+  fit.
 
 ## Checks
 
@@ -504,6 +504,70 @@ size could fill (`swap_chains`, `product` and `fill_split` are 92, 92 and
 95), or per-row records, written by `(r_rr),Y` from `Y` = 160 + the line's
 low three bits, which is a cycle more than an array indexed by line.
 
+### Round 7: the first and last pieces the screen holds (2026-11-06)
+
+Round 5's what's left, built with round 6's room: for each screen and line,
+`RasterEnds` (four pages in the fill's bank on the live disc) keeps the
+line's first piece's byte and the row run's slot after its whole bytes, and
+its last piece's byte and the slot of its first whole byte. A first piece
+whose byte is the record's enters its run at the lesser of the record's slot
+and its own plant, a last piece plants at the greater of the record's slot
+and its own entry, and a piece of the whole line does both; a run left with
+nothing isn't entered. These replace `bg_was`, `bg_sig` and `ln_v`: a line
+the screen holds whole (the sky, the floor) is the case where the first
+piece's record reaches `RR_END`, which `END_WHOLE` tests inline as the old
+records did. One set of records is enough, as each line has one first piece
+and one last a frame and each is compared and recorded as it's written; a
+piece inside the line isn't trimmed, though the old first or last run may
+cover it.
+
+Estimated on the model first (the live check's frames in order, against
+the frame two before on the same screen; a frame's mean): walking, 1,665
+whole bytes written by the old records and 559 by these (28 lines a frame
+of more than one piece, which pay the test); turning, 1,197 and 556 (18
+lines). Most of a trimmed piece's run is long (a median near 20 bytes), so
+no threshold was needed for a last piece's extra plant.
+
+The paths: INSERT's piece from a gap at 0 (found by the entry slot being 0,
+a `BEQ` after `ENTER_X`, so no test of its own) and to `VIEW_W` (the `CMP`
+of the end's half), its fresh paths, the stretch's three end kinds, the
+background's gaps and its lines no face touched, and the horizon's split
+pieces (`put_end`, in the builds with the horizon). The routines
+`end_first`, `end_last` and `end_both` are shared by the four copies; with
+them inline the bank would have needed about 3K more (the first attempt
+overran it). A line that's had a face has no gap `[0, VIEW_W)`, so a
+touched line's piece is never both. The slideshow keeps `RasterEnds`, its
+`RasterState`, line heads and scratch bytes in main RAM; the check build
+likewise.
+
+Checks: the model's `held_writes` counts what the records leave
+(`ends_held`), and every held frame of `make raster`'s sequences must write
+that many bytes. A new sequence, `moving` (a box over a floor and the sky,
+moving, at the view's sides, leaning, gone), makes lines whose ends the
+screens hold in part, by each path. Mutations (each caught): the forgotten
+first slot not tested; the stretch's last piece without its line in `r_y`;
+`end_both` recording its trimmed entry as the last piece's start (caught
+only once `moving` had a line of three pieces, then whole, then a last
+piece from further left); `raster_forget` leaving the first slots; the
+painter's hull not forgotten.
+
+Measured (cycles, `tools/rastercheck.mjs`, the check build):
+
+| | before | after |
+|---|---|---|
+| Driller's 65 entrance views, each fresh: all / median / p90 / max | 7,813,661 / 109,803 / 184,381 / 322,345 | 8,282,061 / 116,242 / 193,250 / 330,677 |
+| the live frames in order (eight of the logic disc's scenarios, 1,229 frames after each sequence's first two): median / mean / p90 / max | 39,396 / 45,374 / 99,182 / 157,001 | 32,025 / 40,574 / 91,547 / 148,225 |
+
+A view drawn fresh pays about 40 cycles at each line's first and last
+pieces, which no record helps: 6% on the entrance views. On the logic's
+disc (fields a frame, median / p90 / max, flip to flip and the fill):
+walking 1.83 / 4.53 / 13.6 to 1.61 / 4.37 / 13.98, the fill 0.74 / 2.4 /
+8.15 to 0.71 / 2.21 / 8.41; turning 2.32 / 5.53 / 12.49 to 2.13 / 5.53 /
+12.95, the fill 0.8 / 2.67 / 7.31 to 0.68 / 2.58 / 7.3; entrances 8.46 /
+12.62 / 19.17 to 8.6 / 13 / 19.5, the fill 2.74 / 4.7 / 8.2 to 2.95 / 4.92 /
+8.48. The fill's bank's free bytes went from 3,072 to 1,536, and main RAM
+below `&3000` gained what `bg_was` and `bg_sig` took. Decision 100.
+
 ### Measured and not built
 
 - **Faces' lines already full** when the face comes, which its line loop
@@ -664,6 +728,8 @@ the same at p90. The painter's stays buildable and checked.
   them** (decision 70, 2026-11-06, amending 20): round 5's records. The
   picture is the same; the model's `held_writes` counts the bytes it
   leaves.
+- **Nor a line's first and last pieces, where the buffer holds them**
+  (decision 100, 2026-11-06, amending 70): round 7's records.
 
 Nothing else in the rounds changes the picture or the model's method:
 the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
@@ -707,9 +773,9 @@ the 6502 matches `tools/model/raster.py`'s rule as it was, byte for byte.
   (the figures above): about 40K off the busiest view; it needs the span
   buffer's pools and the painter's code in the bank together.
 - **More of what the screen holds.** Lines of one run, the background's or
-  one face's, are skipped now (round 5); what's left of the bytes the
-  screen holds is mostly in the first and last runs of lines of more than
-  one, which want room (round 5, above). A view the same as the one its
+  one face's, are skipped now (round 5), and the first and last pieces'
+  bytes the screen holds (round 7); what's left is inside lines (a piece
+  between others the old first or last run covered). A view the same as the one its
   screen holds (the crosshair moved, the camera still: the live check's
   standing frames, 3.26 fields of fill a frame and 1.91 of the stages
   before) could skip both halves, but only the live loop knows that its

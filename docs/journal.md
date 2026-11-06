@@ -1155,3 +1155,29 @@ terms; the fills' unrolled cells. ANDY could not give the bank anything:
 its 70 bytes free are what it has, and the setup routines that would fit
 there (`transform_setup`, `bound_frame`) reach code in the bank's first 4K,
 which ANDY hides, or patch it (`fill_patch`).
+
+## 2026-11-06: the thirteenth round, the room spent
+
+The coordinator asked for the room the last two rounds freed to be spent on
+speed, the optimisations that waited for memory first, then whatever else
+the profiles found, each kept only if faster and passing `make check`, each
+a commit of its own. The whole frame on the logic's disc before the round
+(flip to flip, fields a frame, median / p90 / max): walking 1.83 / 4.53 /
+13.6, turning 2.32 / 5.53 / 12.49, entrances 8.46 / 12.62 / 19.17.
+
+**The first and last pieces the screen holds** (decision 100;
+`docs/research/raster.md`, "Round 7"). Each screen's records of each line's
+ends, 1K in the fill's bank, replace the whole-line records: a line's first
+piece starts writing where the screen stops holding it, its last stops where
+the screen holds it again. On the model's estimate, walking frames wrote
+1,665 bytes a frame by the old records and 559 by these. Measured: the live
+frames in order, `raster_frame` a median 39,396 cycles to 32,025 (p90
+99,182 to 91,547); a view drawn fresh 6% slower (Driller's views, a median
+109,803 to 116,242), as it pays the records' tests on every line. On the
+disc, flip to flip: walking 1.83 / 4.53 / 13.6 to 1.61 / 4.37 / 13.98,
+turning 2.32 / 5.53 / 12.49 to 2.13 / 5.53 / 12.95, entrances 8.46 / 12.62
+/ 19.17 to 8.6 / 13 / 19.5. The routines are shared by the four copies of
+the line loop and the background's: inline, the first attempt overran the
+bank by about 3K. The slideshow's bank had no room for the code; its line
+heads, scratch bytes and the records went to main RAM, which leaves its bank
+exactly full. The fill's bank: 3,072 bytes free to 1,536.
