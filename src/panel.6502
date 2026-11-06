@@ -93,6 +93,8 @@ PC_VEHICLE = 18 : PC_AREA = 19 : PC_BYTES = 20
     CMP panel_want,X : BEQ same
     STA panel_want,X
     INC panel_gen
+    CPX panel_left : BCS same
+    STX panel_left                      ; (every cell before it is still shown as wanted)
 .same
     RTS
 }
@@ -168,15 +170,17 @@ SECTION PanelData
 ASSERT LO(SCREEN) = 0
 
 \ panel_sync: each cell not shown as wanted drawn into both buffers, from
-\ the first, while the beam leaves time; panel_left says where it stopped.
-\ Keeps ACCCON's X.
+\ the first that may not be (panel_left: where the last stopped, or before
+\ it the first panel_set has changed since), while the beam leaves time;
+\ panel_left says where it stopped. Keeps ACCCON's X.
 .panel_sync
 {
     LDA panel_gen : CMP panel_seen : BNE changed
     RTS
 .changed
     PHA
-    LDX #0
+    LDX panel_left
+    CPX #PANEL_CELLS : BEQ same_last    ; (nothing left: panel_left at its end)
 .cell
     LDA panel_want,X : CMP panel_shown,X : BEQ same
     LDA panel_free : BNE draw
@@ -191,6 +195,7 @@ ASSERT LO(SCREEN) = 0
     LDA panel_want,X : STA panel_shown,X
 .same
     INX : CPX #PANEL_CELLS : BNE cell
+.same_last
     PLA : STA panel_seen
     STX panel_left
     RTS

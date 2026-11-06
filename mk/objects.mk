@@ -109,15 +109,22 @@ ENDMACRO
 MACRO HAZEL_OUT
     PLA : STA acccon
 ENDMACRO
+\ (the conversion's products read the maths' quarter squares in HAZEL)
 .check_init
     ZA_ENTRY
     OBJ_IN
-    JMP area_init
+    HAZEL_IN
+    JSR area_init
+    HAZEL_OUT
+    RTS
 .check_enter
     ZA_ENTRY
     OBJ_IN
+    HAZEL_IN
     LDA check_area
-    JMP area_enter
+    JSR area_enter
+    HAZEL_OUT
+    RTS
 \ (the build alone: matrix_update's patches for it aren't made, so the next
 \ frame builds its matrix afresh, whatever its angles)
 .check_matrix
@@ -186,9 +193,9 @@ SECTION ObjTables, org = &DC00, guard = &E000, filename = "OTABLES"
 ENDSECTION
 SECTION ObjOut, org = &0400, guard = &0A00, virtual = TRUE
 ENDSECTION
-SECTION ObjMemo, org = &7000, guard = &7680, virtual = TRUE
+SECTION ObjMemo, org = &7000, guard = &7800, virtual = TRUE
 ENDSECTION
-SECTION ObjBound, org = &7680, guard = &8000, virtual = TRUE
+SECTION ObjBound, org = &7800, guard = &8000, virtual = TRUE
 ENDSECTION
 SECTION AreaConv, org = &8000, guard = &C000, filename = "ACONV", cmos = TRUE
 ENDSECTION

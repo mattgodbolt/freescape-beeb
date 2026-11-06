@@ -134,6 +134,11 @@ const tracePath = opt("trace", "build/live/trace.json");
 const walkAt = opt("walks", "0,18,26,40,57").split(",").filter(Boolean).map(Number);
 const jsonOut = opt("json");
 const verbose = args.includes("--verbose");
+// --profile-rest: the cycles of each frame's "the rest" (its loop but its two
+// halves) by routine, the last label at or below each instruction that isn't
+// inside a scope (--fine: every label), summed by what the frame did; --top N
+const profileRest = args.includes("--profile-rest");
+const fineRest = args.includes("--fine");
 const CLOCK_SLACK = 8; // cycles: T2 counts microseconds, from its own phase
 const NAME = FREE ? "live-free" : "live";
 
@@ -276,10 +281,58 @@ let script = "start"; // what the script is doing (frames before it begins aren'
 let clockChecked = 0;
 let afterClock = null; // the span whose clock_to is running
 
+// --profile-rest's routines: each sideways section's labels keyed by its bank
+// (ANDY's as bank 16), so the banks' shared addresses are told apart
+const restRoutines = [];
+const restKey = (bank, addr) => (addr >= 0x8000 && addr < 0xc000 ? (bank < 0 ? 16 : bank) + 1 : 0) * 0x10000 + addr;
+if (profileRest) {
+    const bankOf = {
+        Logic: sym("BANK_DB"), LiveGlue: sym("BANK_GLUE"), LogicCode: sym("BANK_DATA"), LiveData: sym("BANK_DATA"),
+        PanelData: sym("BANK_DATA"), AreaConv: sym("BANK_DATA"), ObjCode: sym("BANK_OBJ"), ObjAndy: -1,
+        RasterRuns: sym("BANK_RASTER"), RasterCode: sym("BANK_RASTER"), RasterWork: sym("BANK_RASTER"),
+    };
+    const all = JSON.parse(fs.readFileSync(disc.replace(/\.ssd$/, ".json"), "utf8"));
+    for (const a of all.assemblies)
+        for (const s of a.sections)
+            for (const [k, v] of Object.entries(s.labels ?? {}))
+                if (!k.includes("@") && (fineRest || !k.includes(".")))
+                    restRoutines.push([restKey(bankOf[s.name] ?? 0, v.value), k]);
+    restRoutines.sort((a, b) => a[0] - b[0]);
+}
+const restRoutineOf = (key) => {
+    let lo = 0, hi = restRoutines.length - 1;
+    if (hi < 0 || key < restRoutines[0][0]) return "?";
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (restRoutines[mid][0] <= key) lo = mid;
+        else hi = mid - 1;
+    }
+    return restRoutines[lo][1];
+};
+let restAcc = new Map(), restInHalf = false, restLastKey = -1, restLastT = 0;
+
 cpu.debugInstruction.add((addr, opcode) => {
     // the bank paged at a hooked address, unless ANDY (ROMSEL's bit 7, over
     // a bank's first 4K) is there instead: none then
     const bank = cpu.isBankPagedAt(cpu.romsel & 15, addr) ? cpu.romsel & 15 : -1;
+    if (profileRest) {
+        const t = now();
+        if (restLastKey >= 0 && !restInHalf) {
+            const r = restRoutineOf(restLastKey);
+            restAcc.set(r, (restAcc.get(r) || 0) + (t - restLastT));
+        }
+        restLastKey = restKey(bank, addr);
+        restLastT = t;
+        if (addr === OBJECTS && bank === BANK_OBJ) restInHalf = true;
+        else if (addr === FRONT_DONE || addr === FILL_DONE) restInHalf = false;
+        else if (addr === RASTER && bank === BANK_RASTER) restInHalf = true;
+        // (a loop that drew nothing: the next frame's loop starts at its own)
+        else if (addr === LIVE_LOOP && current && current.tFront === undefined) restAcc = new Map();
+        else if (addr === FB_END && current && current.fill !== undefined) {
+            current.restProf = restAcc;
+            restAcc = new Map();
+        }
+    }
     if (opcode === JSR && word(addr + 1) === FB_BEGIN) calling = true;
     if (addr === LIVE_LOOP) {
         // (a loop that drew nothing leaves its frame unbegun)
@@ -1399,6 +1452,17 @@ console.log(`  ${"frames".padEnd(10)} ${"n".padStart(4)}  ${"flip to flip".padEn
     `${"1-7 objects".padEnd(20)} ${"8-10 fill".padEnd(20)} ${"the rest".padEnd(20)}`);
 row("all", counted);
 for (const k of ["entrance", "standing", "walking", "turning", ...(FREE ? ["demo"] : [])]) row(k, counted.filter((f) => f.kind === k));
+if (profileRest)
+    for (const k of ["entrance", "standing", "walking", "turning"]) {
+        const fs_ = counted.filter((f) => f.kind === k && f.restProf);
+        if (!fs_.length) continue;
+        const sum = new Map();
+        for (const f of fs_) for (const [r, c] of f.restProf) sum.set(r, (sum.get(r) || 0) + c);
+        const total = [...sum.values()].reduce((a, b) => a + b, 0);
+        console.log(`${NAME}: the rest by routine, ${k} (${fs_.length} frames, ${Math.round(total / fs_.length)} cycles a frame):`);
+        for (const [r, c] of [...sum.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("top", 25))))
+            console.log(`  ${r.padEnd(28)} ${String(Math.round(c / fs_.length)).padStart(8)} ${(100 * c / total).toFixed(1).padStart(5)}%`);
+    }
 console.log(`${NAME}: ${emulated.toFixed(1)}s emulated in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (verbose)
     for (const f of counted)

@@ -1399,24 +1399,41 @@ ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
     STA lv_yaw,X
     DEX : BPL angle
     RTS
-    \ times_f: m = (m f) >> 8, m 16-bit; k the bits below (bit 7 the half)
+    \ times_f: m = (m f) >> 8, m 16-bit; k the bits below (bit 7 the half).
+    \ By the maths' quarter squares in HAZEL, each byte of m by f: f g =
+    \ sq(f + g) - ng(255 + g - f), through pointers f into the tables. Most
+    \ of a frame's are 0: a step's angles, a turn's position.
 .times_f
 {
-    ZA_AUTO1 p0, p1, p2, g
-    STZ p0 : STZ p1 : STZ p2
-    LDA f : STA g
-    LDY #8
-.bit
-    LSR g : BCC skip
-    LDA p1 : CLC : ADC m : STA p1
-    LDA p2 : ADC m+1 : STA p2
-.skip
-    ROR p2 : ROR p1 : ROR p0
-    DEY : BNE bit
-    LDA p1 : STA m : LDA p2 : STA m+1
-    LDA p0 : STA k
+    ZA_AUTO2 sl, sh, nl, nh
+    ZA_AUTO1 lh, hl
+    LDA m : ORA m+1 : BEQ zero
+    LDA f : STA sl : STA sh
+    EOR #&FF : STA nl : STA nh
+    LDA #HI(sq_lo) : STA sl+1
+    LDA #HI(sq_hi) : STA sh+1
+    LDA #HI(ng_lo) : STA nl+1
+    LDA #HI(ng_hi) : STA nh+1
+    \ m's low byte by f: the bits below, and what goes into m's
+    LDY m
+    SEC
+    LDA (sl),Y : SBC (nl),Y : STA k
+    LDA (sh),Y : SBC (nh),Y : STA lh
+    \ its high byte by f, and the low's top byte added in
+    LDY m+1
+    SEC
+    LDA (sl),Y : SBC (nl),Y : STA hl
+    LDA (sh),Y : SBC (nh),Y : STA m+1
+    LDA hl : CLC : ADC lh : STA m
+    BCC done
+    INC m+1
+.done
+    RTS
+.zero
+    STZ k
     RTS
 }
+ASSERT LO(sq_lo) = 0 AND LO(sq_hi) = 0 AND LO(ng_lo) = 0 AND LO(ng_hi) = 0
 .pace_f
     EQUB (0..PASS_FIELDS - 1) * 256 DIV PASS_FIELDS
 }
