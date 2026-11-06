@@ -507,11 +507,13 @@ def driller_views(db_path, out):
 
 def held_writes(frames):
     """The view's bytes each frame of a sequence writes, as the 6502's
-    records of the background have it (raster_background): the frames go
+    records of the lines have it (raster_background): the frames go
     alternately into each screen; a line no face touched is background
     alone, and isn't written when the screen being drawn held the same
     background there last time, in the same two patterns; other patterns
-    forget the screen's lines, and the first frame forgets both screens.
+    forget the screen's lines, and the first frame forgets both screens. A
+    line one face's piece takes whole isn't written when the screen holds
+    it in the same byte, from such a piece last time.
     In the painter's build the backmost face alone touches lines, and after
     the background the lines its painted faces' line ranges span (their
     hull) are no longer background alone. Sets each built frame's
@@ -530,15 +532,28 @@ def held_writes(frames):
             rec = recs[build_]
             if t == 0:
                 rec[0][:] = rec[1][:] = [0] * VIEW_H
+            touched, wholes = [], []
+            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched, wholes=wholes)
+            skipped = 0
+            # The faces first: a line one face's piece takes whole isn't
+            # written in the byte the screen holds there already; a line
+            # more than one piece fills is no longer known.
+            for y in range(VIEW_H):
+                if wholes[y] is not None:
+                    if rec[screen][y] == ("whole", wholes[y]):
+                        skipped += 1
+                    else:
+                        rec[screen][y] = ("whole", wholes[y])
+                elif touched[y]:
+                    rec[screen][y] = 0
+            # Then the background, which forgets the screen's lines if its
+            # patterns aren't those of last time.
             if sigs[build_][screen] != sig:
                 sigs[build_][screen] = sig
                 rec[screen][:] = [0] * VIEW_H
-            touched = []
-            spans(front, bg, POOL_NODES if build_ == "span" else PAINTER_POOL, touched=touched)
-            skipped = 0
             for y in range(VIEW_H):
                 if touched[y]:
-                    rec[screen][y] = 0
+                    pass
                 elif rec[screen][y] == splits[y][2] + 1:
                     skipped += 1
                 else:
