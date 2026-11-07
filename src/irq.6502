@@ -4,7 +4,9 @@
 \ The engine owns IRQ1V. Two interrupts are on:
 \
 \ - The vertical sync's (the System VIA's CA1): the field counted and the
-\   keyboard read (src/input.6502); with FLIP_AT_VSYNC, the flip too.
+\   keyboard read (src/input.6502), then, if the includer names one as
+\   IRQ_TICK, its routine (the live disc's sounds: src/sound.6502); with
+\   FLIP_AT_VSYNC, the flip too.
 \ - User VIA T1's, at FLIP_LINE, as the view's last line has gone (not
 \   with FLIP_AT_VSYNC): the shown buffer's view marked shown whole, and a
 \   frame frame_end handed over shown (src/screen.6502). T1 runs free, a
@@ -78,6 +80,10 @@ IF FLIP_AT_VSYNC
 .shown
 ENDIF
     JSR input_irq
+IF DEFINED(IRQ_TICK)
+    JSR IRQ_TICK                                ; (port A as input_irq leaves it: an output)
+.ticked                                         ; (tools/soundcap.mjs: its cycles)
+ENDIF
     PLY : PLX
     LDA &FC
     RTI

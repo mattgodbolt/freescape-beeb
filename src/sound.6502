@@ -1,0 +1,192 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - Driller's sounds on the SN76489
+\
+\ The original's 21 sounds ($9574, the beeper: docs/research/sound.md),
+\ each a script of segments tools/mksound.py makes at build time from the
+\ original's own beeper (build/sound/sound.6502, section SoundData), played
+\ a tick at a time by the vertical sync's interrupt (snd_tick, after the
+\ keys: src/irq.6502), so the frame loop spends nothing on them. The
+\ format, the chip's registers and the order they're written in are
+\ tools/model/sound.py's, which tools/soundcheck.mjs holds this to, write
+\ for write.
+\
+\ The logic asks for a sound where the original plays one (hook_sound is
+\ snd_ask; the copy's, Sound, after its pass: src/live.6502). The original
+\ waits while its beeper plays; here a sound asked for waits in snd_next
+\ until the one playing ends, and only the logic's next ask waits for it
+\ to start (decision 110). So sounds play whole, in the order asked, one
+\ after another without a gap.
+\
+\ The scripts are in shadow RAM, past the logic's lists and the slanted
+\ faces' memo (SoundData), which snd_segment reads with ACCCON's X set, put
+\ back as it was. The loader unpacks them into main RAM at the same
+\ addresses, and sound_init copies them across before anything else uses
+\ main RAM's there (decision 111).
+\
+\ Tone 2 plays the tones; the noise, clocked by tone 2, the periodic and
+\ white noise; tones 0 and 1 stay silent.
+\ ***************************************************************************
+
+\ The chip takes port A's byte while its write enable, the addressable
+\ latch's bit 0 (System VIA port B: bits 0-2 the latch's bit, bit 3 its
+\ value), is low, for at least 8us.
+SND_WE_LOW  = &00
+SND_WE_HIGH = &08
+
+\ The modes (tools/model/sound.py's), and a segment's size
+SND_SILENT   = 0
+SND_TONE     = 1
+SND_PERIODIC = 2
+SND_WHITE    = 3
+SND_SEGMENT  = 8
+\ The chip's command bytes: a register's latch (and its first four bits)
+SND_TONE2  = &C0            ; tone 2's period: its low four bits, then a byte of the high six
+SND_TATT   = &D0            ; tone 2's attenuation
+SND_NCTL   = &E0            ; the noise's control: FB (bit 2: white), NF (3: tone 2's rate)
+SND_NATT   = &F0            ; the noise's attenuation
+SND_QUIET  = 15             ; the attenuation that silences
+
+\ What the interrupt reads every tick, in zero page: the segment as the
+\ script has it (snd_segment copies its bytes over these, in order), then
+\ the chip's registers as snd_tick last wrote them, as the bytes written.
+SECTION ZeroPage
+.snd_left       SKIP 1      ; ticks left in the segment
+.snd_mode       SKIP 1      ; its mode (SND_*)
+.snd_per        SKIP 2      ; tone 2's period, 12.4 ...
+.snd_dper       SKIP 2      ; ... and its step a tick
+.snd_att        SKIP 1      ; the attenuation, 4.4 ...
+.snd_datt       SKIP 1      ; ... and its step a tick
+.snd_cper       SKIP 2      ; tone 2's period: the latch byte, then the high bits
+.snd_cnctl      SKIP 1
+.snd_ctatt      SKIP 1
+.snd_cnatt      SKIP 1
+ENDSECTION
+ASSERT snd_datt = snd_left + SND_SEGMENT - 1
+SECTION Work
+.snd_next       SKIP 1      ; a sound asked for, waiting for the one playing to end; 0 none
+.snd_ptr        SKIP 2      ; the playing sound's next segment; high byte 0: none playing
+ENDSECTION
+
+\ snd_ask (hook_sound, the original's $9574): sound A, 1 to SND_SOUNDS,
+\ after the one playing; it waits while another is waiting already. Any
+\ other A asks for nothing. Interrupts must be on. Keeps X and Y.
+.snd_ask
+{
+    CMP #1 : BCC done
+    CMP #SND_SOUNDS + 1 : BCS done
+    PHA
+.wait
+    LDA snd_next : BNE wait
+    PLA
+.asked                                          ; (tools/soundcap.mjs: the sound asked for, A)
+    STA snd_next
+.done
+    RTS
+}
+
+\ snd_tick (the vertical sync's, after the keys, which leave port A an
+\ output): the sound's next tick, written to the chip where it differs from
+\ what's there. Uses A, X and Y.
+.snd_tick
+{
+    LDA snd_left : BNE play
+    JSR snd_segment : BCC play
+.silence
+    \ none playing, or a silent segment: tone 2 and the noise silent, if
+    \ they aren't
+    LDA #SND_TATT OR SND_QUIET : LDX #SND_NATT OR SND_QUIET
+    BRA attenuations
+.play
+    DEC snd_left
+    LDA snd_att : LSR A : LSR A : LSR A : LSR A : TAY
+    LDA snd_mode : BEQ period_kept              ; (silent: no period)
+    \ tone 2's period: the latch byte (its low four bits, those of the
+    \ 12.4's low byte's high nibble) and the high six bits (its high byte)
+    LDA snd_per : LSR A : LSR A : LSR A : LSR A : ORA #SND_TONE2
+    CMP snd_cper : BNE period
+    LDX snd_per+1 : CPX snd_cper+1 : BEQ period_kept
+.period
+    STA snd_cper : JSR snd_write
+    LDA snd_per+1 : STA snd_cper+1 : JSR snd_write
+.period_kept
+    LDA snd_per : CLC : ADC snd_dper : STA snd_per
+    LDA snd_per+1 : ADC snd_dper+1 : STA snd_per+1
+    LDA snd_att : CLC : ADC snd_datt : STA snd_att
+    LDX snd_mode : BEQ silence
+    CPX #SND_TONE : BEQ tone
+    \ the noise, periodic or white, at tone 2's rate: its control, then tone
+    \ 2 silent and the noise at the attenuation
+    LDA snd_noise - SND_PERIODIC,X
+    CMP snd_cnctl : BEQ control_kept
+    STA snd_cnctl : JSR snd_write
+.control_kept
+    TYA : ORA #SND_NATT : TAX
+    LDA #SND_TATT OR SND_QUIET
+    BRA attenuations
+.tone
+    TYA : ORA #SND_TATT
+    LDX #SND_NATT OR SND_QUIET
+\ (on with A tone 2's attenuation's byte and X the noise's)
+.attenuations
+    CMP snd_ctatt : BEQ tone_kept
+    STA snd_ctatt : JSR snd_write
+.tone_kept
+    TXA
+    CMP snd_cnatt : BEQ done
+    STA snd_cnatt : JMP snd_write
+.done
+    RTS
+.snd_noise
+    EQUB SND_NCTL OR 3, SND_NCTL OR 7           ; SND_PERIODIC, SND_WHITE
+}
+ASSERT SND_PERIODIC = 2 AND SND_WHITE = 3 AND SND_TONE = 1 AND SND_SILENT = 0
+
+\ snd_segment (snd_tick's, the segment done): the sound's next segment, or
+\ the next sound's first, into snd_left on, C clear; C set if there's none,
+\ nothing playing or asked for. Uses A, X and Y. In SoundCode, which the
+\ includer puts where the interrupt can always reach (src/live.6502: HAZEL).
+SECTION SoundCode
+.snd_segment
+{
+    ZA_AUTO2 p
+    LDA snd_ptr+1 : ORA snd_next : BNE look
+    SEC                                         ; (nothing playing or asked for)
+    RTS
+.look
+    LDA acccon : PHA
+    LDA #ACCCON_X : TSB acccon                  ; (the scripts are shadow RAM's)
+    LDA snd_ptr : STA p
+    LDA snd_ptr+1 : STA p+1 : BNE segment
+.take
+    LDX snd_next : BEQ none
+    STZ snd_next
+    LDA snd_index_lo - 1,X : STA p
+    LDA snd_index_hi - 1,X : STA p+1
+.segment
+    LDA (p) : BEQ take                          ; (the sound's end: the next at once)
+    LDY #SND_SEGMENT - 1
+.copy
+    LDA (p),Y : STA snd_left,Y
+    DEY : BPL copy
+    LDA p : CLC : ADC #SND_SEGMENT : STA snd_ptr
+    LDA p+1 : ADC #0 : STA snd_ptr+1
+    PLA : STA acccon
+    CLC
+    RTS
+.none
+    STZ snd_ptr+1
+    PLA : STA acccon
+    SEC
+    RTS
+}
+ENDSECTION
+
+\ snd_write: byte A to the chip, through port A, the write enable held low
+\ long enough for it (jsbeeb takes the byte 14 cycles on). Keeps X and Y.
+.snd_write
+    STA sysvia_ora_nh
+    LDA #SND_WE_LOW : STA sysvia_orb
+    NOP : NOP : NOP : NOP : NOP : NOP
+    LDA #SND_WE_HIGH : STA sysvia_orb
+    RTS
+ASSERT P% <= &3000                              ; (the interrupt's: X moves &3000-&7FFF)

@@ -12,13 +12,18 @@
 \ the logic isn't using across the call (baron's allocator sees to it).
 \
 \ An includer that fills one in names its own routine before including
-\ this file, as LOGIC_HOOK_WAIT, LOGIC_HOOK_WALKED or LOGIC_HOOK_LOADED
-\ (src/live.6502 does), and the hook is that routine.
+\ this file, as LOGIC_HOOK_SOUND, LOGIC_HOOK_WAIT, LOGIC_HOOK_WALKED,
+\ LOGIC_HOOK_LOADED or LOGIC_HOOK_REDRAW (src/live.6502 does), and the hook
+\ is that routine.
 \ ***************************************************************************
 
 \ hook_sound ($9574): play sound A (the original waits while it plays).
+IF DEFINED(LOGIC_HOOK_SOUND)
+    hook_sound = LOGIC_HOOK_SOUND
+ELSE
 .hook_sound
     RTS
+ENDIF
 
 \ hook_wait: wait while the interrupt counts Countdown down from A frames
 \ (the turn's and step's size keys, 7; the crosshair keys, 9; FCL DELAY).
@@ -71,10 +76,14 @@ ENDIF
 .hook_screen_colours
     RTS
 
-\ hook_redraw (FCL REDRAW): the redraw, the copy, the sensors' tests and
-\ the panel, there and then.
+\ hook_redraw (FCL REDRAW): the redraw, the copy (which plays Sound and
+\ clears it), the sensors' tests and the panel, there and then.
+IF DEFINED(LOGIC_HOOK_REDRAW)
+    hook_redraw = LOGIC_HOOK_REDRAW
+ELSE
 .hook_redraw
     RTS
+ENDIF
 
 \ hook_undraw ($B492): hiding object A, which the last redraw's draw list
 \ may hold (NDrawn is its length); C set if it did, which asks for a redraw

@@ -160,6 +160,12 @@ SECTION ObjTables, org = hazel_tables_end, filename = "OTABLE"
 ENDSECTION
 SECTION ObjWork, org = obj_tables_end, guard = &E000, virtual = TRUE
 ENDSECTION
+\ ... and the sounds' code the interrupt calls seldom (src/sound.6502's
+\ snd_segment), which reaches the scripts in shadow RAM, where main RAM
+\ below &3000 has no page to spare without costing ObjMore's alignment a
+\ page (decision 111)
+SECTION SoundCode, org = obj_work_end, guard = &E000, filename = "SCODE", cmos = TRUE
+ENDSECTION
 \ The cache: main RAM's &3000 on, with ACCCON's X clear.
 OBJ_CACHE_ORG = &3000
 SECTION ObjCache, org = OBJ_CACHE_ORG, guard = SCREEN, virtual = TRUE
@@ -210,7 +216,11 @@ IF LIVE_LOGIC
     LOGIC_HOOK_WAIT   = lv_hook_wait
     LOGIC_HOOK_WALKED = lv_hook_walked
     LOGIC_HOOK_LOADED = lv_hook_loaded
+    LOGIC_HOOK_SOUND  = snd_ask
+    LOGIC_HOOK_REDRAW = lv_hook_redraw
 ENDIF
+\ The vertical sync's interrupt plays the sounds (src/sound.6502).
+IRQ_TICK = snd_tick
 \ (the same table: n * n DIV 4 for n from 0 to 511, low bytes then high)
 ASSERT LEN(MATHS_SQ) = 512 AND MAX(ABS(MATHS_SQ - (0..511) * (0..511) DIV 4)) = 0 AND sq_hi = sq_lo + 512
 LOGIC_FACES_ORG   = &3000
@@ -220,6 +230,13 @@ ENDSECTION
 \ AreaShapes), which only area_enter reads and writes, setting X round
 \ each access (decision 101).
 SECTION AreaShapes, org = (logic_faces_end + 255) AND &FF00, guard = RASTER_ENDS_ORG, virtual = TRUE
+ENDSECTION
+\ Then the sounds' scripts (src/sound.6502), which the interrupt reads
+\ setting X round each segment's: the loader puts them in main RAM at the
+\ same addresses (SDATA), where nothing is until clear_work, and
+\ sound_init copies them across first (decision 111).
+SOUND_DATA_ORG = area_shapes_end
+SECTION SoundData, org = SOUND_DATA_ORG, guard = RASTER_ENDS_ORG, filename = "SDATA"
 ENDSECTION
 INCLUDE "logic/vars.6502"
 INCLUDE "logic/bank.6502"
@@ -250,6 +267,7 @@ ENDSECTION
 SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE", cmos = TRUE
 ENDSECTION
 INCLUDE "../build/live/data.6502"
+INCLUDE "../build/sound/sound.6502"
 
 \ Main RAM below &3000. First the rasteriser's state, which it reads and
 \ writes whatever ACCCON's X (the buffer it draws); LIVE straight after.
@@ -404,6 +422,7 @@ SECTION LiveBoot
     LDA #ACCCON_Y : TSB acccon                  ; HAZEL, for good
     JSR screen_init
     PAGE_IN BANK_DATA
+    JSR sound_init                              ; (before clear_work clears where the scripts came)
     JSR panel_init
     JSR clear_work
     PAGE_IN BANK_RASTER
@@ -532,6 +551,7 @@ ASSERT PF_MESSAGE < PF_NAME
 INCLUDE "screen.6502"
 INCLUDE "irq.6502"
 INCLUDE "input.6502"
+INCLUDE "sound.6502"
 INCLUDE "logic/call.6502"
 INCLUDE "logic/hooks.6502"
 
@@ -833,6 +853,17 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     LDA #1 : STA lv_loaded
     RTS
 
+\ lv_hook_redraw (hook_redraw, the FCL's REDRAW): of the original's redraw
+\ there and then, its copy's sound: Sound played, and cleared.
+.lv_hook_redraw
+{
+    LDA Sound : BEQ quiet
+    JSR snd_ask
+    STZ Sound
+.quiet
+    RTS
+}
+
 \ mod72: A mod 72. The logic's angles are bytes, and the database can make
 \ any byte one: a GOTO to an id an entrance shares with an object before it
 \ (area 2's 16 is a cuboid's too) puts the camera at that object, its size
@@ -1022,6 +1053,38 @@ IF LIVE_LOGIC
     STZ lv_named
 ENDIF
     RTS
+
+\ sound_init (start's, with interrupts off and ACCCON's X clear): the chip
+\ silent, the driver idle (src/sound.6502), and the sounds' scripts copied
+\ from main RAM, where the loader put them, into shadow RAM's same
+\ addresses (SoundData).
+.sound_init
+{
+    ZA_AUTO2 p
+    LDA #&FF : STA sysvia_ddra                  ; (port A an output)
+    LDX #0
+.quiet
+    LDA snd_quiet,X : JSR snd_write
+    INX : CPX #4 : BNE quiet
+    STZ snd_next : STZ snd_ptr+1 : STZ snd_left : STZ snd_mode
+    LDA #&FF : STA snd_cper : STA snd_cper+1 : STA snd_cnctl  ; (not known: none of the bytes written)
+    LDA #SND_TATT OR SND_QUIET : STA snd_ctatt
+    LDA #SND_NATT OR SND_QUIET : STA snd_cnatt
+    LDA #LO(SOUND_DATA_ORG) : STA p
+    LDA #HI(SOUND_DATA_ORG) : STA p+1
+.copy
+    LDA (p) : TAY
+    LDA #ACCCON_X : TSB acccon
+    TYA : STA (p)
+    LDA #ACCCON_X : TRB acccon
+    INCW p
+    LDA p : CMP #LO(sound_data_end) : BNE copy
+    LDA p+1 : CMP #HI(sound_data_end) : BNE copy
+    RTS
+.snd_quiet
+    EQUB &9F, &BF, &DF, &FF                     ; every channel's attenuation 15, tone 0's first
+}
+ASSERT sound_data_end > SOUND_DATA_ORG
 
 ENDSECTION
 
@@ -1297,6 +1360,21 @@ ENDSECTION
 ASSERT PN_FPS = 4
 
 IF LIVE_LOGIC
+\ lv_copy_sound (lv_setup's, after a pass that ran): the sound the
+\ original's copy plays after the pass, if it redraws ($9807: GameFlags bit
+\ 2 or GameFlags2 bit 3; src/sound.6502). The next pass clears Sound, as
+\ the original's input does.
+.lv_copy_sound
+{
+    LDA Sound : BEQ quiet
+    LDA GameFlags : AND #4 : BNE copied
+    LDA GameFlags2 : AND #8 : BEQ quiet
+.copied
+    LDA Sound : JMP snd_ask
+.quiet
+    RTS
+}
+
 \ lv_setup (lv_pass's, after a pass that ran): the frames that show it,
 \ from where the last pass left the camera (an_p0, an_a0) to where the
 \ logic has it now, over PASS_FIELDS fields (decision 4). The angles turn
@@ -1309,9 +1387,10 @@ IF LIVE_LOGIC
 \ its walk, if it had just one, in the old area, its angles as they were,
 \ and the new area comes after (lv_switch). A pass that changed nothing shows
 \ nothing. A held key's passes follow on from the last's end, without a
-\ gap.
+\ gap. First, the sound the original's copy plays after the pass.
 .lv_setup
 {
+    JSR lv_copy_sound
     LDA lv_loaded : BEQ same_area
     LDA lv_walks : CMP #1 : BEQ away_walked
     LDA #1 : STA lv_switch                      ; no walk to show: the new area at once
@@ -1964,6 +2043,12 @@ ENDSECTION
 SECTION LogicFaces
 .logic_faces_end
 ENDSECTION
+SECTION SoundData
+.sound_data_end
+ENDSECTION
+SECTION SoundCode
+.sound_code_end
+ENDSECTION
 SECTION AreaShapes
 .area_shapes_end
 ENDSECTION
@@ -2016,6 +2101,10 @@ ASSERT raster_ends_end <= SCREEN
 \ slanted faces' memo.
 ASSERT logic_faces_end <= hm_u AND LOGIC_FACES_ORG >= &3000
 ASSERT area_shapes_end <= RASTER_ENDS_ORG
+\ ... then the sounds' scripts; the loader puts them in main RAM's same
+\ addresses, clear of what else it puts there
+ASSERT SOUND_DATA_ORG >= area_shapes_end AND sound_data_end <= RASTER_ENDS_ORG
+ASSERT SOUND_DATA_ORG >= panel_pack_end AND SOUND_DATA_ORG >= obj_const_end
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
 
@@ -2041,11 +2130,13 @@ LIVE_PARTS = {
     {"LOGICW", -1, LOGIC_WORK, logic_work_end},
     {"OMORE", -1, logic_work_end, obj_more_end},
     {"PANEL", -1, PANEL_LOAD, panel_pack_end},
-    {"OCONST", -1, obj_memo_end, obj_const_end}
+    {"OCONST", -1, obj_memo_end, obj_const_end},
+    {"SDATA", -1, SOUND_DATA_ORG, sound_data_end}
 }
 LIVE_LATE = {
     {"HAZEL", -1, &C000, hazel_tables_end},
     {"OTABLE", -1, hazel_tables_end, obj_tables_end},
+    {"SCODE", -1, obj_work_end, sound_code_end},
     {"OANDY", BANK_OBJ OR ROMSEL_ANDY, &8000, obj_andy_end},
     {"LBOOT", -1, LIVE_BOOT_ORG, live_boot_end}
 }

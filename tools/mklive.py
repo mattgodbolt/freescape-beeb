@@ -215,7 +215,8 @@ def trace(snap, out_path, paths):
     logictrace.py's runs start (from_original). Each step as
     logictrace.py's, and for a pass: "walks", each move's walk (where it
     began and where it stopped, before the margin's push, and InJet, as
-    hook_walked sees them), "loaded", whether an area loaded, and "soon"
+    hook_walked sees them), "loaded", whether an area loaded, "sounds", the
+    sounds it asks for in order (the hook's, then the copy's), and "soon"
     if it leaves the input a minute to take, so that the next pass comes at
     once, whatever is held (a pass of no keys is put in after it when the
     next step isn't a pass of keys); for any step, "then": what the disc's
@@ -231,6 +232,17 @@ def trace(snap, out_path, paths):
     from logic.state import VARS, State, database, port_start
     lmove.FIX_CORNER = True     # decision 18: the port's logic
     seen = {"walks": [], "loaded": False, "first": False}
+
+    class LiveHooks(Hooks):
+        """The disc's hooks, as far as they change the logic's state: the
+        FCL's REDRAW copies the screen there and then, which plays Sound
+        and clears it (src/live.6502's lv_hook_redraw)."""
+
+        def redraw(self, s):
+            super().redraw(s)
+            if s.Sound:
+                self.sound(s, s.Sound)
+                s.Sound = 0
     real_move, real_keep, real_load = lmove.move, lmove.keep_clear, larea.load_area
 
     def move(s):
@@ -291,13 +303,19 @@ def trace(snap, out_path, paths):
                 rec["keys"] = logictrace.rows(st.keys)
                 rec["names"] = list(st.keys)
                 rec["tick"] = bool(st.tick)
+                hooks = LiveHooks()
                 try:
-                    alive = run_pass(s, st.keys, st.tick, Hooks())
+                    alive = run_pass(s, st.keys, st.tick, hooks)
                 except lmove.Freeze:
                     break
                 rec["result"] = 2 if alive == "over" else 1
                 rec["walks"] = seen["walks"]
                 rec["loaded"] = seen["loaded"]
+                # the sounds the pass asks for, then the copy's after it if
+                # the pass redraws ($9807), as the disc asks for them
+                rec["sounds"] = [args[0] for name, args in hooks.log if name == "sound"]
+                if s.Sound and (s.GameFlags & 0x04 or s.GameFlags2 & 0x08):
+                    rec["sounds"].append(s.Sound)
             rec["changes"] = logictrace.changes(before, s.mem, where)
             rec["then"] = then(s)
             out.append(rec)

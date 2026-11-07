@@ -41,7 +41,7 @@ LIVE_TRACE   = $(LIVE_DIR)/trace.json
 LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros.6502 \
                src/screen.6502 src/irq.6502 src/input.6502 src/raster.6502 src/writer.6502 \
                src/area.6502 src/matrix.6502 src/transform.6502 src/objects.6502 src/clip.6502 \
-               src/order.6502 src/maths.6502 src/project.6502 $(wildcard src/logic/*.6502)
+               src/order.6502 src/maths.6502 src/project.6502 src/sound.6502 $(wildcard src/logic/*.6502)
 LIVE_SHOTS  ?= 0 18 26 40 57
 # (every scenario of tests/logic/ but keys, whose E the disc doesn't read)
 LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise fcl jet ticks minutes steps turns corner crosshair \
@@ -55,8 +55,9 @@ MODEL_PY    ?= $(wildcard tools/model/*.py tools/model/standin/*.py)
 L6_DIR      ?= build/logic6502
 ZXSNAP      ?= build/zx/driller.z80
 LIVE_L6     = $(L6_DIR)/data.6502 $(L6_DIR)/db.bin
-# (mk/panel.mk's: the panel's data)
+# (mk/panel.mk's: the panel's data; mk/sound.mk's: the sounds')
 PANEL_GEN   ?= build/panel/panel.6502 build/panel/panel.json
+SOUND_GEN   ?= build/sound/sound.6502 build/sound/sound.json
 
 ALL    += $(LIVE_DISC) $(LIVE_FREE)
 CHECKS += live
@@ -65,12 +66,14 @@ $(LIVE_GEN) &: tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(MODEL_PY) $(COLOUR_M
 	$(PYTHON) -I tools/mklive.py $(DATA_JSON) $(AREAS_JSON) $(LIVE_DIR)
 
 # The first pass: the parts and their description, and the symbols.
-$(LIVE_SYMBOLS) $(LIVE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
+$(LIVE_SYMBOLS) $(LIVE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) \
+                                          $(SOUND_GEN) | build
 	@mkdir -p $(LIVE_DIR)/parts
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -p $(LIVE_DIR)/parts -log1 $(LIVE_DIR)/parts.6502 --warn 2 \
 	    --symbols $(LIVE_SYMBOLS) src/live.6502
 
-$(LIVE_FREE:.ssd=.json) $(LIVE_FREE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) $(PANEL_GEN) | build
+$(LIVE_FREE:.ssd=.json) $(LIVE_FREE_DIR)/parts.6502 &: $(LIVE_SOURCES) $(LIVE_GEN) $(AREAS_GEN) $(MATHS_GEN) $(LIVE_L6) \
+                                                    $(PANEL_GEN) $(SOUND_GEN) | build
 	@mkdir -p $(LIVE_FREE_DIR)/parts
 	$(ASM) -D 'BUILD="$(FS_BUILD)"' -D FREE_CAMERA=TRUE -p $(LIVE_FREE_DIR)/parts -log1 $(LIVE_FREE_DIR)/parts.6502 \
 	    --warn 2 --symbols $(LIVE_FREE:.ssd=.json) src/live.6502

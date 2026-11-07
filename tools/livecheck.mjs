@@ -117,6 +117,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { loadSymbols } from "./symbols.mjs";
+import { soundCapture } from "./soundcap.mjs";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const jsbeeb = (file) => import(pathToFileURL(path.join(root, "node_modules/jsbeeb/src", file)).href);
@@ -132,6 +133,7 @@ const FREE = args.includes("--free");
 const disc = opt("disc", FREE ? "build/live-free.ssd" : "build/live.ssd");
 const liveFile = opt("live", "build/live/live.json");
 const tracePath = opt("trace", "build/live/trace.json");
+const soundJson = opt("sound", "build/sound/sound.json");
 const walkAt = opt("walks", "0,18,26,40,57").split(",").filter(Boolean).map(Number);
 const jsonOut = opt("json");
 const verbose = args.includes("--verbose");
@@ -192,6 +194,9 @@ const now = () => tm.elapsedCycles;
 const word = (a) => ram[a] | (ram[a + 1] << 8);
 const bufferByte = (buffer, a) => ram[a + (buffer ? 0x8000 : 0)];
 const bankAt = (bank, a) => cpu.romOffset + bank * 16384 + (a - 0x8000);
+// the sound: the chip's bytes by tick and the sounds asked for, from
+// sound_init on (tools/soundcap.mjs), held to the driver's model below
+const sounds = soundCapture(session, sym);
 
 session.loadDisc(path.resolve(disc));
 await quietly(() => session.autoboot());
@@ -353,6 +358,7 @@ cpu.debugInstruction.add((addr, opcode) => {
         onPassed(cpu.a);
     } else if (!FREE && addr === LV_TAKING) {
         lastTaking = now();
+        passAsks = sounds.log().asks.length;
     } else if (addr === PANEL_WAITING && bank === BANK_DATA) {
         panelWaits++;
     } else if (addr === PANEL_VALUES && bank === BANK_DATA) {
@@ -712,6 +718,7 @@ const press = async (key) => {
 const LIVE_PASSED = FREE ? -1 : sym("lv_pass.live_passed");
 const LV_TAKING = FREE ? -1 : sym("lv_pass.timed"); // (where a pass takes the keys)
 let lastTaking = null;
+let passAsks = 0, passSoundsOk = 0, soundsAsked = 0; // (the sounds asked for since the pass began)
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
 let summary = "";
 let pace = null; // (the logic's disc: the taps and the held keys' passes, reported below)
@@ -971,6 +978,14 @@ async function logicScript() {
         }
         if (ok) walksOk++;
         else fail(`${where}: the disc's hooks saw ${n} walks (${V("lv_loaded") ? "an area loaded" : "no load"}), the transcription ${JSON.stringify(walks)}${rec.loaded ? ", a load" : ""}`);
+        // the sounds: those the pass asked for (hook_sound, and the copy's
+        // in REDRAW), then the copy's after it (lv_copy_sound's rule), as
+        // the transcription's
+        const asked = sounds.log().asks.slice(passAsks).map((a) => a[1]);
+        if (V("Sound") && ((V("GameFlags") & 4) || (V("GameFlags2") & 8))) asked.push(V("Sound"));
+        if (asked.join() === (rec.sounds ?? []).join()) passSoundsOk++;
+        else fail(`${where}: the pass asked for the sounds ${asked.join(",") || "none"}, the transcription ${(rec.sounds ?? []).join(",") || "none"}`);
+        soundsAsked += asked.length;
         passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, margin: exp[0x88d0],
             run: script, t: tPass, made });
         for (const [ad, v] of rec.then) exp[ad] = v;
@@ -1418,6 +1433,23 @@ console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${c
 console.log(`${NAME}: the interrupt's cycles (median / p90 / most), irq_handler to its RTI: the vertical sync's ` +
     `${cyc(syncIrqCycles)} (${syncIrqCycles.length}, ${syncIrqCycles.filter((c) => c > SCAN_MIN).length} reading the keys), ` +
     `T1's ${cyc(t1IrqCycles)} (${t1IrqCycles.length})`);
+
+// --- The sound: every byte the chip took over the run, tick by tick,
+// against the driver's model given the sounds as they were asked for
+// (tools/mksound.py --check), and each pass's asks the transcription's
+// (above).
+{
+    const logPath = path.join(path.dirname(jsonOut ?? path.join(root, "build/live/check.json")), `${NAME}-sound.json`);
+    fs.writeFileSync(logPath, JSON.stringify(sounds.log()));
+    const py = spawnSync(path.join(root, ".venv/bin/python"), ["-I", path.join(root, "tools/mksound.py"), "--check", logPath, soundJson],
+        { encoding: "utf8" });
+    for (const line of py.stdout.trim().split("\n")) console.log(line.replace(/^sound: /, `${NAME}: the sound: `));
+    if (py.status !== 0) fail(`the chip's writes aren't the driver's model's (${logPath}): ${py.stderr}`);
+    if (!FREE) console.log(`${NAME}: the sound: ${passSoundsOk} passes asked for the transcription's sounds ` +
+        `(${soundsAsked} in all)`);
+    console.log(`${NAME}: the sound's cycles (median / p90 / most), snd_tick: a sound playing ${cyc(sounds.cycles.playing)} ` +
+        `(${sounds.cycles.playing.length}), idle ${cyc(sounds.cycles.idle)} (${sounds.cycles.idle.length})`);
+}
 
 // --- The figures, by what each frame did: an area's first frame, the
 // angles changed (the transform's cache refilled), the camera moved (the
