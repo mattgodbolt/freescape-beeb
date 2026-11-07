@@ -766,3 +766,12 @@ logic's lists, where only the logic reached before: the conversion sets
 ACCCON's X round each access, as its working copy is main RAM's. Nothing
 any stage outputs changes: an entry is taken only when its six bytes are
 the face's. Figures: the journal, 2026-11-06, "the fourteenth round".
+
+## 102. No coarser lines from images, no reduced resolution (2026-11-06, Matt)
+
+Matt ruled out two picture-changing speed options: coarser lines from images
+(fewer IMAGE_BITS, priced in the journal's tenth round) and reduced vertical
+resolution (half the lines of the view). The view is already at the limit of
+what can be seen, so further speed has to come with the same picture. The
+other picture-changing options (the floor as the horizon, constant dithers)
+stay priced and unadopted unless Matt asks.
