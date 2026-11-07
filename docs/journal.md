@@ -1340,3 +1340,72 @@ into the background and a line's first face kept compact (much of the line
 loop's code), both fills in one build (the busiest fresh views), the
 transform's cache at 128 slots, and the three remaining decision 76
 shares.
+
+## 2026-11-06: Driller's sounds (track S)
+
+Matt chose the sound as the layer after the panel. The research is
+`docs/research/sound.md`. Driller's ZX code has 21 sounds, each a timing
+loop on the beeper behind `$9574`, which turns interrupts off while it
+plays: the whole game stops for every sound, the clock too. Two are empty
+(`RET`), 5 and 10 are one routine, 13 is noise; the rest are notes and
+sweeps, from a three-field bump (19, a wall and SPACE) to a 179-field fall
+(20, the game's end). The logic asks for them on the laser (1), shooting
+mode and the bump (19), the climb and the fall (4, 3, after the copy), a
+GOTO (10, after the copy) and the FCL's SOUND and SYNCSND (5 to 21); the
+interrupt plays 2 when a sensor fires. No key turns the sound off. The ST
+plays samples, the CPC an AY's tables by the same numbers.
+
+The SN76489's versions are made at build time (`tools/mksound.py`): each
+routine run on the ZX snapshot, its beeper logged to the T-state, cut into
+fields (the ZX's frame and the BBC's field are both 69,888 of the ZX's
+T-states), and each field measured: the waveform's period by YIN, its
+strongest harmonic as the tone, that harmonic's strength as the
+attenuation, periodic noise under the tone's 122Hz floor, white noise for
+sound 13. Sampling every 28 T-states makes a period in samples the chip's
+register. Then straight-line segments within a quarter of a semitone and
+a step of attenuation: 819 bytes of scripts and 42 of index for all 21
+(decision 112). Two fixes after reading the first tables: a median
+of two aperiodicities is their mean (sound 2 had come out as noise), and
+a field with no period holds the last one (the ends of sweeps had come out
+as stray low notes).
+
+The driver (`src/sound.6502`, its model `tools/model/sound.py`) plays a
+tick from the vertical sync's interrupt after the keys, tone 2 for tones
+and as the noise's clock, writing only the registers that change.
+`hook_sound` is `snd_ask`: the sound waits for the one playing, and the
+logic waits only if one is waiting already (decision 110). After a pass,
+`lv_copy_sound` asks for `Sound` by the original's copy's rule (only if
+the pass redraws); the FCL's REDRAW asks for it at once and clears it.
+Where it lives (decision 111): 185 bytes more of main RAM below `&3000`,
+which stays inside `ObjMore`'s page alignment, so its room is still 1,292
+(the first build, with the segment's read there too, pushed `ObjMore` a
+page and cost it 256); the segment's read in HAZEL after `ObjWork` (93 of
+its 169); the scripts in shadow RAM past `AreaShapes` (861 of its 2,864),
+put in main RAM's same addresses by the loader and copied across by
+`sound_init` at the start; 13 bytes of zero page; 29 of `LiveGlue`; 91 of
+`BANK_DATA` for `sound_init`.
+
+The checks: `tools/soundcheck.mjs` (`make sound`, in `make check`) boots
+the disc and asks for every sound alone and a queue of 22 back to back;
+every byte jsbeeb's SN76489 took, tick by tick, is the model's (901 ticks,
+1,559 bytes). `tools/livecheck.mjs` now captures the chip over its whole
+run too, and checks each pass asked for the transcription's sounds
+(`tools/mklive.py --trace` records them): 2,172 passes, 171 sounds, every
+byte of 19,074 ticks the model's. A first soundcheck failed by a tick: the
+harness had put a sound in while the emulator stood inside the interrupt;
+it now asks from `live_loop`, as the logic does.
+
+The cost, `make check`'s live check before and after: the vertical sync's
+interrupt 832 / 1019 / 1264 cycles (median / p90 / most) to 899 / 1087 /
+1660; `snd_tick` 216 / 430 / 557 with a sound playing, 59 idle. Fields a
+frame, flip to flip: all 1.77 / 4.95 / 18 to 1.77 / 4.97 / 113.76; walking
+1.54 / 4.05 / 13.37 to 1.54 / 4.08 / 13.49; turning 2.06 / 5.37 / 11.93 to
+2.07 / 5.31 / 11.92; entrances 7.97 / 12.05 / 18 to 8.05 / 12.21 / 18. The
+113.76 is the logic waiting for a sound to be taken at the minute's turn
+in `minutes.txt` (sound 11, 157 fields, with more queued behind it), where
+the original would stop for each whole sound.
+
+Left for Matt: decisions 110 (whether and how long the logic waits), 112
+(the measured remake's choices) and 113 (the CPC's AY sounds instead).
+Left for the layers after: sound 2 with the sensors, 20 and 6 with the
+game's end, and when the laser's lines show around sound 1.

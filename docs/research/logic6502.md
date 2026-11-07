@@ -182,7 +182,8 @@ other form, which runs on past its target to an object without hanging.
 
 ## What's left
 
-- The hooks: the sound, the waits' timing, the panel, the crosshair, the
+- The hooks (the live disc fills in the sound: `docs/research/sound.md`;
+  this check build keeps the defaults): the waits' timing, the panel, the crosshair, the
   laser, the shot's pick and the draw list (the renderer's), the sensors'
   tests and their shots (`$9841` and the interrupt's), the rigs (`$BEFA`),
   the information screen (`$C3DC`), the game's end (`$9AB7`) and a new

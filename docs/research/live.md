@@ -153,18 +153,24 @@ ends.
   After a pass that ran, `logic_go_shown` gives the renderer the objects'
   flags (but after an area's change, below).
 - **The hooks** (`src/logic/hooks.6502`, the logic's calls to what it
-  leaves out): this disc fills in three. `hook_wait` (the size keys', the
+  leaves out): this disc fills in five. `hook_wait` (the size keys', the
   crosshair keys' and the FCL's `DELAY`): the original waits that many
   frames of its interrupt in the logic; here the next pass waits that many
   fields more, and frames go on being drawn. `hook_walked` (each move's
   walk, before the margin's push) and `hook_loaded` (an area's load) are
-  the disc's own, for the frames between passes. The rest do nothing yet,
-  as the transcription's defaults: the sound, the panel (the disc draws
+  the disc's own, for the frames between passes. `hook_sound` is
+  `snd_ask` (`src/sound.6502`, `docs/research/sound.md`): the sound plays
+  from the interrupt after the one playing, and the logic waits only if
+  one is waiting already (decision 110); after a pass, `lv_copy_sound` asks
+  for the copy's sound (`Sound`) by the original's rule. `hook_redraw` (the
+  FCL's `REDRAW`) is, for now, its copy's sound alone: `Sound` asked for and
+  cleared. The rest do nothing yet,
+  as the transcription's defaults: the panel (the disc draws
   its own from the logic's variables after each pass: `panel_values`,
   `docs/research/panel.md`) and its key lights, the crosshair's drawing
   (the frame draws it, below), the screen's colours,
-  the FCL's `REDRAW`, the draw list, the sensors, the laser and the shot,
-  the rigs, the information screen and the game's end.
+  the rest of the FCL's `REDRAW`, the draw list, the sensors, the laser and
+  the shot, the rigs, the information screen and the game's end.
 - **The clock**: a minute is `MINUTE_FIELDS` fields, as the original's
   interrupt counts 50 to a second; `logic_go_minute` goes in just before
   the pass the minute's end comes before, which takes it.
@@ -435,13 +441,13 @@ logic's code and variables unused.
 | bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20); its quarter squares are the maths' in HAZEL (`RASTER_SQUARES`: the same table, ASSERTed) |
 | bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below): the transform's and the object pass's first, then from `obj_andy_reach`, past the bank's first 4K, what ANDY's code may call |
 | ANDY (ROMSEL's bit 7, over `BANK_OBJ`'s first 4K) | the object pipeline's rarely run code (`ObjAndy`, `OANDY`, decision 52: `docs/research/objects.md`, "ANDY"), which its code calls through trampolines in `ObjMore`; the loader puts it in once the OS is gone (`LIVE_LATE`) |
-| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), which the loader unpacks once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it). The logic's multiplies and the fill read the maths' quarter squares here (`LOGIC_SQUARES`, `RASTER_SQUARES`) |
+| HAZEL | the maths' tables (`HAZEL`) and the transform's f64 table (`ObjTables`, `OTABLE`, on a page boundary), which the loader unpacks once the OS is gone (ACCCON's Y then stays set); then `ObjWork` (the camera with it), then the sound's `snd_segment` (`SoundCode`, `SCODE`, decision 111). The logic's multiplies and the fill read the maths' quarter squares here (`LOGIC_SQUARES`, `RASTER_SQUARES`) |
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it), then `AreaKeep` (the globals' records their slots were last built from: `src/area.6502`'s `ag_kept`, 2026-11-06) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
 | page `&0D`, below `&0D9F` | `start`, with `lv_start` and `clock_init`, which run once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
 | main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`), the area's working copy (`ObjArea`) and the objects' bounds (`ObjBound`, kept with the cache), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`, which the loader puts there) in the cache's place |
-| shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass` |
+| shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass`; the slanted faces' memo (`AreaShapes`); the sounds' scripts (`SoundData`, decision 111), which the loader puts in main RAM at the same addresses (`SDATA`) and `sound_init` copies across at the start |
 | `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
 
 The screen at 192 lines leaves main and shadow RAM's `&3000` up to `SCREEN`
@@ -591,6 +597,10 @@ On both:
   and every write outside it to the buffer shown comes with the beam above
   its row;
 - the BBC's own timing of each half is the emulator's (above);
+- every byte the sound chip took, tick by tick, is the sound driver's
+  model's given the sounds as they were asked for, and on the logic's disc
+  each pass asked for the transcription's sounds, the copy's after it
+  (`docs/research/sound.md`, "The checks");
 - every loop that draws nothing (`live_idle`) finds the inputs of the frame
   last handed over (its camera, area and entries, every index's hidden
   flags, its crosshair), so the view shown, or about to be, is the model's
@@ -638,7 +648,7 @@ disc's demo.
 
 ## What's left
 
-- The hooks still empty: the sound, the panel's key lights (and what else
+- The hooks still empty: the panel's key lights (and what else
   `docs/research/panel.md` leaves), the laser and the shot's pick (`$B153`, from the renderer's faces), the draw
   list (`hook_undraw`), the sensors' tests and shots, the rigs, the
   information screen, the game's end and a new game (the database and

@@ -775,3 +775,94 @@ resolution (half the lines of the view). The view is already at the limit of
 what can be seen, so further speed has to come with the same picture. The
 other picture-changing options (the floor as the horizon, constant dithers)
 stay priced and unadopted unless Matt asks.
+
+## 110. Sounds play while the game goes on; the logic waits only for a full queue (2026-11-06, autonomous, proposed for Matt)
+
+The original stops for every sound: its beeper needs the CPU, so `$9574`
+turns interrupts off and loops until the sound ends, and the game, its
+clock and its sensors stand still meanwhile (`docs/research/sound.md`). The
+BBC's chip plays by itself, so the vertical sync's interrupt plays the
+sounds a field at a time and the frame loop goes on. What's kept of the
+original's decision: every sound plays whole, in the order asked, one after
+another without a gap. A sound asked for waits in `snd_next` while one
+plays; asking for another while one is waiting makes the logic wait for
+that one to start.
+
+The options, for Matt:
+
+- **As built**: the logic waits only with a sound already waiting. Walking
+  into a wall (sound 19, three fields, a pass every five) never waits; a
+  held climb (sound 4, six fields a step, a pass every five) would fall a
+  field a pass behind, so wait about that; the
+  minute's turn in `tests/logic/minutes.txt` (global condition 0's sound
+  11, 157 fields, and more behind it) waited 31 and 114 fields in the live
+  check (`docs/research/sound.md`, "Measurements").
+- A longer queue: the logic never waits until it's full, but sounds lag
+  further behind what made them.
+- A new sound cuts the playing one short: nothing waits or lags, and long
+  sounds (7, 8, 11, 20) are seldom heard whole.
+- The original's: the logic waits for every sound to end, the frame loop
+  with it.
+
+## 111. Where the sounds live (2026-11-06, autonomous)
+
+The driver's tick and the hook are in main RAM below `&3000` (the
+interrupt and both logic banks reach them), its segment's state and the
+chip's last bytes in zero page (`&03` up to `ZP_FIXED`), the queue in
+`Work`. Its rarely run part, the next segment's read (`snd_segment`), is in
+HAZEL after `ObjWork`, which the interrupt always sees: in main RAM it
+would have pushed `ObjMore` past a page boundary, whose alignment would
+have cost `ObjMore`'s room a whole page. The scripts are in shadow RAM past
+the slanted faces' memo (`SoundData`), which `snd_segment` reads setting
+ACCCON's X and putting it back; the loader can't unpack into shadow RAM
+(it runs from screen memory, which X would switch under it), so it puts
+them in main RAM at the same addresses, which `sound_init` copies across at
+the start, before `clear_work` clears main RAM there. Bytes: the journal,
+2026-11-06, "Driller's sounds".
+
+## 112. The beeper's sounds remade for the SN76489, a field at a time (2026-11-06, autonomous, proposed for Matt)
+
+The original's sounds are timing loops on a one-bit beeper; the SN76489
+has three square tones, a noise channel and 16 volumes. The build runs each
+of the original's 21 routines on the ZX snapshot and measures each field of
+it (`tools/mksound.py`, `docs/research/sound.md`, "From the beeper to the
+chip"): its waveform's period (YIN), the strongest of that period's
+harmonics as the tone, that harmonic's strength against a square's as the
+attenuation; under the tone's 122Hz floor, periodic noise at the pitch; for
+sound 13's random loop, white noise as busy as the beeper was. Then
+straight-line segments, within a quarter of a semitone and a step of
+attenuation. What differs from the original, by the choice:
+
+- **A field is the finest step.** Sweeps faster than that (sound 1's saw,
+  the chirps of 5 and 10, the ends of 8's sweeps) become a field's
+  dominant tone, or its strongest harmonic.
+- **Loudness from the waveform.** The beeper has one level; a narrow pulse
+  sounds quieter than a square, so it plays quieter (sound 15's sweeping
+  pulse width becomes a swell and fade). A square plays at attenuation 0,
+  the loudest.
+- **Bass as periodic noise.** Under 122Hz the tone channels can't go;
+  periodic noise there is a thin pulse a fifteenth of tone 2's frequency,
+  buzzier than the beeper's square (sounds 17 and 19, the ends of 7 and 20).
+  An octave up on the tone channel is the other way.
+- **One voice.** The original plays one sound at a time, so tone 2 and the
+  noise do; tones 0 and 1 are free for anything later.
+
+## 113. The ZX's sounds, not the CPC's or the ST's (2026-11-06, autonomous, proposed for Matt)
+
+The logic is the ZX's (decision 1), so its sound numbers and when it asks
+for them are the ZX's, and the ZX's sounds are the ones remade (decision
+112). The other versions, for Matt:
+
+- **The Atari ST's** (whose colours and panel the disc has): 25 digitised
+  samples. The SN76489 can play samples only through its volume, as a
+  four-bit DAC with the CPU writing every sample, which the frame loop
+  can't spare.
+- **The Amstrad CPC's**: the same numbers, on an AY-3-8912 at 1MHz, with
+  volume and pitch envelopes from small tables (ScummVM's `sound/cpc.cpp`,
+  from a disassembly of `DRILL.BIN`). An AY tone's period at 1MHz is half
+  the SN76489's at 4MHz for the same note, so they would port nearly
+  register for register, a closer match than the beeper's measured
+  remake. It would take the CPC's disc into the build (`make fetch` has
+  it) and a transcription of its table and player; the driver and its
+  checks would stay as they are, with the scripts made from the CPC's
+  tables instead.

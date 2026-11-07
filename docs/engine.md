@@ -94,8 +94,15 @@ which owns the machine and makes no OS call.
   `key_take`), a bit each: `K_FORWARD` and the rest. It reads them only
   while one is held or auto-scan has found one, and then a keyboard
   column's keys only when CA2 says the column has one down (2026-11-06).
+- **The sound** (the live disc's, `src/sound.6502`,
+  `docs/research/sound.md`): after the keys, the vertical sync's interrupt
+  plays Driller's sounds on the SN76489, a tick a field, writing only the
+  registers that change; the logic asks for them (`snd_ask`). Port A is an
+  output whenever the keys aren't being read, so the interrupt writes the
+  chip through it with nothing to restore.
 - **Zero page**: `frame_ready`, `draw_buffer` and `view_shown` are
-  fixed below `ZP_FIXED`; baron's pool is the rest up to `&FB`.
+  fixed below `ZP_FIXED`, and the live disc's sound's state after them;
+  baron's pool is the rest up to `&FB`.
 - **The test scene** (`src/main.6502`, until the renderer replaces it):
   bars of the eight colours moving a pixel a frame in the view, inside a
   white border, and the screen's edge in cyan.
@@ -286,7 +293,7 @@ come with it, to see where the cycles go.
 | Path | What |
 |---|---|
 | `tools/freescape.py` | Driller's database to JSON |
-| `tools/model/` | the model: `camera`, `matrix`, `objects`, `transform`, `clip`, `project`, `order`, `raster`, `writer`, `colours`, `render` (a whole view), `counts` |
+| `tools/model/` | the model: `camera`, `matrix`, `objects`, `transform`, `clip`, `project`, `order`, `raster`, `writer`, `colours`, `render` (a whole view), `counts`; and `sound` (the sound driver: `tools/mksound.py` makes its scripts) |
 | `tools/run6502.mjs`, `tools/beeb.mjs`, `tools/play.mjs` | the harness: headless runs, MCP sessions, scripted play |
 | `src/*.6502` | the engine, one file per stage, named as the model's modules |
 | `mk/*.mk` | each track's Makefile rules, included by the Makefile |
@@ -311,7 +318,7 @@ come with it, to see where the cycles go.
   ACCCON's X and whatever bank is paged: the interrupt, the code that
   pages, the rasteriser's state, the player logic's variables
   (`LogicWork`, `docs/research/logic6502.md`), the maths' code (which
-  patches itself).
+  patches itself), the sound's driver and its hook (`src/sound.6502`).
 - `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
   RAM's. Data kept per buffer (section 4, stage 10) needs the same
   addresses free in both. The live disc keeps the front end's data in main
@@ -328,14 +335,18 @@ come with it, to see where the cycles go.
   101), which leaves main RAM's room before `RasterEnds` that it took.
   Shadow RAM's past the logic's lists holds the slanted faces' planes by
   their shape (`AreaShapes`, decision 101), which the area's conversion
-  reads and writes setting X round each access; the rest of it to
-  `RasterEnds` is free, for data the front end can reach so.
+  reads and writes setting X round each access, then the sounds' scripts
+  (`SoundData`, decision 111), which the interrupt reads so, putting X
+  back; the rest of it to `RasterEnds` is free, for data the front end can
+  reach so.
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
   f64 table) and the front end's work. The maths' quarter squares serve the
   logic and the fill too, and its doubled bit lengths (`proj_bl2`) the
-  fill's edge set-up (`RASTER_BL2`). HAZEL holds the filing system's workspace until
+  fill's edge set-up (`RASTER_BL2`). After `ObjWork`, the sound's rarely
+  run code (`SoundCode`, decision 111), which the interrupt calls: HAZEL
+  is always paged. HAZEL holds the filing system's workspace until
   the OS is gone, so nothing goes in before.
 - The fill's bank (6) holds the row runs, its code and its work. Its
   routines are fewer on the live disc (no horizon: decision 71), which

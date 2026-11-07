@@ -32,6 +32,15 @@ the original running headless. A tap turns 5° or steps 25 units, one
 of Driller's own moves; holding a key repeats it smoothly, like a
 keyboard's auto-repeat, and f0-f3 change the sizes.
 
+*2026-11-06.* **Driller's sounds**, remade for the BBC's sound chip from
+the Spectrum original's own beeper, measured a fiftieth of a second at a
+time: the low bump of a wall (and of SPACE, into shooting mode), the two
+notes of a climb and of a fall, the chirp of a doorway, and the scripts'
+sounds as things are touched and the clock turns. They play from the interrupt while
+the game goes on, so they cost the frames nothing (the original stops
+while each plays). Driller has no key for the sound, so neither has the
+disc.
+
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the
 order) and fills it into MODE 2, double-buffered, flipping as soon as the
@@ -57,7 +66,7 @@ draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
 stock Master. Driller's game itself (the drilling rigs, the laser, the
-sensors and the sound) comes after. `docs/journal.md` has the
+sensors) comes after; its sound is in. `docs/journal.md` has the
 story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)

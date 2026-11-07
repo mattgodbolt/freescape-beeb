@@ -113,6 +113,11 @@ includes.)
   while it's live, not after it returns.
 - A harness that releases keys at the end of a routine may be too late: the
   vertical sync can read them while the routine runs.
+- `runFor` can stop the emulator inside the interrupt. A harness that
+  pokes what the interrupt reads, standing in for main-loop code, runs to
+  a main-loop label first (`tools/soundcheck.mjs` asks at `live_loop`).
+- jsbeeb's SN76489 takes a byte only if its write enable is still low 14
+  cycles on: hold it low that long (`src/sound.6502`'s `snd_write`).
 
 - Baron: fail on any warning (`tools/asm.sh`); `ASSERT` is built in;
   `FOR n = 0..15` is inclusive; put `ZA_UNREACHABLE` after an
