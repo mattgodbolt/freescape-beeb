@@ -247,6 +247,10 @@ ENDSECTION
 LOGIC_SHADOW_CODE = TRUE
 SECTION RigCode, org = sound_data_end, guard = RASTER_ENDS_ORG, filename = "RIGC", cmos = TRUE
 ENDSECTION
+\ The game's end, a new game and the demo (src/logic/end.6502), which page
+\ both of the logic's banks: in main RAM, in ObjMore's room after it.
+SECTION LogicMore, org = obj_more_end, guard = &3000, filename = "LMORE", cmos = TRUE
+ENDSECTION
 INCLUDE "logic/vars.6502"
 INCLUDE "logic/bank.6502"
 ASSERT LOGIC_BANK = BANK_DB AND LOGIC_CODE_BANK = BANK_DATA
@@ -692,7 +696,9 @@ SECTION Work
 .lv_repeat      SKIP 2      ; ... and before which the keys held don't repeat, if none goes down
 .lv_made        SKIP 1      ; non-zero: the pass took a key gone down since the last
 .lv_minute      SKIP 2      ; fields when the clock's minute ends
-.lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer)
+.lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer), till a new game
+.lv_end_t0      SKIP 2      ; ... fields at the end
+.lv_call        SKIP 1      ; the pass's call: 0 logic_go_pass, else logic_go_restart's A + 1
 .lv_switch      SKIP 1      ; non-zero: the area changes once the old area's frames are shown
 .lv_request     SKIP 1      ; non-zero: tools/livecheck.mjs has set the logic's state (lv_requested)
     \ what the hooks saw in the pass
@@ -766,7 +772,7 @@ ENDSECTION
 .lv_requested
     STZ lv_request
     JSR logic_go_init
-    STZ lv_over
+    STZ lv_over : STZ lv_call
     STZ lv_msg_on                               ; (a rig's messages, if any, end)
     LDA lv_now : STA lv_until
     LDA lv_now+1 : STA lv_until+1
@@ -820,6 +826,14 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     JMP lv_switched
 .here
     LDA lv_over : BEQ alive
+    \ The end's wait ($9B43): once the sensors' test after its redraw is
+    \ done, a key answers it, or it runs out (lv_waited); then the new
+    \ game is the pass's call (lv_call)
+    LDA sn_due : BNE waiting
+    JSR lv_waited : BCC waiting
+    INC A : STA lv_call
+    JMP timed
+.waiting
     RTS
 .alive
     \ The shot's pick is from the frame last drawn (src/laser.6502), which
@@ -838,7 +852,11 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 .tested
     \ (keys_made read, not taken: a key the vertical sync reads after this
     \ waits for the next loop. A minute's end brings its pass whatever is
-    \ held, as the original's input takes it without waiting for a key.)
+    \ held, as the original's input takes it without waiting for a key; as
+    \ does the game over, which the input finds whatever is held, and the
+    \ demo, which plays itself.)
+    LDA GameOver : BNE repeats
+    LDA Demo : CMP #DEMO_ON : BEQ repeats
     LDA lv_now : CMP lv_repeat : LDA lv_now+1 : SBC lv_repeat+1 : BPL repeats
     LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BPL repeats
     LDX #KEYS_BYTES - 1
@@ -872,7 +890,21 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     STZ lv_walks : STZ lv_loaded : STZ lv_wait
     STZ lv_rigged : STZ lv_msg_n : STZ lv_lzn
     LDA #ACCCON_X : TSB acccon                  ; (LogicFaces: shadow RAM's)
+    LDA lv_call : BNE restart
     JSR logic_go_pass
+    CMP #2 : BNE called
+    \ the game over: its end there and then, as the original's input goes
+    \ to it ($9AB7); the next pass is the end's wait's (lv_waited)
+    JSR logic_go_end
+    LDA #2
+    BRA called
+.restart
+    \ the end's wait answered (1, by the keys) or run out (2, the demo
+    \ next), and the new game: answered as a pass after which one began
+    DEC A : JSR logic_go_restart
+    STZ lv_call
+    LDA #3
+.called
     TAX
     LDA #ACCCON_X : TRB acccon
     TXA
@@ -880,10 +912,18 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     BNE answered
     RTS
 .answered
-    CMP #2 : BNE ran
+    CMP #2 : BNE not_over
     STA lv_over
-    PAGE_IN BANK_DATA
-    JSR live_lines                              ; ("game over")
+    LDA lv_now : STA lv_end_t0
+    LDA lv_now+1 : STA lv_end_t0+1
+    BRA ran
+.not_over
+    CMP #3 : BNE ran
+    \ a new game: the end over, its message gone, the clock's minute from
+    \ now (and the area entered as for any pass that loads one)
+    STZ lv_over : STZ lv_msg_on
+    LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
+    LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
 .ran
     \ the laser fired: its lines from now, for LASER_FIELDS (the pass's
     \ waits hold the next pass that long: lv_hook_laser)
@@ -893,12 +933,11 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_now+1 : ADC #0 : STA lz_until+1
 .unfired
     \ the sensors' test after the redraw, if the pass redraws ($9807: a
-    \ re-projection for GameFlags bit 2, from the last for GameFlags2 bit 3)
-    \ and the game goes on
-    \ and the game goes on: at once if it needs nothing of the frame (no
-    \ sensor in range: the lists' copy alone, as the original's), else once
-    \ the frame of the pass's end is drawn, before the next pass (live_idle)
-    LDA lv_over : BNE untested
+    \ re-projection for GameFlags bit 2, from the last for GameFlags2 bit 3;
+    \ the end's and a new game's redraw everything, $9B34 and $97CD): at
+    \ once if it needs nothing of the frame (no sensor in range: the lists'
+    \ copy alone, as the original's), else once the frame of the pass's end
+    \ is drawn, before the next pass (live_idle)
     LDA GameFlags : AND #4 : STA sn_proj
     LDA GameFlags2 : AND #8 : ORA sn_proj : BEQ untested
     LDA #ACCCON_X : TSB acccon
@@ -946,6 +985,36 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     PAGE_IN BANK_GLUE
     JMP lv_setup
 .done
+    RTS
+}
+
+\ lv_waited (lv_pass's, during the end's wait, $9B43-$9B5B): no key is
+\ read for END_DEAF fields; then any held or gone down answers it (C set,
+\ A = 0), until END_FIELDS: then it has run out (C set, A = 1), the demo
+\ next. C clear while it waits.
+END_DEAF   = 75
+END_FIELDS = 13 * END_DEAF
+.lv_waited
+{
+    ZA_AUTO2 e
+    LDA lv_now : SEC : SBC lv_end_t0 : STA e
+    LDA lv_now+1 : SBC lv_end_t0+1 : STA e+1
+    BNE reading
+    LDA e : CMP #END_DEAF : BCC no
+.reading
+    LDX #KEYS_BYTES - 1
+.key
+    LDA keys,X : ORA keys_made,X : BNE answered
+    DEX : BPL key
+    LDA e : CMP #LO(END_FIELDS) : LDA e+1 : SBC #HI(END_FIELDS) : BCC no
+    LDA #1                                      ; (run out: C set)
+    RTS
+.answered
+    LDA #0
+    SEC
+    RTS
+.no
+    CLC
     RTS
 }
 
@@ -1048,6 +1117,7 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 \ the one whose RIG_SHOWN fields these are, then the area's again.
 .lv_messages
 {
+    LDA lv_over : BNE done                      ; (the end's stays till a new game)
     LDA lv_now : SEC : SBC lv_msg_t0 : TAX
     LDA lv_now+1 : SBC lv_msg_t0+1 : BNE ended
     TXA
@@ -1991,6 +2061,7 @@ ENDSECTION
     ZA_ENTRY
     JSR logic_go_init : JSR logic_go_minute : JSR logic_go_pass
     JSR logic_go_colours : JSR logic_go_shown
+    JSR logic_go_end : JSR logic_go_restart
     RTS
 
 \ live_first: the demo off, and the first entrance.
@@ -2270,6 +2341,9 @@ ENDSECTION
 SECTION ObjMore
 .obj_more_end
 ENDSECTION
+SECTION LogicMore
+.logic_more_end
+ENDSECTION
 SECTION ObjCache
 .obj_cache_end
 ENDSECTION
@@ -2369,7 +2443,7 @@ ASSERT obj_andy_end <= &9000 AND obj_andy_reach >= &9000
 \ ACCCON's X switches, as the frame reads them whatever X.
 ASSERT LO(RASTER_STATE_ORG) = 0 AND RASTER_STATE_ORG >= &0E00
 ASSERT live_end <= area_code_end AND area_code_end <= LOGIC_WORK AND logic_work_end <= LOGIC_WORK_END
-ASSERT logic_work_end <= obj_more_end AND obj_more_end <= &3000
+ASSERT logic_work_end <= obj_more_end AND obj_more_end <= logic_more_end AND logic_more_end <= &3000
 \ The OS's pages: Work, AreaKeep, then RasterIn (with ObjOut over it) to
 \ the NMI's page, and there the start, below the MOS's extended vectors.
 ASSERT work_end <= area_keep_end AND area_keep_end <= RASTER_IN_ORG
@@ -2414,6 +2488,7 @@ LIVE_PARTS = {
     {"LAREA", -1, live_end, area_code_end},
     {"LOGICW", -1, LOGIC_WORK, logic_work_end},
     {"OMORE", -1, logic_work_end, obj_more_end},
+    {"LMORE", -1, obj_more_end, logic_more_end},
     {"PANEL", -1, PANEL_LOAD, panel_pack_end},
     {"OCONST", -1, obj_memo_end, obj_const_end},
     {"SDATA", -1, SOUND_DATA_ORG, sound_data_end},

@@ -443,6 +443,19 @@ def centred(text, n):
     return " " * (pad // 2) + text + " " * (pad - pad // 2)
 
 
+NAME_LEN = 12           # an area's name in the database: the original's field
+
+
+def name_text(name):
+    """An area's name in the panel's 14 cells: the original's 12
+    characters, as its own field shows them, a space each side (the same as
+    the name centred for every area but 127's, whose characters the end
+    writes the safe sectors into)."""
+    if len(name) == NAME_LEN:
+        return " " + name + " "
+    return centred(name, 14)
+
+
 def bar_lit(v):
     """The pixels a bar lights for v: BAR_CELLS * 4 for BAR_MAX or more,
     none for 0, at least one for 1."""
@@ -464,7 +477,7 @@ def cells(values, before=None, build=None):
     out = {
         "score": text_cells(number(v["score"], 7), 7),
         "message": text_cells(message, 14),
-        "name": text_cells(centred(v["name"] or "", 14), 14),
+        "name": text_cells(name_text(v["name"] or ""), 14),
         "shield": bar_cells(v["shield"]),
         "energy": bar_cells(v["energy"]),
         "heading": heading_cells(v["yaw"] % STEPS),

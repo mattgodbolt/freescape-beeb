@@ -68,7 +68,7 @@ SL_FIRING  = SL_FOUND + SL_ENTRY * SL_ENTRIES
 .Collided       EQUB ZXI_Collided       ; the id of the object the move hit
 .Wipe           EQUB ZXI_Wipe           ; non-zero: the screen's copy wipes
 .ShotFlag       EQUB ZXI_ShotFlag       ; non-zero: the events are a shot's
-.GameOver       EQUB ZXI_GameOver       ; why the game ended: 1 shield, 2 time, 3 energy, 4 a fall
+.GameOver       EQUB ZXI_GameOver       ; why the game ended: 1 shield, 2 time, 3 energy, 4 a fall, 5 won, 6 abandoned
 .KeyCount       EQUB ZXI_KeyCount       ; the keys read this pass, at most 5
 .Keys           EQUB ZXI_Keys           ; their codes, in the keyboard's order
 .Countdown      EQUB ZXI_Countdown      ; frames to wait

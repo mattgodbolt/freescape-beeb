@@ -1,0 +1,51 @@
+# The game's end ($9AB7) and a new game ($9C36, $97CD): each way the game
+# ends, the end's scene (area 127, the safe sectors in its name, the
+# message by cause), its wait answered, and the new game played on.
+# A fall too far (GameOver 4): NASTY FALL, sound 20.
+at 1312 1184 3872
+angles 0 54 0
+O x2
+expect GameOver 4
+end
+expect GameOver 0
+expect AreaId 1
+expect Score 0
+O
+Q
+# Energy out (GameOver 3) as a minute ends with none: ENERGY OUT. Some
+# safe sectors first, which the end's area's name shows.
+poke 889E 07
+poke 8875 00
+tick
+expect GameOver 3
+end
+expect FclVar32 0
+expect Energy 48
+O O
+# Won (GameOver 5): the eighteenth rig with half the gas or more: TASK
+# COMPLETED, and no sound 20; then the wait left to run out, the demo
+# next, a new game without the control menu or the crosshair.
+poke 889E 11
+at 6304 160 5920
+angles 0 0 0
+D
+expect GameOver 5
+end demo
+expect CrossOn 0
+# The demo's passes: the header's stream of actions, a pass each (turns
+# and steps first), until a key ends it: a new game, with the control
+# menu (ENTER) and the crosshair.
+demo x30
+ENTER
+expect CrossOn 255
+O
+# Shield out (GameOver 1) by a sensor's shot: area 28's, on the screen.
+# (Last: the 6502 logic's trace leaves the shots to the disc, and stops.)
+goto 28 19
+P
+poke 8878 01
+sensors 60
+expect GameOver 1
+end
+expect AreaId 1
+O

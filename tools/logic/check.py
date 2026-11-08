@@ -30,7 +30,7 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from logic import fcl, move, scenario  # noqa: E402
+from logic import end as lend, fcl, move, scenario  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.move import Freeze  # noqa: E402
 from logic.oracle import Original, SCRIPT, Waiting  # noqa: E402
@@ -194,6 +194,29 @@ def sight_check(st, s, projected, redrawn):
         raise Mismatch(f"{st.line}: the redraw's sensors differ (original, transcription): " + ", ".join(bad))
 
 
+ENDS = collections.Counter()   # the ends and new games compared, by how
+
+
+# What the logic's end and new game set of the variables the renderer's
+# side writes too: kept when the rest are taken from the original.
+KEPT = ("Energy", "Shield", "GameOver", "Sound")
+
+
+def compare_drawn(st, s, mem, what):
+    """After a redraw the renderer's outputs are the original's (as after
+    the FCL's REDRAW), but what the logic set of them (KEPT); then every
+    variable and the database must agree."""
+    kept = {k: getattr(s, k) for k in KEPT}
+    s.sync_from(mem)
+    for k, v in kept.items():
+        setattr(s, k, v)
+    diffs = differences(State(mem).snapshot(), s.snapshot())
+    if diffs:
+        lines = [f"{st.line}: {len(diffs)} differ, {what} (original, transcription):"]
+        lines += [f"  {name}: {fmt(a)}  {fmt(b)}" for name, a, b in diffs[:40]]
+        raise Mismatch("\n".join(lines))
+
+
 def run(steps, snap, verbose=False):
     """Run steps on both sides; returns the passes compared. Raises
     Mismatch at the first difference."""
@@ -202,7 +225,28 @@ def run(steps, snap, verbose=False):
     last = orig.memory()   # the original as the last step left it (a pass: at $982B)
     passes = 0
     over = False
+    ending = False     # the original is at its end ($9AB7)
     for st in steps:
+        if st.kind == "end":
+            # The end: the input's next pass finds the game over, unless the
+            # last did; the scene; the wait answered; the new game.
+            if not (over or s.GameOver):      # (a sensors step's shots may end it)
+                raise Mismatch(f"{st.line}: an end with the game going on")
+            if not ending:
+                s.sync_from(orig.begin())
+                if run_pass(s, (), False, Hooks()) != "over":
+                    raise Mismatch(f"{st.line}: the transcription's input didn't find the game over")
+                orig.run_pass((), False, ends=True)
+            hooks = Hooks()
+            lend.end(s, hooks)
+            scene, restarted = orig.end(demo=st.demo)
+            compare_drawn(st, s, scene, "at the end's scene")
+            lend.restart(s, hooks, demo=st.demo)
+            compare_drawn(st, s, restarted, "after the new game")
+            ENDS[f"GameOver {State(scene).GameOver}" + (", the demo next" if st.demo else "")] += 1
+            last = restarted
+            over = ending = False
+            continue
         if over and st.kind != "expect":
             break   # the game is over: the original goes to its end ($9AB7)
         if st.kind == "expect":
@@ -261,6 +305,16 @@ def run(steps, snap, verbose=False):
                     break
                 raise Mismatch(f"{st.line}: the transcription hangs ({e}); the original doesn't")
             after = orig.run_pass(st.keys, st.tick, ends=alive == "over")
+            if alive == "new" or (alive != "over" and orig.new_game):
+                # a new game after the pass (the demo's end, or a key in it):
+                # the original's from the main loop's top after it
+                if alive != "new" or not orig.new_game:
+                    raise Mismatch(f"{st.line}: a new game on one side only")
+                passes += 1
+                compare_drawn(st, s, after, "after the new game")
+                ENDS["the demo's new games"] += 1
+                last = after
+                continue
             if any(n == "message" for n, _ in hooks.log) and any(n == "redraw" for n, _ in hooks.log):
                 # a rig's redraw: the pass again, with the original's Collided
                 s = s0
@@ -296,6 +350,7 @@ def run(steps, snap, verbose=False):
             raise Mismatch("\n".join(lines))
         if st.kind == "pass" and (alive == "over" or not alive):
             over = True
+            ending = alive == "over"
     return passes
 
 
@@ -403,6 +458,8 @@ def main():
         print(f"shots picked from the BBC's view: {SHOTS['hit']} hit, {SHOTS['missed']} missed")
     if SENSORS:
         print("the sensors: " + ", ".join(f"{k} {v}" for k, v in sorted(SENSORS.items())))
+    if ENDS:
+        print("the ends and new games: " + ", ".join(f"{k} {v}" for k, v in sorted(ENDS.items())))
     if REDRAWN[0]:
         print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
     if FROZE[0]:

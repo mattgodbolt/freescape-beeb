@@ -106,3 +106,7 @@ ASSERT ZXI_RigScratch[2] = 1                    ; (the instruction's ADDSCORE, w
     JSR hook_wait
     STZ Countdown
     RTS
+
+\ The game's end, a new game and the demo (in LogicMore, main RAM, which
+\ the includer declares).
+INCLUDE "end.6502"

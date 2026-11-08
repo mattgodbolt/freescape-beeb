@@ -686,9 +686,10 @@ disc's demo.
 
 - The hooks still empty: the panel's key lights (and what else
   `docs/research/panel.md` leaves), the draw list (`hook_undraw`), the
-  information screen, the game's end and a new game
-  (`docs/research/game-audit.md` has what each needs; the laser and the
-  sensors, 2026-11-08: `docs/research/laser.md`, `sensors.md`).
+  information screen (`docs/research/game-audit.md` has what it needs;
+  the laser and the sensors, 2026-11-08: `docs/research/laser.md`,
+  `sensors.md`; the game's end, a new game and the demo:
+  `docs/research/end.md`).
 - Shooting mode moves the crosshair a pass a frame; since 2026-11-06 only
   the first move after the view changes draws a whole frame (into the
   buffer with the older view), and the rest move the crosshair alone ("The

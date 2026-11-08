@@ -1,0 +1,271 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the game's end, a new game and the demo
+\ (tools/logic/end.py: the original's $9AB7, $9B62, $9C36 with $BD74,
+\ $97CD; tools/logic/passes.py's demo_action, $9A27)
+\
+\ In section LogicMore, which the includer declares first, in main RAM:
+\ these read the database's header and records (LOGIC_BANK) and call the
+\ pass's code (LOGIC_CODE_BANK), so they page each in as they go. The
+\ frame's entries are logic_go_end and logic_go_restart; the pass calls
+\ new_game_due and demo_next.
+\ ***************************************************************************
+
+SECTION LogicMore
+
+END_AREA    = &7F           ; the end's area ($9B02)
+END_WON     = 5             ; GameOver when won: no sound 20
+END_SOUND   = &14
+RESTART_SOUND = 6
+START_WAIT  = &28           ; a game's start's frames before its crosshair ($97F0)
+DEMO_ON     = 3             ; Demo when the demo plays itself
+
+\ hdr(a): the database's byte at the original's a, in LOGIC_BANK.
+FUNCTION hdr(a) = a + DB_MOVE
+Demo        = zx(&891F)     ; 3: the demo plays itself
+DemoStream  = zx(&8924)     ; the demo's stream (in the bank) ...
+DemoCount   = zx(&8926)     ; ... the times its action has left ...
+DemoAt      = zx(&8927)     ; ... and where it's got to
+Clock       = zx(&88A4)     ; the clock's text, hh:mm:ss
+
+\ logic_go_end ($9AB7-$9B40): the game's end, once logic_go_pass has
+\ answered 2: the message by cause (hook_message), sound 20 unless won,
+\ area 127 entered (its name takes the safe sectors, FclVar32, two digits
+\ after its first character, the first a space for 0) and everything to
+\ redraw. The original then waits for a key: logic_go_restart.
+.logic_go_end
+{
+    LOGIC_PAGE A, LOGIC_BANK
+    LDX GameOver : DEX : CPX #6 : BCC known
+    LDX #5                                      ; (0, or past 6: 6's)
+.known
+    LDA end_at,X : CLC : ADC #LO(end_msg) : TAX
+    LDA #HI(end_msg) : ADC #0 : TAY
+    JSR hook_message
+    LDA GameOver : CMP #END_WON : BEQ won
+    LDA #END_SOUND : JSR hook_sound
+.won
+    LDA #END_AREA : STA AreaId
+    STZ EntranceId : STZ CrossOn
+    JSR go_to_entrance
+    JSR end_name
+    LDA #4 : STA GameFlags
+    LDA #&40 : STA GameFlags2
+    RTS
+}
+\ end_name ($9B11-$9B2C): the safe sectors into area 127's name.
+.end_name
+{
+    ZA_AUTO2 p
+    LDA AreaNamePtr : CLC : ADC #1 : STA p
+    LDA AreaNamePtr+1 : ADC #0 : STA p+1
+    LDA FclVar32
+.hundreds
+    CMP #100 : BCC tens
+    SBC #100
+    BRA hundreds
+.tens
+    LDX #'0'
+.ten
+    CMP #10 : BCC units
+    SBC #10 : INX
+    BRA ten
+.units
+    ORA #'0' : LDY #1 : STA (p),Y
+    TXA : CMP #'0' : BNE named
+    LDA #' '
+.named
+    STA (p)
+    RTS
+}
+.end_msg    EQUB ZX_END_MSG
+.end_at     EQUB ZX_END_AT
+ASSERT LEN(ZX_END_AT) = 6 AND LEN(ZX_END_MSG) < 256
+
+\ logic_go_restart ($9B43-$9B6D, then the main loop's $982B): the end's
+\ wait answered: A = 0 by the keys in logic_keys (read as the wait reads
+\ them, from none), or else run out, the demo next; sound 6, and the new
+\ game and its start.
+.logic_go_restart
+{
+    PHA
+    LOGIC_PAGE Y, LOGIC_CODE_BANK
+    \ (the wait's reads of the keys: none held through its first 75 frames,
+    \ as read_keys leaves them with none ...)
+    STZ KeyCount : STZ LastKeyCount
+    LDX #KEYS_BYTES - 1
+.rows
+    STZ KeyRows,X
+    DEX : BPL rows
+    PLA : BNE demo
+    JSR read_keys                               ; (... then the keys)
+    BRA answered
+.demo
+    LDA #DEMO_ON : STA Demo
+.answered
+    LDA #RESTART_SOUND : JSR hook_sound
+    LDA #2 : STA GameFlags : STZ GameFlags2
+    \ (the events: none, as the input that found the end cleared EventsDue)
+}
+    \ (on into new_game_due)
+
+\ new_game_due ($982B): GameFlags bit 1 (the end's way out, or the demo's)
+\ asks for a new game and its start. C set if one came; returns with
+\ LOGIC_CODE_BANK paged.
+.new_game_due
+{
+    LDA GameFlags : AND #2 : BNE due
+    CLC
+    RTS
+.due
+    JSR new_game
+    \ $97CD: a game's start: everything to redraw; but in the demo, the
+    \ control menu's read of the keys (its ENTER, still held), 40 frames,
+    \ and the crosshair shown as B shows it; and the game goes on
+    LDA #&FD : STA GameFlags
+    LDA #&FF : STA GameFlags2
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+    LDA Demo : CMP #DEMO_ON : BEQ started
+    JSR read_keys
+    LDA #START_WAIT : JSR wait
+    LDA #&15 : JSR crosshair_action
+.started
+    STZ GameOver
+    SEC
+    RTS
+}
+
+\ new_game ($9C36, $BD74): from the database's header, the probe's level,
+\ the sizes, the vehicles' energy and shields, the limits, the keys'
+\ repeat, the clock's text and the vehicle; the score, the FCL's bits and
+\ variables, the rigs, the crosshair and the sensors' lists cleared; area
+\ and entrance from the header; then every object's flags as the database
+\ began (bit 7: invisible at the start). The header's pointers ($BD74's
+\ first part) never change, so aren't written again; the panel's and the
+\ screen's are the renderer's.
+.new_game
+{
+    ZA_AUTO2 tp, fa, p
+    ZA_AUTO1 n, k
+    LOGIC_PAGE A, LOGIC_BANK
+    LDA hdr(&CFFC) : STA ExtLevel
+    LDA hdr(&D000) : STA StepIndex
+    LDA hdr(&D001) : STA TurnIndex
+    LDA #1 : STA GameOver : STA Wipe
+    STZ CrossOn : STZ SensorList : STZ SensorList+1
+    STZ GasChosen : STZ Sound : STZ ShootMode : STZ CrossWanted
+    STZ Score : STZ Score+1 : STZ Score+2
+    LDX #&889F - &887B - 1                      ; the FCL's bits and its 32 variables
+.fcl
+    STZ FclBits,X
+    DEX : BPL fcl
+    LDX #2 * 18 - 1                             ; RigPlaced and RigState
+.rigs
+    STZ RigPlaced,X
+    DEX : BPL rigs
+    LDA hdr(&CF44) : STA JetEnergy
+    LDA hdr(&CF46) : STA ProbeEnergy
+    LDA hdr(&CF45) : STA JetShield
+    LDA hdr(&CF47) : STA ProbeShield
+    LDX StepIndex : LDA StepTable+1,X : STA Step
+    LDX TurnIndex : LDA TurnTable+1,X : STA Turn
+    LDA DemoStream : STA DemoAt
+    LDA DemoStream+1 : STA DemoAt+1
+    STZ DemoCount
+    LDA hdr(&CFFA) : STA FallLimit
+    LDA hdr(&CFFB) : STA ClimbLimit
+    LDA hdr(&CFFD) : STA ExtMax
+    LDA hdr(&D002) : STA RepeatDelay
+    LDA hdr(&D003) : STA RepeatRate
+    LDX #7
+.clock
+    LDA hdr(&CFF2),X : STA Clock,X
+    DEX : BPL clock
+    LDA hdr(&CFFF) : STA InJet : BEQ probe
+    LDA #&80 : TSB FclBits+3
+    LDA JetEnergy : STA Energy
+    LDA JetShield
+    BRA shield
+.probe
+    LDA #&80 : TRB FclBits+3
+    LDA ProbeEnergy : STA Energy
+    LDA ProbeShield
+.shield
+    STA Shield
+    LDA hdr(&CF41) : STA AreaId
+    LDA hdr(&CF42) : STA EntranceId
+    JSR go_to_entrance
+    \ $9CDD: each area's objects' flags, destroyed and invisible cleared,
+    \ and invisible again where bit 7 says it was at the start
+    LDA AreaTablePtr : STA tp
+    LDA AreaTablePtr+1 : STA tp+1
+    LDA LOGIC_DB : STA n                        ; the areas (0 is 256)
+.area
+    LDA (tp) : CLC : ADC DbPtr : STA fa
+    LDY #1 : LDA (tp),Y : ADC DbPtr+1 : STA fa+1
+    LDA (fa),Y : BEQ next_area
+    STA k
+    LDA fa : CLC : ADC #&19 : STA p
+    LDA fa+1 : ADC #0 : STA p+1
+.object
+    LDA (p) : AND #&9F : BPL kept
+    ORA #&40
+.kept
+    STA (p)
+    LDY #8 : LDA (p),Y : CLC : ADC p : STA p
+    BCC same
+    INC p+1
+.same
+    DEC k : BNE object
+.next_area
+    LDA tp : CLC : ADC #2 : STA tp
+    BCC next
+    INC tp+1
+.next
+    DEC n : BNE area
+    RTS
+}
+ASSERT ZXV_ORG <= &8924 AND &8929 <= ZXV_END AND ZXV_ORG <= &88A4 AND &88AC <= ZXV_END
+ASSERT FIND(ZXV_PTRS, &8924 - ZXV_ORG, -1) >= 0 AND FIND(ZXV_PTRS, &8927 - ZXV_ORG, -1) >= 0
+ASSERT RigState = RigPlaced + 18 AND FclVars = FclBits + 4 AND FclVar32 = FclBits + 4 + 31
+
+\ demo_next ($9A34-$9A62): the demo's pass, no key held: KeyCount 1 and
+\ the stream's next action, C set and A; or at the stream's end (a 0), C
+\ clear and GameFlags bit 1 (a new game, the demo again). A byte of &80 +
+\ n is followed by an action done n times. Returns with LOGIC_CODE_BANK
+\ paged.
+.demo_next
+{
+    ZA_AUTO2 p
+    LOGIC_PAGE A, LOGIC_BANK
+    LDA #1 : STA KeyCount
+    LDA DemoAt : STA p
+    LDA DemoAt+1 : STA p+1
+    LDA DemoCount : BEQ fresh
+    DEC DemoCount
+    LDA (p)
+    LDX DemoCount : BNE acted
+    INC DemoAt : BNE acted
+    INC DemoAt+1
+.acted
+    LOGIC_PAGE Y, LOGIC_CODE_BANK
+    SEC
+    RTS
+.fresh
+    LDA (p) : BEQ ended
+    PHA
+    INC p : BNE stepped
+    INC p+1
+.stepped
+    LDA p : STA DemoAt
+    LDA p+1 : STA DemoAt+1
+    PLA : BPL acted
+    AND #&7F : DEC A : STA DemoCount
+    LDA (p)
+    BRA acted
+.ended
+    LDA #2 : STA GameFlags : STZ GameFlags2
+    LOGIC_PAGE Y, LOGIC_CODE_BANK
+    CLC
+    RTS
+}
+ENDSECTION

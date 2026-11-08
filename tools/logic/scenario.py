@@ -16,6 +16,13 @@ in-play snapshot (make zx: area 1, entrance 19, on the probe).
     poke 8772 03      bytes at an address, hex, on both sides
     at 4640 160 5920  the camera's x, y, z (decimal)
     angles 0 34 0     its pitch, yaw, roll (decimal)
+    end               the game's end (after the pass that ended it: the
+                      original's $9AB7, from the input's next pass, which
+                      finds it), its wait answered by ENTER, and the new
+                      game it starts ($9C36, $97CD)
+    end demo          ... its wait left to run out: the demo next
+    demo x20          passes with no key held while the demo plays (a pass
+                      of keys ends it, and a new game starts)
     expect AreaId 2   a variable's value after the last step (decimal or
                       $hex), on both sides: a scenario says what it shows.
                       Keys[0] is one byte of a run; a run alone reads as a
@@ -65,6 +72,18 @@ def parse(text, name="scenario"):
                 steps.append(Step("pass", where, keys=(), tick=True))
         elif w0 == "sensors":
             steps.append(Step("sensors", where, n=int(words[1])))
+        elif w0 == "end":
+            if words[1:] not in ([], ["demo"]):
+                raise ValueError(f"{where}: an end is 'end' or 'end demo': {line!r}")
+            steps.append(Step("end", where, demo=words[1:] == ["demo"]))
+        elif w0 == "demo":
+            repeat = 1
+            if len(words) == 2 and re.fullmatch(r"x\d+", words[1]):
+                repeat = int(words[1][1:])
+            elif len(words) != 1:
+                raise ValueError(f"{where}: the demo's passes take no keys: {line!r}")
+            for _ in range(repeat):
+                steps.append(Step("pass", where, keys=(), tick=False))
         elif w0 == "goto":
             steps.append(Step("fcl", where, code=[0x12, int(words[1]), int(words[2])], shot=False))
         elif w0 in ("fcl", "shot"):

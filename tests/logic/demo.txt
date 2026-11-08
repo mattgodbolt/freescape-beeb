@@ -1,0 +1,11 @@
+# The demo ($9A27) whole: the end's wait left to run out, then the
+# header's stream of actions a pass each, to its end, where a new game
+# begins the demo again ($9B67, $891F still 3); a key then ends it.
+poke 889E 11
+at 6304 160 5920
+angles 0 0 0
+D
+end demo
+demo x480
+ENTER
+expect CrossOn 255

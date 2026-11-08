@@ -318,7 +318,10 @@ come with it, to see where the cycles go.
   ACCCON's X and whatever bank is paged: the interrupt, the code that
   pages, the rasteriser's state, the player logic's variables
   (`LogicWork`, `docs/research/logic6502.md`), the maths' code (which
-  patches itself), the sound's driver and its hook (`src/sound.6502`).
+  patches itself), the sound's driver and its hook (`src/sound.6502`);
+  after the front end's `ObjMore`, the logic's code that reaches both of
+  its banks (`LogicMore`: the game's end, a new game and the demo's
+  stream, `src/logic/end.6502`, 2026-11-08).
 - `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
   RAM's. Data kept per buffer (section 4, stage 10) needs the same
   addresses free in both. The live disc keeps the front end's data in main

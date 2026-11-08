@@ -396,6 +396,10 @@ cpu.debugInstruction.add((addr, opcode) => {
     } else if (!FREE && addr === LV_TAKING) {
         lastTaking = now();
         passAsks = sounds.log().asks.length;
+    } else if (!FREE && addr === LV_SWITCHED) {
+        // (an area's change, which waited for the pass's waits: what it
+        // enters wants a frame, so the loops before it don't settle it)
+        idleSeen = false;
     } else if (addr === PANEL_WAITING && bank === BANK_DATA) {
         panelWaits++;
     } else if (addr === PANEL_VALUES && bank === BANK_DATA) {
@@ -558,9 +562,15 @@ const entranceMessage = (id, demo) => ` ${demo ? "    DEMO" : "ENTRANCE"} ${id >
 // message: with the free camera, its entrance (and the demo); with the
 // logic, what the panel's values set (checked against the model's, below).
 let linesChecked = 0;
+// An area's name in the panel's cells (tools/model/panel.py's name_text):
+// the original's twelve characters, a space each side; the end's area's
+// with the safe sectors in it (endName, the logic's), as the end writes them.
+const nameText = (n) => (n.length === 12 ? ` ${n} ` : centred(n, PN_NAME));
+let endName = () => null;
+const areaName = (area) => (area === panelBuild.end_area && endName() ? endName() : panelBuild.names[area]);
 function checkLines(frame) {
     const want = panelCells(PANEL_WANT), shown = panelCells(PANEL_SHOWN);
-    const name = cellsOf(centred(live.areas[frame.area].name, PN_NAME)).join();
+    const name = cellsOf(nameText(frame.name ?? areaName(frame.area))).join();
     const range = (cells, f, n) => cells.slice(f, f + n).join();
     if (range(want, PF_NAME, PN_NAME) !== name || range(shown, PF_NAME, PN_NAME) !== name)
         fail(`frame ${frame.n} (area ${frame.area}) doesn't want and show its name: ${range(want, PF_NAME, PN_NAME)} and ${range(shown, PF_NAME, PN_NAME)}, not ${name}`);
@@ -620,15 +630,16 @@ let passMessages = [], passMessagesT = 0, messagesShown = 0;
 const LV_MSG_ON = syms.lv_msg_on, LV_MSGS_AT = syms.lv_msgs, LV_MSG_T0 = syms.lv_msg_t0;
 function onValued() {
     const v = { want: panelCells(PANEL_WANT), mem: panelMem(), area: ram[PANEL_AREA], over: ram[PANEL_OVER], script };
+    if (v.area === panelBuild.end_area && endName()) v.name = endName();
     const on = LV_MSG_ON === undefined ? 0 : ram[LV_MSG_ON];
     if (on) {
         const text = String.fromCharCode(...ram.subarray(LV_MSGS_AT + 14 * (on - 1), LV_MSGS_AT + 14 * on));
         // its time: on - 1 whole RIG_SHOWN fields from the pass's (lv_now as
-        // the pass ran, lv_msg_t0)
+        // the pass ran, lv_msg_t0); the end's stays till a new game
         const e = (ram[syms.lv_now] | (ram[syms.lv_now + 1] << 8)) - (ram[LV_MSG_T0] | (ram[LV_MSG_T0 + 1] << 8));
         if (text !== passMessages[on - 1])
             fail(`${script}: the panel shows message ${on} "${text}", the transcription's pass showed ${JSON.stringify(passMessages)}`);
-        else if (Math.floor(e / syms.RIG_SHOWN) !== on - 1)
+        else if (!ram[syms.lv_over] && Math.floor(e / syms.RIG_SHOWN) !== on - 1)
             fail(`${script}: message ${on} shown ${e} fields into the pass's messages`);
         else messagesShown++;
         v.msg = text;
@@ -779,6 +790,7 @@ const press = async (key) => {
 // --- The logic's disc.
 const LIVE_PASSED = FREE ? -1 : sym("lv_pass.live_passed");
 const LV_TAKING = FREE ? -1 : sym("lv_pass.timed"); // (where a pass takes the keys)
+const LV_SWITCHED = FREE ? -1 : sym("lv_switched");
 let lastTaking = null;
 let passAsks = 0, passSoundsOk = 0, soundsAsked = 0; // (the sounds asked for since the pass began)
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
@@ -877,6 +889,16 @@ async function logicScript() {
 
     const exp = new Uint8Array(0x10000);
     for (const [a, v] of trace.start) exp[a] = v;
+    // the end's area's name as the logic's database has it (the end writes
+    // the safe sectors into it, and nothing puts it back)
+    endName = () => {
+        const base = zw(0x8912), table = zw(0x8914);
+        for (let k = 0; k < exp[dbLo]; k++) {
+            const a = (base + zw(table + 2 * k)) & 0xffff;
+            if (exp[a + 2] === 0x7f) return String.fromCharCode(...exp.subarray(a + 13, a + 25));
+        }
+        return null;
+    };
     // the panel's values are the transcription's state's (onValued)
     panelMem = () => memOf((a) => exp[a]);
     // The game's start, as the disc booted: its state now must be the
@@ -890,7 +912,7 @@ async function logicScript() {
     // The keys: the ZX's names as the BBC's (src/input.6502's KEY_MAP).
     // Driller's Z, X, A and S (the turn's and the step's sizes) are on the
     // function keys, the BBC's Z and X being motion (decision 10).
-    const MOVED = { Z: "F0", A: "F1", X: "F2", S: "F3" };
+    const MOVED = { Z: "F0", A: "F1", X: "F2", S: "F3", ENTER: "RETURN" };
     const bbcKey = (k) => (/^[0-9]$/.test(k) ? BBC[`K${k}`] : BBC[MOVED[k] ?? k]);
     let held = new Set();
     function hold(keys) {
@@ -1013,7 +1035,9 @@ async function logicScript() {
         const tPass = V16("lv_now"), made = V("lv_made") !== 0;
         const prev = passLog.at(-1);
         if (made) lastMade = tPass;
-        else if (!rec.tick) {
+        else if (!rec.tick && rec.names.length) {
+            // (a pass of no keys comes by itself, not as keys held repeat:
+            // the game over found, the demo's, a minute's left to take)
             const gap = (tPass - (lastMade ?? tPass)) & 0xffff;
             if (lastMade !== null && gap < REPEAT_FIELDS) fail(`${where}: the keys held repeated ${gap} fields after a key went down, not ${REPEAT_FIELDS}`);
             if (prev && prev.run === script && rec.names.length) (prev.made ? firstRepeats : repeats).push((tPass - prev.t) & 0xffff);
@@ -1138,11 +1162,16 @@ async function logicScript() {
                 await until(() => waited, `${where}: the input waiting`);
                 waiting();
                 sensorFields = rec;
+                // (their shots ending the game: the input's next pass finds
+                // it at once, and the end, the trace's next step)
+                if (rec.soon) want = { rec: run.steps[i + 1], where: `${script} ${run.steps[i + 1].line}`, steps: run.steps, i: i + 1 };
                 await settle(where);
+                if (rec.soon) await until(() => done.has(run.steps[i + 1]), `${where}: the game over`);
                 const d = compare();
                 if (d.length) report(where, d);
                 else sensorSteps++;
-                const asked = sounds.log().asks.slice(sensorAsks).map((a) => a[1]);
+                // (up to the pass that found the game over, if their shots ended it)
+                const asked = sounds.log().asks.slice(sensorAsks, rec.soon ? passAsks : undefined).map((a) => a[1]);
                 if (asked.join() !== (rec.sounds ?? []).join())
                     fail(`${where}: the sensors asked for the sounds ${asked.join(",") || "none"}, the transcription ${(rec.sounds ?? []).join(",") || "none"}`);
                 sensorShots += asked.length;
@@ -1173,7 +1202,12 @@ async function logicScript() {
                     for (const [a, v] of batch) exp[a] = v;
                     for (const [a] of batch) put(a, exp[a]);
                 };
+                // (one that ends the game: the input's next pass finds it at
+                // once, and the end, the trace's next step)
+                const over = run.steps[j - 1].soon ? run.steps[j] : null;
+                if (over) want = { rec: over, where: `${script} ${over.line}`, steps: run.steps, i: j };
                 await settle(where);
+                if (over) await until(() => done.has(over), `${where}: the game over`);
             } else if (!done.has(rec)) {
                 // keys going down (not held on from the last pass's, which
                 // the hook asks for): pressed once the disc has settled, and
@@ -1181,7 +1215,8 @@ async function logicScript() {
                 if (want?.rec !== rec) {
                     hold([]);
                     await settleAndPress(where);
-                    if (!rec.tick) startProbe(rec.names.join("+"));
+                    // (the end's wait reads no key for its first END_DEAF fields)
+                    if (!rec.tick && !rec.restart) startProbe(rec.names.join("+"));
                     want = { rec, where, steps: run.steps, i, tDown: now() };
                     minuteDue = rec.tick;
                     hold(rec.names);

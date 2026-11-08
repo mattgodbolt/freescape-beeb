@@ -476,6 +476,10 @@ def papers(screen):
 # memory, and the disc's own for the game's end.
 ZX_MESSAGES = {"neutral": 0x8C12, "cleared": 0x8BF6, "build": 0x8C04}
 MESSAGE_LEN = 14
+# The end's area (tools/logic/end.py's END_AREA), whose name's characters 1
+# and 2 the end writes the safe sectors into ($9B11).
+END_AREA = 0x7F
+END_DIGITS = 1
 
 
 def messages(snap):
@@ -529,6 +533,8 @@ def assembly(build, packed):
         f"PANEL_LOWEST = &{min(a for a, _k in cells):04X}",
         f"PANEL_TILES = {len(build['tiles'])}",
         f"PANEL_AREAS = {len(names)}",
+        f"PANEL_END_AREA = {build['end_area']}",
+        f"PANEL_END_DIGITS = {END_DIGITS + 1}       \\ (the safe sectors' two cells in its name's)",
         f"PANEL_MESSAGE = {MESSAGE_LEN}",
         f"PANEL_HEADING_SPAN = {2 * panel.HEADING_CELLS}",
         f"PANEL_PITCH_MID = {panel.PITCH_MID}",
@@ -584,7 +590,7 @@ def assembly(build, packed):
         L += equb(f"pm_{k}", panel.text_cells(panel.centred(build["messages"][k], MESSAGE_LEN), MESSAGE_LEN))
     L += equb("pm_vehicle", (c for v in panel.VEHICLE_NAMES for c in panel.text_cells(panel.centred(v, 5), 5)))
     L += equb("pa_names", (c for n in names
-                           for c in panel.text_cells(panel.centred(n, MESSAGE_LEN), MESSAGE_LEN)))
+                           for c in panel.text_cells(panel.name_text(n), MESSAGE_LEN)))
     L += ["ENDSECTION", "", "SECTION PanelPack"]
     L += equb("panel_packed", packed)
     L += ["ENDSECTION"]
@@ -634,7 +640,8 @@ def check(req):
     for v in req["valued"]:
         mem = dict(v["mem"])
         names = build["names"]
-        values = panel.values_of(mem, names[v["area"]] if v["area"] < len(names) else None, bool(v["over"]))
+        name = v.get("name") or (names[v["area"]] if v["area"] < len(names) else None)
+        values = panel.values_of(mem, name, bool(v["over"]))
         if v.get("msg"):
             values["message_text"] = v["msg"]       # (a rig's message, as the original's)
         if v.get("cam"):
@@ -672,13 +679,19 @@ def main(argv):
     db = json.loads(Path(data_json).read_text())
     by_id = {a["id"]: a for a in db["areas"]}
     layout = json.loads(Path(areas_json).read_text())
-    names = [by_id[a["id"]]["name"].strip() for a in layout["areas"]]
+    # (each as the database has it: the original's 12 characters,
+    # panel.name_text)
+    names = [by_id[a["id"]]["name"] for a in layout["areas"]]
+    assert all(len(n) == panel.NAME_LEN for n in names), "an area's name isn't the original's 12 characters"
+    # the end's area, whose name the end writes the safe sectors into: its
+    # index in the records' directory, and where those two characters are
+    end_area = [a["id"] for a in layout["areas"]].index(END_AREA)
     build = {
         "picture": screen.hex(), "inks": inks(pattern_of), "papers": papers(screen),
         "tables": {name: panel.table_lines(name) for name in panel.TABLES},
         "tile_places": places, "tiles": [t.hex() for t in tile_list],
         "pictures": [tiles_of(jet), tiles_of(screen)], "messages": messages(snap),
-        "names": names, "charset": panel.CHARSET,
+        "names": names, "charset": panel.CHARSET, "end_area": end_area,
     }
     packed = pack(screen)
     if unpack(packed, len(screen)) != screen:

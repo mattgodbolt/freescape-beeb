@@ -55,6 +55,7 @@ K_I     = 5 * 8 + 2         ; information
 K_U     = 5 * 8 + 3         ; turn round
 K_Y     = 5 * 8 + 4         ; (nothing in play)
     \ &BFFE: ENTER L K J H
+K_ENTER = 6 * 8 + 0         ; (nothing in play: the end's wait and the demo take any key)
 K_L     = 6 * 8 + 1         ; look down
 K_K     = 6 * 8 + 2         ; back
     \ &7FFE: SPACE SYM M N B
@@ -76,6 +77,7 @@ KEY_MAP = {
     {&32, K_D}, {&52, K_C}, {&62, K_SPACE}, {&64, K_B}, {&25, K_I},
     {&23, K_T}, {&44, K_Y},
     {&70, K_1},                                 ; ESCAPE
+    {&49, K_ENTER},                             ; RETURN
     {&69, K_0},                                 ; COPY
     {&39, K_7}, {&29, K_6}, {&19, K_5}, {&79, K_8}  ; the cursor keys: up, down, left, right
 }

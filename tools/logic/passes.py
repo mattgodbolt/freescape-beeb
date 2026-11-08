@@ -226,7 +226,11 @@ def input_pass(s, held, hooks):
     s.ActionIndex = 0
     hooks.key_lights(s, "off")
     if s.mem[DEMO] == 3:
-        raise NotImplementedError("the demo's playback ($9A27)")
+        a = demo_action(s, held, hooks)
+        if a is None:
+            return True
+        hooks.key_lights(s, "on")
+        return _act(s, 1, hooks, a)     # (not kept in Actions: $9A63 takes it in A)
     first = read_keys(s, held, hooks)
     if s.GameOver:
         hooks.game_over(s)
@@ -241,9 +245,52 @@ def input_pass(s, held, hooks):
     for i in range(n):
         s.mem[0x998A + i] = _action_of(s, s.mem[0x8FBD + i])
     hooks.key_lights(s, "on")
+    return _act(s, n, hooks)
+
+
+def demo_action(s, held, hooks):
+    """$9A27: the demo plays itself. A key held ends it ($891F 1) and a new
+    game comes after the pass, as the end's way out ($9B62); else the next
+    action of the database's recorded stream ($8927, the header's $CF84 on:
+    a byte an action, or $80 + n then an action done n times; 0 ends it,
+    and the demo begins again with a new game, $9B67). Returns the action,
+    or None if the pass does none."""
+    from .end import RESTART_SOUND
+    m = s.mem
+    if read_keys(s, held, hooks) is not None:
+        m[DEMO] = 1
+        hooks.sound(s, RESTART_SOUND)
+        s.GameFlags, s.GameFlags2 = 2, 0
+        return None
+    s.KeyCount = 1
+    hl = m[0x8927] | m[0x8928] << 8
+    n = m[0x8926]
+    if n:
+        n = (n - 1) & 0xFF
+        m[0x8926] = n
+        a = m[hl]
+        if n == 0:
+            hl = (hl + 1) & 0xFFFF
+            m[0x8927], m[0x8928] = hl & 0xFF, hl >> 8
+        return a
+    a = m[hl]
+    if a == 0:
+        s.GameFlags, s.GameFlags2 = 2, 0
+        return None
+    hl = (hl + 1) & 0xFFFF
+    m[0x8927], m[0x8928] = hl & 0xFF, hl >> 8
+    if a & 0x80:
+        m[0x8926] = ((a & 0x7F) - 1) & 0xFF
+        a = m[hl]
+    return a
+
+
+def _act(s, n, hooks, first=None):
+    """$9A63-$9AB5: the pass's n actions ($998A on, or the demo's first) in
+    turn."""
     i = 0
     while True:
-        a = s.mem[0x998A + i]
+        a = first if i == 0 and first is not None else s.mem[0x998A + i]
         if not minus(a, 1) and minus(a, 0x15):
             movement(s, a, hooks)
         elif not minus(a, 0x15) and minus(a, 0x1F):
@@ -281,4 +328,17 @@ def run_pass(s, keys=(), tick=False, hooks=None):
     if not input_pass(s, keys, hooks):
         return "over"
     events(s, hooks)
+    if new_game_due(s, hooks, keys):
+        return "new"
     return not s.GameOver
+
+
+def new_game_due(s, hooks, keys):
+    """$982B: GameFlags bit 1 (the end's way out, or the demo's) asks for a
+    new game ($9C36) and its start ($97CD). True if it came."""
+    from .end import DEMO, new_game, start
+    if not s.GameFlags & 0x02:
+        return False
+    new_game(s, hooks)
+    start(s, hooks, keys, demo=s.mem[DEMO] == 3)
+    return True

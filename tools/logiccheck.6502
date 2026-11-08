@@ -19,6 +19,10 @@ INCLUDE "../src/logic/vars.6502"
 SECTION RigCode, org = &2000, guard = &3000, filename = "RIGC", cmos = TRUE
 .rig_code
 ENDSECTION
+\ The end, a new game and the demo (src/logic/end.6502) after them (LMORE).
+SECTION LogicMore, org = rig_code_end, guard = &3000, filename = "LMORE", cmos = TRUE
+.logic_more
+ENDSECTION
 INCLUDE "../src/logic/bank.6502"
 
 CHK_BUF = &3000                     ; the arithmetic's records, up to CHK_TOP
@@ -129,4 +133,20 @@ ENDMACRO
     INY : LDA mhl+1 : STA (chk_p),Y
     CHK_NEXT CHK_MUL, chk_mul_loop
     RTS
+
+\ The end, and the new game after it: A = 0 for the wait answered by the
+\ keys (in keys), else run out.
+.chk_end
+    ZA_ENTRY
+    JSR logic_go_end
+    RTS
+
+.chk_restart
+    ZA_ENTRY
+    LDA chk_result
+    JSR logic_go_restart
+    RTS
+ENDSECTION
+SECTION RigCode
+.rig_code_end
 ENDSECTION

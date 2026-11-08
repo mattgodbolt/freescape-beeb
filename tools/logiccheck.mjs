@@ -42,6 +42,7 @@ const bank = fs.readFileSync(path.join(dir, "LOGIC"));
 m.load(path.join(dir, "CHECK"), sym("chk_code"));
 m.load(path.join(dir, "LOGICC"), 0x8000, CODE_BANK);
 m.load(path.join(dir, "RIGC"), sym("rig_code"));
+m.load(path.join(dir, "LMORE"), sym("logic_more"));
 
 let failures = 0;
 function fail(msg) {
@@ -234,6 +235,15 @@ for (const r of trace.runs) {
             m.poke(sym("chk_len"), rec.fcl.length);
             m.poke(sym("ShotFlag"), rec.shot ? 1 : 0);
             await m.call(sym("chk_fcl"));
+        } else if (rec.end) {
+            // the game's end (logic_go_end), after the pass that found it
+            await m.call(sym("chk_end"));
+        } else if (rec.restart) {
+            // its wait answered by the keys, or run out (the demo next),
+            // and the new game (logic_go_restart)
+            m.write(KEYS, rec.keys);
+            m.poke(sym("chk_result"), rec.demo ? 1 : 0);
+            await m.call(sym("chk_restart"));
         } else {
             m.write(KEYS, rec.keys);
             if (rec.tick) await m.call(sym("chk_minute"));
@@ -264,7 +274,7 @@ for (const r of trace.runs) {
         }
         for (const [a, v] of rec.changes) exp[a] = v;
         diffs = compare();
-        const where = `${rec.line} (${rec.names?.join(" ") ?? (rec.fcl ? "fcl" : "poke")})`;
+        const where = `${rec.line} (${rec.names?.join(" ") ?? (rec.fcl ? "fcl" : rec.end ? "the end" : rec.restart ? "a new game" : "poke")})`;
         if (diffs.length) {
             report(where, diffs);
             ok = false;

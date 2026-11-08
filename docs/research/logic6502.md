@@ -21,6 +21,7 @@ Addresses written `$` are the original's; the 6502's are symbols.*
 | `src/logic/arith.6502` | the original's multiplies and divide as the logic uses them |
 | `src/logic/rig.6502` | the rigs (`$BEFA`): D drills and C collects, the gas, the score, the messages, the redraw (in `LOGIC_CODE_BANK`) |
 | `src/logic/rigdb.6502` | the rigs' part in `LOGIC_BANK`: whether a rig fits (it scans the records), and the messages that never change |
+| `src/logic/end.6502` | the game's end (`$9AB7`), a new game (`$9C36`, `$97CD`) and the demo's stream (`$9A27`), in main RAM (`LogicMore`), reaching both banks (`docs/research/end.md`) |
 | `src/logic/hooks.6502` | where the logic calls what it leaves out (`tools/logic/hooks.py`'s list) |
 | `src/logic/call.6502` | main RAM: the frame's way in, and the way between the two banks |
 | `src/logic/bank.6502` | the two sideways RAM banks' layout |
@@ -205,9 +206,8 @@ other form, which runs on past its target to an object without hanging.
   the laser and the pick, `docs/research/laser.md`, and runs the sensors,
   `docs/research/sensors.md`; this check build keeps the defaults): the
   panel's key lights, the draw list (the renderer's), the information
-  screen (`$C3DC`), the game's end (`$9AB7`) and a new game (`$9C36`).
+  screen (`$C3DC`). The game's end (`$9AB7`), a new game (`$9C36`) and
+  the demo (`$9A27`) are the logic's since 2026-11-08
+  (`src/logic/end.6502`, `docs/research/end.md`).
 - The clock: the interrupt's seconds and minutes (`$BAE6`), which call
   `logic_go_minute`.
-- The disc: loading `LOGICW` into main RAM and the two banks into
-  sideways RAM, and calling the entries from the frame.
-- The demo's playback (`$9A27`).

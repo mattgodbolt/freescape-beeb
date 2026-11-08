@@ -461,6 +461,29 @@ ENDIF
     CMP panel_cache + PC_AREA : BEQ no_name     ; (as last shown)
     STA panel_cache + PC_AREA
     JSR names
+IF NOT(PANEL_FREE)
+    \ the end's area: the safe sectors (FclVar32) in its name, two digits,
+    \ the first a space for 0, as the end writes them ($9B11)
+    LDA panel_area : CMP #PANEL_END_AREA : BNE no_name
+    LDA FclVar32
+.hundreds
+    CMP #100 : BCC tens
+    SBC #100
+    BRA hundreds
+.tens
+    LDY #PC_DIGIT0
+.ten
+    CMP #10 : BCC units
+    SBC #10 : INY
+    BRA ten
+.units
+    ADC #PC_DIGIT0                              ; (C clear)
+    LDX #PF_NAME + PANEL_END_DIGITS + 1 : JSR panel_set
+    TYA : CMP #PC_DIGIT0 : BNE tens_digit
+    LDA #PC_SPACE
+.tens_digit
+    LDX #PF_NAME + PANEL_END_DIGITS : JSR panel_set
+ENDIF
 .no_name
 IF NOT(PANEL_FREE)
     \ the message: one of a rig's while it shows (src/live.6502's

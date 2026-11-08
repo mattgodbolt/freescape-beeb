@@ -93,3 +93,13 @@ class Hooks:
     def game_over(self, s):
         """$9AB7: GameOver ($8BF2) is set: the end of the game."""
         self._note("game_over", s.GameOver)
+
+    def ended(self, s):
+        """$9B34-$9B40: the end's redraw of area 127 ($6B12), the sensors'
+        test ($9841), the panel ($B72B) and the message's highlight off."""
+        self._note("ended")
+
+    def started(self, s):
+        """$97D3-$97EB: a game's start: the redraw, the panel, the clock's
+        text, the control menu (not in the demo) and the sensors' test."""
+        self._note("started")

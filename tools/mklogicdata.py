@@ -44,7 +44,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import freescape  # noqa: E402
 from logic.oracle import Original  # noqa: E402
-from logic import rig  # noqa: E402
+from logic import end as lend, rig  # noqa: E402
 from logic.passes import _action_of  # noqa: E402
 from logic.state import VARS, DATABASE, PASS_FIELDS, REPEAT_FIELDS, State, database, port_start  # noqa: E402
 
@@ -59,7 +59,11 @@ ZXV_END = 0x8939 + 0x80
 ZXV_PTR_ADDRS = {
     0x8864: "AreaObjPtr", 0x8866: "AreaNamePtr", 0x8868: "AreaCondPtr",
     0x8912: "the database", 0x8914: "the area table", 0x8922: "the global conditions",
+    0x8924: "the demo's stream", 0x8927: "the demo's place in it",
 }
+# The end's six messages ($9AB7), 14 characters each, from OUT OF TIME on.
+END_MESSAGES = 0x8CBA
+END_MESSAGE_ENDS = 0x8D0E
 # The original's tables the logic reads outside the mirror: constant in
 # play, so they go in the bank with the code.
 SINCOS = 0x8E78         # 72 (sin, cos) pairs, signed, 1.0 = 64
@@ -120,6 +124,9 @@ def main():
     db = m[lo:hi]
     for a in ZXV_PTR_ADDRS:
         assert lo <= word(m, a) < hi, f"${a:04X} doesn't point into the database"
+    # The end's messages, one for each cause, all inside the block.
+    assert all(END_MESSAGES <= lend.message_of(c) < END_MESSAGE_ENDS for c in range(1, 7))
+    assert (END_MESSAGE_ENDS - END_MESSAGES) % rig.MESSAGE_LEN == 0
     mirror = m[ZXV_ORG:ZXV_END]
     n3, n2 = m[0x8FC6], m[0x8FC7]
     outside = [(n, a, size_of(sz)) for n, a, sz, _, _ in VARS if not ZXV_ORG <= a < ZXV_END]
@@ -213,6 +220,11 @@ def main():
         f"ZX_RIG_MESSAGES_B = &{rig.ENERGY_TOO_LOW:04X}",
         blist("ZX_RIG_MSG_A", m[rig.AREA_NEUTRAL:rig.CFT]),
         blist("ZX_RIG_MSG_B", m[rig.ENERGY_TOO_LOW:rig.NO_RIG_PLACED + rig.MESSAGE_LEN]),
+        "\\ the end's messages ($8CBA on), 14 characters each, and where each",
+        "\\ cause's is, by GameOver from 1 (tools/logic/end.py's MESSAGES; past 5, 6's)",
+        f"ZX_END_MESSAGES = &{END_MESSAGES:04X}",
+        blist("ZX_END_MSG", m[END_MESSAGES:END_MESSAGE_ENDS]),
+        blist("ZX_END_AT", [lend.message_of(c) - END_MESSAGES for c in range(1, 7)]),
         "",
         "\\ the action of each key code from KEY_LOW up, from the key table as $99EF",
         "\\ finds it (the other codes and shooting mode: action_of)",

@@ -44,6 +44,10 @@ N_DRAWN = 0x8918
 GAME_OVER = 0x9AB7       # the input's way to the end of the game
 INTERRUPT = 0xBAE6       # the frame's interrupt: the clock and the sensors
 SIGHT = 0x9841           # the sensors' test after the redraw
+DEMO = 0x891F            # 3: the demo plays itself
+END_WAIT = 0x9B43        # the end's wait for a key: the scene is drawn
+END_KEYS = 0x9B50        # ... where it reads the keys, its first 75 frames done
+END_FRAMES = 13 * 75 + 50   # (the wait, and a little: the demo's way)
 # A pass's limit. Area 18's last condition redraws seven times, and the
 # busiest redraw is 62 frames (docs/research/zx-driller.md).
 PASS_FRAMES = 2000
@@ -122,6 +126,22 @@ class Original:
             return self.memory()
         self._run_to(AFTER_EVENTS)
         after = self.memory()
+        self.new_game = bool(after[0x8920] & 0x02)
+        if self.new_game:
+            # $982B: a new game (the demo's end, or a key in it) and its
+            # start, whose control menu, but in the demo, takes ENTER; the
+            # memory returned is the main loop's top's after it
+            self.projected = None
+            if after[DEMO] != 3:
+                self._run_to(zx.MENU)
+                self.spec.key("ENTER", True)
+                try:
+                    self._run_to(zx.MENU_DONE)
+                finally:
+                    self.spec.key("ENTER", False)
+            self._run_to(MAIN_LOOP)
+            self.redrawn = self.memory()
+            return self.redrawn
         # the redraw's projection, before the sensors' test ($9841), if it
         # redraws; and after it all
         self.projected = None
@@ -131,6 +151,29 @@ class Original:
         self._run_to(MAIN_LOOP)
         self.redrawn = self.memory()
         return after
+
+    def end(self, demo=False):
+        """The end, from where run_pass(ends=True) left the original
+        ($9AB7): run to its wait for a key ($9B43), the memory then the
+        scene's; then the wait answered, as a player would: ENTER held once
+        it reads the keys (its 75 frames done) until the control menu has
+        taken it (MENU_DONE), or, demo, no key at all; then on to the main
+        loop's top, the new game begun. Returns (scene, restarted): the
+        memory at each."""
+        assert self.spec.regs[zx.PC] == GAME_OVER
+        self._run_to(END_WAIT)
+        scene = self.memory()
+        if demo:
+            self._run_to(MAIN_LOOP, frames=END_FRAMES + PASS_FRAMES)
+        else:
+            self._run_to(END_KEYS, frames=END_FRAMES)
+            self.spec.key("ENTER", True)
+            try:
+                self._run_to(zx.MENU_DONE)
+            finally:
+                self.spec.key("ENTER", False)
+            self._run_to(MAIN_LOOP)
+        return scene, self.memory()
 
     def sensors(self, frames):
         """Time going by between passes, its sensors let fire: the input

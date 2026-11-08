@@ -36,7 +36,7 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logic import arith, fcl, move, scenario  # noqa: E402
+from logic import arith, end as lend, fcl, move, scenario  # noqa: E402
 from logic.check import entrances, walk  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.oracle import Original, SCRIPT  # noqa: E402
@@ -88,10 +88,31 @@ def run(steps, start_mem, where):
     each changes."""
     s = State(start_mem)
     out = []
-    over = False
+    over = ending = False
     for st in steps:
         if st.kind in ("expect", "sensors"):
             continue        # (checked against the original by make logic; the sensors' shots are the disc's)
+        if st.kind == "end":
+            if not over:
+                break       # (a sensors step's shots ended it, which are the disc's)
+            if not ending:
+                # the input's next pass finds the game over
+                before = bytes(s.mem)
+                rec = {"line": st.line, "keys": rows(()), "names": [], "tick": False,
+                       "jet": bool(s.InJet), "shoot": bool(s.ShootMode)}
+                rec["result"] = 2 if run_pass(s, (), False, Hooks()) == "over" else 1
+                rec["changes"] = changes(before, s.mem, where)
+                out.append(rec)
+            before = bytes(s.mem)
+            lend.end(s, Hooks())
+            out.append({"line": st.line, "end": True, "changes": changes(before, s.mem, where)})
+            before = bytes(s.mem)
+            keys = () if st.demo else ("ENTER",)
+            lend.restart(s, Hooks(), keys, demo=st.demo)
+            out.append({"line": st.line, "restart": True, "demo": st.demo, "keys": rows(keys),
+                        "changes": changes(before, s.mem, where)})
+            over = ending = False
+            continue
         if over:
             break           # the game is over: the original goes to its end
         before = bytes(s.mem)
@@ -119,9 +140,10 @@ def run(steps, start_mem, where):
                 rec["freeze"] = True
                 out.append(rec)
                 break
-            rec["result"] = 2 if alive == "over" else 1
+            rec["result"] = {"over": 2, "new": 3}.get(alive, 1)
             if alive == "over" or not alive:
                 over = True
+                ending = alive == "over"
         rec["changes"] = changes(before, s.mem, where)
         out.append(rec)
     return out

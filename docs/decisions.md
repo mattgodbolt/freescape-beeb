@@ -989,3 +989,34 @@ and one more (`SENSOR_LINES`), in frames of their own as the laser's
 a line below the view's bottom (where the original's row table puts it),
 isn't drawn.
 
+## 150. The end's wait takes any key, and the frames go on through it (2026-11-08, autonomous, proposed for Matt)
+
+The original's end ($9AB7) shows its message highlighted, enters area 127
+and redraws, and holds the game in a wait: no key read for 75 frames, then
+any key, for up to 12 x 75 more, else the demo. A key then brings the
+control menu ($C9C6: the ZX's joysticks), which waits for ENTER, and the
+new game starts. The disc does the end in the pass that finds the game
+over, shows the message in the panel's message line (not highlighted:
+decision 121) until the new game, and keeps drawing frames through the
+wait, as it does everywhere (decision 110); the wait reads no key for
+`END_DEAF` (75) fields and then takes any key the disc reads, or runs out
+at `END_FIELDS` (13 x 75), as the original's. There's no control menu: the
+logic reads the key twice, the wait's and the menu's, as the original does
+for ENTER held through both, so its state after is the original's for
+ENTER; RETURN is now the ZX's ENTER (`src/input.6502`). The checks press
+RETURN. Why: the menu chooses the ZX's joysticks, which the BBC hasn't
+(decision 10's keyboard is the only one). Against: with a key other than
+ENTER the original would sit in its menu; the disc starts the game.
+
+## 151. The demo plays at a held key's pace (2026-11-08, autonomous, proposed for Matt)
+
+The original's demo ($9A27) does an action of the header's stream a pass,
+each pass as fast as its redraw goes (a ZX frame or several). The disc
+plays the same stream, a pass each `PASS_FIELDS` fields with the frames
+between showing it (decision 4), as a held key's passes come (decision
+48). Its waits (the size keys', the
+rigs' messages', the laser's) hold it as they hold a pass of keys. Why:
+the disc shows each pass over its fields whatever drives it, and the
+original's pace is its renderer's, which the BBC's differs from. Against:
+the original's demo runs faster where its views are simple.
+

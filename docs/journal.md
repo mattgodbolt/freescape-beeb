@@ -1670,3 +1670,86 @@ address afresh; shadow RAM past `RigCode` is nearly full. Decisions 130
 to 134 are Matt's to take or change. `mk/live.mk` now names
 `src/laser.6502` and `src/sensors.6502` among the disc's sources (a build
 had missed a change to one).
+
+## 2026-11-08: the end, a new game and the demo
+
+The next of Matt's layers, from the original's listing
+(`docs/research/end.md`): the end of the game ($9AB7), the new game after
+it ($9C36, $97CD) and, since the end's wait leads to it, the demo ($9A27).
+
+**The original**: the input finds `GameOver` after its read of the keys,
+held or not, and goes to the end: the message by cause, sound 20 unless
+won, area 127 entered at its own entrance 0 (an invisible entrance among a
+row of blocks), the safe sectors written into its name in the database
+(" 18 CLEARED "), everything redrawn, and a wait: 75 frames deaf, then any
+key for up to 900 more, else the demo. Then sound 6 and `GameFlags` bit 1,
+which the main loop's `$982B` turns into a new game from the database's
+header (the objects' flags from their bit 7, the score, the FCL's
+variables and the rigs cleared; the globals' records left as they are)
+and its start (the control menu, 40 frames, the crosshair shown as B
+shows it). The demo plays the header's stream of 476 actions a pass each;
+a key ends it with a new game, and its end starts it again.
+
+**Transcribed** (`tools/logic/end.py`; `tools/logic/passes.py`'s
+`demo_action` and `new_game_due`) and checked against the original
+(`make logic`): new scenario steps `end`, `end demo` and `demo xN`; the
+oracle runs its end to the wait (the scene compared, the renderer's
+outputs taken from the original), holds ENTER from the wait's 75th frame
+through the control menu to the main loop (the new game compared), or
+lets the wait run out. Two of the original's ways showed in the first
+runs: the wait's and the menu's reads of the keys leave them as a repeat,
+and the demo's action isn't kept in `Actions`. `tests/logic/end.txt`
+(a fall, energy out on a minute, won, the demo's first 30 passes and a
+key, shield out by a sensor's shot) and `tests/logic/demo.txt` (the demo
+whole, twice, and a key): the same.
+
+**In 6502** (`src/logic/end.6502`): in main RAM after `ObjMore`
+(`LogicMore`), as it reads the header and the records in `LOGIC_BANK` and
+calls the pass's code in `LOGIC_CODE_BANK`; the demo's two pointers into
+the database are moved as the mirror's others are. `logic_pass` answers 3
+for a pass after which a new game began. `make logic6502`: every scenario,
+the ends and new games and the whole demo, the same as the transcription.
+A pass costs a few dozen cycles more (the demo's test and `$982B`'s):
+the probe's steps 10,323 against 10,260 at the median (with the new
+scenarios' passes among them).
+
+**On the disc** (`src/live.6502`): with `GameOver` set the next loop's
+pass runs whatever is held, as the original's input finds it, and
+`logic_go_end` follows in the same call, so the end is a pass whose frames
+are area 127's; the message stays in the panel's message line till a new
+game; the wait (`lv_waited`, decision 150) takes any key (RETURN is the
+ZX's ENTER now) after `END_DEAF` fields, and its answer is the next pass's
+call (`logic_go_restart`). The demo's passes come by themselves at a held
+key's pace (decision 151). Area 127's name shows the safe sectors: every
+name is now the original's twelve characters with a space each side,
+which is what the panel showed already for every other area. `make live`
+plays both scenarios: every pass the transcription's, every frame the
+model's, the demo's 476 actions twice.
+
+The live check found two things of its own: a run that ends the game now
+goes on into the end on the disc (the check's trace puts the pass that
+finds it after any step that ends the game, a script's, a poke's or the
+sensors' too, and waits for it); and the check took the loops while the
+start's waits held an area's change for idle, so it pressed a key while
+the area was being entered (it now resets at `lv_switched`). A pass of no
+keys (the game over found, the demo's, a minute's) isn't held to the
+keys' repeat any more.
+
+**Room** (the logic disc, before and after): `LOGIC_BANK` 453 to 453;
+`BANK_DATA` 566 to 506 (the demo's branch in the input); `ObjMore`'s room
+1,189 to 433 (`LogicMore`, 756 bytes, of which the new game is 328: a
+table of the header's bytes would save some); shadow RAM 52 to 52; `Work`
+18 to 15. The free disc's `LiveGlue` 368 to 362.
+
+**Speed** (`make check`'s live check, flip to flip in fields, median /
+p90 / max, over the runs both had, so without `end` and `demo`): walking
+1.57 / 4.5 / 13.76 to 1.57 / 4.51 / 146.5, turning 2.16 / 5.65 / 11.82 to
+2.17 / 5.63 / 127.69, entrances 8.5 / 12.96 / 18.24 to 8.6 / 14.37 /
+18.24 (103 frames against 92: area 127's scene after the runs that end
+the game). The new maxima are loops that wait to ask for a sound while
+sound 20 (179 fields) still plays after an end, as decision 110 has any
+sound wait for a full queue.
+
+Left: OUT OF TIME (the clock's seconds aren't kept: the next layer), the
+information screen (TERMINATED is its 1). Decisions 150 and 151 are
+Matt's to take or change.

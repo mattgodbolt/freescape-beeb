@@ -248,6 +248,7 @@ def trace(snap, out_path, paths):
     import logictrace
     from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen, view as lview
     from logic import sensors as lsensors
+    from logic import end as lend
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
     from logic.passes import run_pass, waiting
@@ -324,8 +325,9 @@ def trace(snap, out_path, paths):
         """A minute the input takes at once, so the next pass comes without
         waiting for a key ($9990 waits only with none to take): the events
         can put MinuteCount back under the input (the global conditions at
-        minute 9)."""
-        return not s.GameOver and s.MinuteSeen != s.MinuteCount
+        minute 9); and while the demo plays itself, its next action
+        (lv_pass)."""
+        return not s.GameOver and (s.MinuteSeen != s.MinuteCount or s.mem[lend.DEMO] == lend.DEMO_ON)
 
     def run(steps):
         s = State(mem)
@@ -359,6 +361,20 @@ def trace(snap, out_path, paths):
                 s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
                 s.ShotFlag = 1 if st.shot else 0
                 lfcl.run(s, SCRIPT, len(st.code), Hooks())
+            elif st.kind == "end":
+                # The end's wait answered, by ENTER (the BBC's RETURN) once it
+                # reads the keys, or run out (the demo next), and the new
+                # game: a pass of its own on the disc (lv_pass's lv_call),
+                # which answers 3. (The end itself came with the pass that
+                # found the game over, below.)
+                keys = () if st.demo else ("ENTER",)
+                rec.update(restart=True, demo=st.demo, keys=logictrace.rows(keys), names=list(keys), tick=False)
+                hooks = LiveHooks()
+                hooks.messages = []
+                lend.restart(s, hooks, keys, demo=st.demo)
+                rec.update(result=3, walks=seen["walks"], loaded=seen["loaded"],
+                           sounds=[args[0] for name, args in hooks.log if name == "sound"])
+                redraws = True
             else:
                 rec["keys"] = logictrace.rows(st.keys)
                 rec["names"] = list(st.keys)
@@ -371,7 +387,11 @@ def trace(snap, out_path, paths):
                     alive = run_pass(s, st.keys, st.tick, hooks)
                 except lmove.Freeze:
                     break
-                rec["result"] = 2 if alive == "over" else 1
+                if alive == "over":
+                    # the disc's end comes with the pass that finds it
+                    # (lv_pass: logic_go_end)
+                    lend.end(s, hooks)
+                rec["result"] = {"over": 2, "new": 3}.get(alive, 1)
                 rec["walks"] = seen["walks"]
                 rec["loaded"] = seen["loaded"]
                 # the sounds the pass asks for, then the copy's after it if
@@ -386,14 +406,23 @@ def trace(snap, out_path, paths):
                 if hooks.laser_at:
                     rec["laser"] = hooks.laser_at
                 # the redraw after it ($9807), and the sensors' test with it
-                redraws = alive != "over" and bool(s.GameFlags & 0x04 or s.GameFlags2 & 0x08)
+                # (and the end's, $9B34)
+                redraws = bool(s.GameFlags & 0x04 or s.GameFlags2 & 0x08)
             rec["changes"] = logictrace.changes(before, s.mem, where)
             rec["then"] = then(s, redraws)
             out.append(rec)
-            if rec.get("result") == 2 or (rec.get("result") == 1 and s.GameOver):
-                break               # the game is over: the original goes to its end
-            if st.kind == "sensors" and s.GameOver:
-                break               # (their shots ended it: the next pass goes to the end)
+            if rec.get("result") == 2:
+                # the end: its wait is the next step's, or the run's end
+                if not (i < len(steps) and steps[i].kind == "end"):
+                    break
+                continue
+            if s.GameOver:
+                # the step ended the game (a pass, a script, a poke, the
+                # sensors' shots): the input's next pass finds it, at once on
+                # the disc, whatever is held (lv_pass), and goes to the end
+                rec["soon"] = True
+                steps.insert(i, lscen.Step("pass", f"{st.line} (the game over)", keys=(), tick=False))
+                continue
             if pending(s):
                 # The next pass comes at once, on the keys held then: the
                 # next step's, if it's a pass of keys (the scenario has

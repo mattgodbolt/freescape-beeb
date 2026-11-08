@@ -10,12 +10,15 @@
 \ logic_pass: one pass, the input and then the events. A = 0 if there was
 \ nothing to do (no key held and no minute: the original waits in its
 \ input), 1 if a pass ran, 2 if the input found the game over (the
-\ original goes to its end, $9AB7, which hook_game_over stands for).
+\ original goes to its end, $9AB7: logic_go_end), 3 if a pass ran and a
+\ new game began after it ($982B: the demo's end, or a key in it).
 .logic_pass
 {
     JSR input_pass
     CMP #1 : BNE done
     JSR far_events
+    JSR new_game_due
+    LDA #3 : BCS done
     LDA #1
 .done
     RTS
@@ -49,6 +52,26 @@
     STZ Collided : STZ ShotFlag : STZ Wipe : STZ EventsDue
     STZ Sound : STZ Blocked : STZ ActionIndex
     LDA #0 : JSR hook_key_lights                ; off
+    LDA Demo : CMP #DEMO_ON : BNE played
+    \ $9A27: the demo plays itself, an action a pass, until a key ends it
+    \ ($9B62: a new game after the pass)
+    JSR read_keys : BCC demo
+    LDA #1 : STA Demo
+    LDA #RESTART_SOUND : JSR hook_sound
+    LDA #2 : STA GameFlags : STZ GameFlags2
+    LDA #1                                      ; (a pass)
+    RTS
+.demo
+    JSR demo_next : BCS demo_act
+    LDA #1
+    RTS
+.demo_act
+    PHA
+    LDA #1 : JSR hook_key_lights                ; on
+    STZ i
+    PLA
+    JMP acting                                  ; (its one action, not kept in Actions)
+.played
     JSR read_keys
     PHP
     LDA GameOver : BEQ alive
@@ -75,6 +98,7 @@
     STZ i
 .act
     LDX i : LDA Actions,X
+.acting
     CMP #1 : BMI not_move
     CMP #&15 : BPL not_move
     JSR movement
