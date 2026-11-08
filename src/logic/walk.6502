@@ -151,40 +151,33 @@ ZA_AUTO1 crc
 ZA_AUTO1 wk_mc                                  ; the axes the move crosses, as crossing bits
 .move
 {
-    ZA_AUTO1 body, moved
+    ZA_AUTO1 body, moved, ax, why
     STZ wk_mc
-    LDA PlayerX : LDX PlayerX+1 : JSR cell_of : STA CellX
-    LDA TargetX : LDX TargetX+1 : JSR cell_of : STA MoveScratch
-    CMP CellX : BEQ y
-    LDA #X_MOVES : TSB wk_mc
-    LDA MoveScratch : CMP CellX : BMI y
-    LDA #X_UP : TSB wk_mc
-.y
-    LDA PlayerY : LDX PlayerY+1 : JSR cell_of : STA CellY
-    LDA TargetY : LDX TargetY+1 : JSR cell_of : STA MoveScratch+1
-    CMP CellY : BEQ z
-    LDA #Y_MOVES : TSB wk_mc
-    LDA MoveScratch+1 : CMP CellY : BMI z
-    LDA #Y_UP : TSB wk_mc
-.z
-    LDA PlayerZ : LDX PlayerZ+1 : JSR cell_of : STA CellZ
-    LDA TargetZ : LDX TargetZ+1 : JSR cell_of : STA MoveScratch+2
-    CMP CellZ : BEQ axes
-    LDA #Z_MOVES : TSB wk_mc
-    LDA MoveScratch+2 : CMP CellZ : BMI axes
-    LDA #Z_UP : TSB wk_mc
+    \ each axis's cell, its target's, and whether and which way it crosses
+    LDX #2
+.axis_cells
+    STX ax : TXA : ASL A : TAY
+    LDA PlayerX+1,Y : TAX : LDA PlayerX,Y : JSR cell_of
+    LDX ax : STA CellX,X
+    LDA TargetX+1,Y : TAX : LDA TargetX,Y : JSR cell_of
+    LDX ax : STA MoveScratch,X
+    CMP CellX,X : BEQ axis_done
+    LDA next_crossing.moves,X : TSB wk_mc
+    LDA MoveScratch,X : CMP CellX,X : BMI axis_done
+    LDA next_crossing.up,X : TSB wk_mc
+.axis_done
+    DEX : BPL axis_cells
 .axes
     LDA wk_mc : BNE walk
     JMP margin
 .walk
     STZ next_crossing.known : STZ next_crossing.known+1 : STZ next_crossing.known+2
     \ the deltas
-    LDA TargetX : SEC : SBC PlayerX : STA MoveScratch+9
-    LDA TargetX+1 : SBC PlayerX+1 : STA MoveScratch+10
-    LDA TargetY : SEC : SBC PlayerY : STA MoveScratch+11
-    LDA TargetY+1 : SBC PlayerY+1 : STA MoveScratch+12
-    LDA TargetZ : SEC : SBC PlayerZ : STA MoveScratch+13
-    LDA TargetZ+1 : SBC PlayerZ+1 : STA MoveScratch+14
+    LDX #4
+.delta
+    LDA TargetX,X : SEC : SBC PlayerX,X : STA MoveScratch+9,X
+    LDA TargetX+1,X : SBC PlayerX+1,X : STA MoveScratch+10,X
+    DEX : DEX : BPL delta
 .crossing
     JSR next_crossing                           ; (the point into MoveScratch+3)
     LDA next_crossing.b : JSR at_extent : BCS extent
@@ -202,23 +195,22 @@ ZA_AUTO1 wk_mc                                  ; the axes the move crosses, as 
     \ $A1D8: where it stopped, a unit back into the current cell when the
     \ crossing point is in the next one; y only when stopped (1), as the
     \ step up or the fall (2) has set it.
-    CMP #1 : BNE xz
-    LDA MoveScratch+5 : STA pull.v
-    LDA MoveScratch+6 : STA pull.v+1
-    LDA CellY : JSR pull
-    LDA pull.v : STA TargetY
-    LDA pull.v+1 : STA TargetY+1
-.xz
-    LDA MoveScratch+3 : STA pull.v
-    LDA MoveScratch+4 : STA pull.v+1
-    LDA CellX : JSR pull
-    LDA pull.v : STA TargetX
-    LDA pull.v+1 : STA TargetX+1
-    LDA MoveScratch+7 : STA pull.v
-    LDA MoveScratch+8 : STA pull.v+1
-    LDA CellZ : JSR pull
-    LDA pull.v : STA TargetZ
-    LDA pull.v+1 : STA TargetZ+1
+    STA why
+    LDX #2
+.pulls
+    STX ax
+    CPX #1 : BNE pull_axis                      ; (y only when stopped)
+    LDA why : CMP #1 : BNE pulled
+.pull_axis
+    TXA : ASL A : TAY
+    LDA MoveScratch+3,Y : STA pull.v
+    LDA MoveScratch+4,Y : STA pull.v+1
+    LDA CellX,X : JSR pull
+    LDX ax : TXA : ASL A : TAY
+    LDA pull.v : STA TargetX,Y
+    LDA pull.v+1 : STA TargetX+1,Y
+.pulled
+    LDX ax : DEX : BPL pulls
 .margin
     \ $A220
     LDA Margin : BNE keep
