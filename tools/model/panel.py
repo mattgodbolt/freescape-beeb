@@ -279,6 +279,19 @@ def pitch_cells(pitch):
     return [(top + PITCH_H * j) % PITCH_LINES for j in range(PITCH_CELLS)]
 
 
+# The units column is the same tick every PITCH1_PERIOD lines (the units
+# of 0, 30, 60 and 90 are all 0), so its table is one period and the
+# window past it, and its cells are the line mod the period.
+PITCH1_PERIOD = 12
+
+
+def pitch1_table():
+    tape = pitch_tape()[1]
+    assert PITCH_LINES % PITCH1_PERIOD == 0
+    assert all(tape[i] == tape[i % PITCH1_PERIOD] for i in range(len(tape)))
+    return [[v] for v in tape[:PITCH1_PERIOD + PITCH_H]]
+
+
 # Lights: a cell two lines high, three pixels lit or none.
 LIGHT_H = 2
 
@@ -292,7 +305,7 @@ TABLES = {
     "bar": (BAR_H, BAR_H, bar_table),
     "heading": (HEADING_H, HEADING_H, heading_table),
     "pitch0": (PITCH_H, 1, lambda: [[v] for v in pitch_tape()[0]]),
-    "pitch1": (PITCH_H, 1, lambda: [[v] for v in pitch_tape()[1]]),
+    "pitch1": (PITCH_H, 1, pitch1_table),
     "light": (LIGHT_H, LIGHT_H, light_table),
 }
 
@@ -498,7 +511,7 @@ def cells(values, before=None, build=None):
         out["name"] = before["name"] if before else text_cells("", 14)
     pitch = pitch_cells(v["pitch"] % STEPS)
     out["pitch0"] = pitch
-    out["pitch1"] = pitch
+    out["pitch1"] = [c % PITCH1_PERIOD for c in pitch]
     return out
 
 

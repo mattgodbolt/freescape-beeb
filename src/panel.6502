@@ -412,8 +412,13 @@ ENDIF
 .pitch_cell
     JSR panel_set
     PHA : TXA : CLC : ADC #PF_PITCH1 - PF_PITCH0 : TAX : PLA
+    PHA                                         ; (the units' column is one period of its tape: the line mod it)
+    SEC
+.period
+    SBC #PANEL_PITCH1_PERIOD : BCS period
+    ADC #PANEL_PITCH1_PERIOD
     JSR panel_set
-    PHA : TXA : SEC : SBC #PF_PITCH1 - PF_PITCH0 - 1 : TAX : PLA
+    TXA : SEC : SBC #PF_PITCH1 - PF_PITCH0 - 1 : TAX : PLA
     CLC : ADC #PANEL_PITCH_H : CMP #PANEL_PITCH_LINES : BCC pitch_next
     SBC #PANEL_PITCH_LINES
 .pitch_next
