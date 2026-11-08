@@ -40,8 +40,8 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | Energy, the jet and the probe | FCL 2, `$15`, the minute | yes | yes | yes | bars, vehicle | `fcl`, `jet` | nothing |
 | **Game over** | `$9AB7`: the message (SHIELD OUT, OUT OF TIME, ENERGY OUT, NASTY FALL, TASK COMPLETED, TERMINATED), sound 20, area 127 with the safe sectors in its name, a wait for a key | **yes** (`tools/logic/end.py`) | **yes** (`src/logic/end.6502`, `logic_go_end`) | **yes**: with the pass that finds it; the wait (decision 150) | **area 127 at its entrance; the message till a new game; the name with the safe sectors** | **`end`, `clock` (each cause but TERMINATED), the scene and the new game against the original's** | TERMINATED (the information screen's 1) |
 | **New game** | `$9C36`, `$BD74`, `$97CD`: the header's values, the objects' flags from bit 7, the control menu | **yes** | **yes** (`logic_go_restart`, `new_game_due`) | **yes** (RETURN, or the wait run out) | the start's area, the crosshair | **`end`, `demo`** | the control menu (decision 150) |
-| The information screen | `$C3DC`, `$C7EB` (I alone) | a hook | hook | no | - | - | the screen of the sector's rig, its gas and the safe sectors, its keys: 1 ABORT (`GameOver` 6), S and L |
-| Save and load | `$C3DC`: to tape by the ROM (`$04C6`, `$0562`), 333 bytes of state and every object's flags | no | no | no | - | - | to the BBC's disc, if wanted (a decision: the ZX's is tape) |
+| **The information screen** | `$C3DC`, `$C7EB` (I alone) | **yes** (`tools/logic/info.py`) | **yes** (`src/logic/info.6502`) | **yes**: its frame, its key (decision 153) | **the original's nine lines in the panel's font, in the view** | **`info`: every rig's case, an area, 1 (TERMINATED); the text against the original's buffer** | nothing |
+| Save and load | `$C3DC`: to tape by the ROM (`$04C6`, `$0562`), 333 bytes of state and every object's flags | no | no | S and L go on (decision 153) | - | - | to the BBC's disc, if wanted (decision 153's options) |
 | Title, protection, control menu | `$97A4`, `$CB7A`, `$C9C6` | no | no | the disc's own boot | - | - | the protection is the original's copy protection (not ported); the menu's choices are the ZX's joysticks |
 | **The demo** | `$9A27` (`$891F` 3), after the end's wait | **yes** (`passes.demo_action`) | **yes** (`demo_next`) | **yes**, at a held key's pace (decision 151) | **every pass's frames** | **`demo`: the stream whole, twice, and a key** | nothing |
 | Sounds | `$9574` and the interrupt's 2 | yes (hooks) | yes | yes (decisions 110-113; 2 from the main loop) | sound | every pass's, every `sensors` step's, **the end's 20 and 6** | nothing |
@@ -155,6 +155,10 @@ the other; the globals' records are not put back (the original doesn't).*
   exists.
 
 ### The information screen, save and load
+
+*The screen is done (the journal's entry of 2026-11-08, "the information
+screen"; `docs/research/info.md`); save and load are not (decision 153).
+The plan as written before follows.*
 
 - The screen draws into the view (cleared) text of the panel's font: the
   view's 104 pixels take 26 characters at four pixels, as the original's

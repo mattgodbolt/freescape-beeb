@@ -45,6 +45,7 @@ GAME_OVER = 0x9AB7       # the input's way to the end of the game
 INTERRUPT = 0xBAE6       # the frame's interrupt: the clock and the sensors
 SIGHT = 0x9841           # the sensors' test after the redraw
 DEMO = 0x891F            # 3: the demo plays itself
+INFO_KEYS = 0xC5A2       # the information screen reads the keys: its text is printed
 END_WAIT = 0x9B43        # the end's wait for a key: the scene is drawn
 END_KEYS = 0x9B50        # ... where it reads the keys, its first 75 frames done
 END_FRAMES = 13 * 75 + 50   # (the wait, and a little: the demo's way)
@@ -110,14 +111,26 @@ class Original:
         self._hold(tick)
         return self.memory()
 
-    def run_pass(self, keys=(), tick=False, ends=False):
+    def run_pass(self, keys=(), tick=False, ends=False, info_keys=None):
         """The pass begun: keys held through the input. Returns the memory
         when the events are done, and leaves the original at the next
         pass's top. ends: the input will find the game over; returns the
-        memory as it goes to the end ($9AB7) instead, and stays there."""
+        memory as it goes to the end ($9AB7) instead, and stays there.
+        info_keys: the information screen's answer: keys held until it
+        reads the keys (its text printed: the memory then is info_mem),
+        then these instead."""
+        self.info_mem = None
         for k in keys:
             self.spec.key(k, True)
         try:
+            if info_keys is not None:
+                self._run_to(INFO_KEYS)
+                self.info_mem = self.memory()
+                for k in keys:
+                    self.spec.key(k, False)
+                keys = info_keys
+                for k in keys:
+                    self.spec.key(k, True)
             self._run_to(GAME_OVER if ends else AFTER_INPUT)
         finally:
             for k in keys:

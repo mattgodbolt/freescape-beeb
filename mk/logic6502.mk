@@ -22,7 +22,7 @@ ZXSNAP  ?= build/zx/driller.z80
 L6_TAPE  = originals/zx/Driller.tzx
 L6_DIR   = build/logic6502
 L6_DATA  = $(L6_DIR)/data.6502 $(L6_DIR)/db.bin $(L6_DIR)/layout.json
-L6_BIN   = $(L6_DIR)/CHECK $(L6_DIR)/LOGIC $(L6_DIR)/LOGICC $(L6_DIR)/LOGICW $(L6_DIR)/RIGC $(L6_DIR)/LMORE
+L6_BIN   = $(L6_DIR)/CHECK $(L6_DIR)/LOGIC $(L6_DIR)/LOGICC $(L6_DIR)/LOGICW $(L6_DIR)/RIGC $(L6_DIR)/LMORE $(L6_DIR)/IDATA
 L6_SYMS  = $(L6_DIR)/symbols.json
 L6_TRACE = $(L6_DIR)/trace.json
 L6_SOURCES = tools/logiccheck.6502 src/defs.6502 src/zp.6502 src/input.6502 $(wildcard src/logic/*.6502)
@@ -34,7 +34,8 @@ L6SEED  ?= 100000
 ALL    += $(L6_BIN)
 CHECKS += logic6502
 
-$(L6_DATA) &: tools/mklogicdata.py tools/freescape.py tools/logic/state.py tools/logic/rig.py tools/logic/end.py $(ZXSNAP) $(L6_TAPE)
+$(L6_DATA) &: tools/mklogicdata.py tools/freescape.py tools/logic/state.py tools/logic/rig.py tools/logic/end.py \
+              tools/logic/info.py $(ZXSNAP) $(L6_TAPE)
 	@mkdir -p $(L6_DIR)
 	$(PYTHON) -I tools/mklogicdata.py $(ZXSNAP) $(L6_TAPE) $(L6_DIR)
 

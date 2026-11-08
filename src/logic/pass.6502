@@ -11,7 +11,9 @@
 \ nothing to do (no key held and no minute: the original waits in its
 \ input), 1 if a pass ran, 2 if the input found the game over (the
 \ original goes to its end, $9AB7: logic_go_end), 3 if a pass ran and a
-\ new game began after it ($982B: the demo's end, or a key in it).
+\ new game began after it ($982B: the demo's end, or a key in it), 4 if the
+\ information screen shows (INFO_SHOWN), its key awaited (logic_go_info;
+\ the pass's events, none due, are left out).
 .logic_pass
 {
     JSR input_pass
@@ -153,9 +155,7 @@ Clock = zx(&88A4)                               ; the clock's text, hh:mm:ss
     CMP #&28 : BEQ a_rig
     CMP #&2A : BEQ a_rig
     CMP #&29 : BNE next
-    JSR hook_info
-    LDA #1
-    RTS
+    JMP info_begin                              ; (A: 1, or INFO_SHOWN: its key awaited)
 .a_rig
     JSR rig
     LDA #1

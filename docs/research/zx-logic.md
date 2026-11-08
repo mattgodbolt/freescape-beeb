@@ -462,7 +462,8 @@ keys from random entrances and keeps a failing walk as a scenario.
   (`$B492`). (The shot's pick, the sensors' tests and their shots are
   transcribed, on the BBC's view: `tools/logic/view.py`,
   `tools/logic/sensors.py`.)
-- The information screen (`$C3DC`) (`docs/research/game-audit.md` has
-  what it does). The end of the game (`$9AB7`), a new game (`$9C36`) and
-  the demo's playback (`$9A27`) are transcribed since 2026-11-08
-  (`tools/logic/end.py`, `docs/research/end.md`).
+- The end of the game (`$9AB7`), a new game (`$9C36`), the demo's
+  playback (`$9A27`), the clock (`$BAFA`) and the information screen
+  (`$C3DC`) are transcribed since 2026-11-08 (`tools/logic/end.py`,
+  `tools/logic/info.py`, `docs/research/end.md`, `docs/research/info.md`);
+  its save and load to tape aren't (decision 153).

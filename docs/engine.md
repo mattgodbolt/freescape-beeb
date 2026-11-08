@@ -321,7 +321,8 @@ come with it, to see where the cycles go.
   patches itself), the sound's driver and its hook (`src/sound.6502`);
   after the front end's `ObjMore`, the logic's code that reaches both of
   its banks (`LogicMore`: the game's end, a new game and the demo's
-  stream, `src/logic/end.6502`, 2026-11-08).
+  stream, `src/logic/end.6502`; the information screen's entries and its
+  drawing, `src/logic/info.6502`, `src/info.6502`; 2026-11-08).
 - `&3000` up to `SCREEN`: what ACCCON's X selects, main RAM's or shadow
   RAM's. Data kept per buffer (section 4, stage 10) needs the same
   addresses free in both. The live disc keeps the front end's data in main
@@ -403,6 +404,10 @@ come with it, to see where the cycles go.
   projection's patch, the 2D clip's bodies and `camera_setup`'s axes again
   for the laser's and the sensors' room). Their guards in
   `src/live.6502` say when any doesn't fit.
+- The front end's bank after its code: the information screen's text, the
+  code that writes its fields, and the panel's font to draw it with
+  (`InfoData`, 2026-11-08, `docs/research/info.md`), reached from main
+  RAM with that bank paged.
 - ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the paged bank's
   first 4K): the front end's rarely run code, reached through trampolines
   in main RAM (decision 52, `docs/research/objects.md`, "ANDY").

@@ -167,6 +167,30 @@ def laser(rows, cross_x, cross_y, centre_x):
             rows[py][px >> 1] ^= mode2_left(7) >> (px & 1)
 
 
+INFO_INK = 3                # the information screen's text: yellow, as the panel's
+
+
+def info_view(lines):
+    """The information screen in the view (src/info.6502): black, each of
+    the original's lines (tools/logic/info.py's) on its character row, a
+    character the panel's font's glyph (tools/model/panel.py) in four
+    pixels, so two bytes, in yellow."""
+    from tools.logic.info import ROWS
+    from tools.model import panel
+    font = panel.font_table()
+    rows = [bytearray(view.VIEW_W // 2) for _ in range(view.VIEW_H)]
+
+    def ink(two):
+        return (mode2_left(INFO_INK) if two & 2 else 0) | (mode2_left(INFO_INK) >> 1 if two & 1 else 0)
+    for k, line in enumerate(lines):
+        for c, ch in enumerate(line):
+            glyph = font[panel.CHARSET.index(ch) if ch in panel.CHARSET else 0]
+            for y, nib in enumerate(glyph):
+                rows[8 * ROWS[k] + y][2 * c] = ink(nib >> 2)
+                rows[8 * ROWS[k] + y][2 * c + 1] = ink(nib & 3)
+    return rows
+
+
 def render_cameras(db, layout_areas, cameras):
     """Each request's view: {"area": its directory index, "camera": [x, y,
     z, yaw, pitch, roll]}, and with the logic "hidden" (each object's, in
@@ -191,6 +215,9 @@ def render_cameras(db, layout_areas, cameras):
             at = c.get("globals") or [g["pos"] for g in db["globals"]]
             d = dict(db, globals=[dict(o, initially_invisible=h, pos=list(p))
                                   for o, h, p in zip(db["globals"], hidden[len(objs):], at)])
+        if c.get("info"):
+            out.append([row.hex() for row in info_view(c["info"])])
+            continue
         v = render.render(d, area, cam.Camera(*c["camera"]))
         rows = [bytearray(row) for row in writer.view_bytes(v.lines)]
         if c.get("cross"):
@@ -248,10 +275,10 @@ def trace(snap, out_path, paths):
     import logictrace
     from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen, view as lview
     from logic import sensors as lsensors
-    from logic import end as lend
+    from logic import end as lend, info as linfo
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
-    from logic.passes import run_pass, waiting
+    from logic.passes import info_answered, run_pass, waiting
     from logic.rig import message_text
     from logic.state import VARS, State, database, port_start
     lmove.FIX_CORNER = True     # decision 18: the port's logic
@@ -383,15 +410,27 @@ def trace(snap, out_path, paths):
                 hooks.messages = []
                 hooks.laser_at = None
                 hooks.start = s.copy()
-                try:
-                    alive = run_pass(s, st.keys, st.tick, hooks)
-                except lmove.Freeze:
-                    break
+                if getattr(st, "info_answer", False):
+                    # the information screen's key: a pass of its own on the
+                    # disc (lv_pass's lv_call, logic_go_info)
+                    rec["info_answer"] = True
+                    alive = info_answered(s, hooks, st.keys)
+                else:
+                    try:
+                        alive = run_pass(s, st.keys, st.tick, hooks)
+                    except lmove.Freeze:
+                        break
                 if alive == "over":
                     # the disc's end comes with the pass that finds it
                     # (lv_pass: logic_go_end)
                     lend.end(s, hooks)
-                rec["result"] = {"over": 2, "new": 3}.get(alive, 1)
+                if alive == "info":
+                    # the information screen shows (its frame: the text) and
+                    # waits for its key, the next step
+                    rec["info_lines"] = linfo.lines(s)
+                    steps.insert(i, lscen.Step("pass", f"{st.line} (its key)", keys=st.info_keys, tick=False,
+                                               info_answer=True))
+                rec["result"] = {"over": 2, "new": 3, "info": 4}.get(alive, 1)
                 rec["walks"] = seen["walks"]
                 rec["loaded"] = seen["loaded"]
                 # the sounds the pass asks for, then the copy's after it if
@@ -416,7 +455,7 @@ def trace(snap, out_path, paths):
                 if not (i < len(steps) and steps[i].kind == "end"):
                     break
                 continue
-            if s.GameOver:
+            if s.GameOver and rec.get("result") != 4:
                 # the step ended the game (a pass, a script, a poke, the
                 # sensors' shots): the input's next pass finds it, at once on
                 # the disc, whatever is held (lv_pass), and goes to the end

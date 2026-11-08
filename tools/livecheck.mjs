@@ -220,6 +220,7 @@ const RASTER = sym("raster_frame"), FILL_DONE = sym("live_fill_done");
 const FB_BEGIN = sym("frame_begin"), FB_END = sym("frame_end");
 const LIVE_LOOP = sym("live_loop");
 const CROSS_ONLY = syms.live_cross_only ?? -1; // (the logic's disc's: frames of the crosshair alone)
+const INFO_FRAME = syms.live_info ?? -1; // (... and the information screen's frames)
 let crossOnly = 0;
 const LV_CAM = sym("lv_cam"), LV_AREA = sym("lv_area");
 const SPAN_US = sym("span_us"), T_FRONT = sym("T_FRONT"), T_FILL = sym("T_FILL");
@@ -279,9 +280,11 @@ function inputsNow() {
     const f = { area: ram[LV_AREA], gen: genNow(), camera: camera() };
     if (!FREE) {
         f.hiddenAll = hiddenOf([...ram.subarray(IX_FLAGS, IX_FLAGS + IX_MAX)]);
-        f.cross = ram[CROSS_ON] ? [ram[CROSS_X], ram[CROSS_Y]] : null;
-        f.laser = ram[LZ_ON] ? [ram[LZ_X], ram[LZ_Y], ram[VIEW_CENTRE]] : null;
-        f.slines = linesOf(dataByte(SL_N), SL_X, SL_Y);
+        // (the information screen's frame has none of the view's lines)
+        const info = ram[syms.lv_info];
+        f.cross = ram[CROSS_ON] && !info ? [ram[CROSS_X], ram[CROSS_Y]] : null;
+        f.laser = ram[LZ_ON] && !info ? [ram[LZ_X], ram[LZ_Y], ram[VIEW_CENTRE]] : null;
+        f.slines = info ? null : linesOf(dataByte(SL_N), SL_X, SL_Y);
     }
     return inputsOf(f);
 }
@@ -443,14 +446,15 @@ cpu.debugInstruction.add((addr, opcode) => {
         onIdle();
     } else if (addr === CLOCK_READ) {
         lastClock = now(); // (the last of its tries is the one kept)
-    } else if ((addr === OBJECTS && bank === BANK_OBJ || addr === CROSS_ONLY) && current) {
+    } else if ((addr === OBJECTS && bank === BANK_OBJ || addr === CROSS_ONLY || addr === INFO_FRAME) && current) {
         current.tFront = now();
         // a frame of the crosshair alone (live_cross_only): its buffer has
-        // its view, so neither half runs
-        if (addr === CROSS_ONLY) {
+        // its view, so neither half runs; nor in the information screen's
+        // (live_info), its text alone
+        if (addr === CROSS_ONLY || addr === INFO_FRAME) {
             current.crossOnly = true;
             current.front = current.fill = 0;
-            crossOnly++;
+            if (addr === CROSS_ONLY) crossOnly++;
         }
         current.clockFront = lastClock;
         current.camera = camera();
@@ -799,6 +803,7 @@ let passAsks = 0, passSoundsOk = 0, soundsAsked = 0; // (the sounds asked for si
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
 const LV_LON = FREE ? 0 : sym("lv_lon"), LV_LX = FREE ? 0 : sym("lv_lx"), LV_LY = FREE ? 0 : sym("lv_ly");
 let laserFrames = 0, lasersOk = 0, lasersShown = 0, sensorLineFrames = 0, sensorSteps = 0, sensorShots = 0;
+let infoScreens = 0;
 const LV_LASERED = FREE ? -1 : sym("lv_pass.unfired"); // (lv_pass has set the laser's lines up)
 let onLasered = null;
 let summary = "";
@@ -1009,7 +1014,7 @@ async function logicScript() {
     const done = new Set(), early = new Set(); // (early: pokes the hook has put in)
     let passesOk = 0, passesSeen = 0, walksOk = 0;
     const passLog = []; // each pass that ran: what its frames are to show
-    let overs = 0;
+    let overs = 0, infoLines = null;
     const REPEAT_FIELDS = sym("REPEAT_FIELDS");
     const LASER_FIELDS = sym("LASER_FIELDS");
     let tapUntil = null, taps = 0;
@@ -1112,6 +1117,9 @@ async function logicScript() {
         passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, globals0,
             margin: exp[0x88d0], run: script, t: tPass, made, messages: rec.messages ?? [] });
         passMessages = rec.messages ?? [];
+        // the information screen's text, as the transcription built it, which
+        // its frame must show (the model's info_view)
+        if (rec.info_lines) (infoLines = rec.info_lines), infoScreens++;
         // the laser: checked once lv_pass has set its lines up (onLasered)
         onLasered = () => {
             onLasered = null;
@@ -1134,6 +1142,7 @@ async function logicScript() {
     // replaced, though the logic has indexed the new area's)
     const IX_MAX = S("IX_MAX");
     frameExtra = () => ({
+        info: V("lv_info") ? infoLines : null,
         anOn: V("an_on"), e: (V16("lv_now") - V16("an_t0")) & 0xffff, pass: passLog.at(-1), over: V("lv_over") !== 0,
         ixFlags: [...ram.subarray(S("ix_flags"), S("ix_flags") + IX_MAX)], ixN: V("ix_n"),
         logicCam: expCamera(), expFlags: visibility ? visibility.slice(0, V("ix_n")) : expFlags(), switching: V("lv_switch") !== 0,
@@ -1222,8 +1231,9 @@ async function logicScript() {
                 if (want?.rec !== rec) {
                     hold([]);
                     await settleAndPress(where);
-                    // (the end's wait reads no key for its first END_DEAF fields)
-                    if (!rec.tick && !rec.restart) startProbe(rec.names.join("+"));
+                    // (the end's wait reads no key for its first END_DEAF
+                    // fields, the information screen's for its INFO_SHOW)
+                    if (!rec.tick && !rec.restart && !rec.info_answer) startProbe(rec.names.join("+"));
                     want = { rec, where, steps: run.steps, i, tDown: now() };
                     minuteDue = rec.tick;
                     hold(rec.names);
@@ -1342,7 +1352,8 @@ async function logicScript() {
         `${passesSeen} passes taken, ${passesOk} with the transcription's state, ${walksOk} with its walks and loads, ${overs} that found the game over; ` +
         `${camsOk} frames with the camera as the logic and decision 4 have it, ${between_n} of them between passes ` +
         `(${perPass.size} passes shown so, ${counts.length ? counts[counts.length >> 1] : 0} frames each at the median), ` +
-        `${flagsOk} with the logic's objects' flags; ${visibilityFrames} frames from the objects' flags alone`;
+        `${flagsOk} with the logic's objects' flags; ${visibilityFrames} frames from the objects' flags alone; ` +
+        `${infoScreens} information screens, ${frames.filter((f) => f.info).length} frames of them`;
     // The held keys' speed in tests/logic/pace.txt's run (at the port's
     // start sizes): over each pass on the keys held alone with another after
     // it, its turn or its walk (one, not both) over the fields to that one.
@@ -1507,8 +1518,9 @@ async function freeScript() {
 
 // --- Every frame shown against the model.
 const requests = [];
-const keyOf = (f) => `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}:` +
-    `${f.globals ? f.globals.join(";") : ""}:${f.laser ?? ""}:${f.slines ? f.slines.join(";") : ""}`;
+const keyOf = (f) => (f.info ? `info:${f.info.join("|")}` :
+    `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}:` +
+    `${f.globals ? f.globals.join(";") : ""}:${f.laser ?? ""}:${f.slines ? f.slines.join(";") : ""}`);
 const index = new Map();
 for (const { frame } of shown) {
     if (frame.camera.slice(3).some((a) => a >= 72) || frame.camera.slice(0, 3).some((v) => v >= 0x8000)) {
@@ -1519,6 +1531,7 @@ for (const { frame } of shown) {
     if (!index.has(k)) {
         index.set(k, requests.length);
         const r = { area: frame.area, camera: frame.camera };
+        if (frame.info) r.info = frame.info;            // (the information screen's text alone)
         if (frame.hidden) r.hidden = frame.hidden;
         if (frame.globals) r.globals = frame.globals;
         if (frame.cross) r.cross = frame.cross;

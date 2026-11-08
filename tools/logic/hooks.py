@@ -90,9 +90,15 @@ class Hooks:
         wait after it is wait's)."""
         self._note("message", addr)
 
-    def info(self, s):
-        """$C3DC: I shows the information screen, and waits for a key."""
-        self._note("info")
+    def info_shown(self, s):
+        """$C40D-$C597: the information screen's text printed into the view,
+        cleared (tools/logic/info.py's lines)."""
+        self._note("info_shown")
+
+    def info_gone(self, s):
+        """$C7F7-$C7FE: the view back from the buffer (wiped in), and the
+        crosshair, after the information screen."""
+        self._note("info_gone")
 
     def game_over(self, s):
         """$9AB7: GameOver ($8BF2) is set: the end of the game."""

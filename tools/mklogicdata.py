@@ -44,7 +44,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import freescape  # noqa: E402
 from logic.oracle import Original  # noqa: E402
-from logic import end as lend, rig  # noqa: E402
+from logic import end as lend, info as linfo, rig  # noqa: E402
 from logic.passes import _action_of  # noqa: E402
 from logic.state import VARS, DATABASE, PASS_FIELDS, REPEAT_FIELDS, State, database, port_start  # noqa: E402
 
@@ -225,6 +225,12 @@ def main():
         f"ZX_END_MESSAGES = &{END_MESSAGES:04X}",
         blist("ZX_END_MSG", m[END_MESSAGES:END_MESSAGE_ENDS]),
         blist("ZX_END_AT", [lend.message_of(c) - END_MESSAGES for c in range(1, 7)]),
+        "\\ the information screen's text as the game starts with it ($C2B2: nine",
+        "\\ lines, its static parts), and its words ($C39C on)",
+        f"ZX_INFO_COLS = {linfo.COLS}",
+        blist("ZX_INFO_TEXT", m[linfo.TEXT:linfo.TEXT + linfo.COLS * len(linfo.ROWS)]),
+        blist("ZX_INFO_WORDS", m[linfo.WORDS:linfo.WORDS + linfo.N_WORDS]),
+        blist("ZX_INFO_ROWS", linfo.ROWS),
         "",
         "\\ the action of each key code from KEY_LOW up, from the key table as $99EF",
         "\\ finds it (the other codes and shooting mode: action_of)",

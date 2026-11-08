@@ -45,6 +45,7 @@ m.load(path.join(dir, "CHECK"), sym("chk_code"));
 m.load(path.join(dir, "LOGICC"), 0x8000, CODE_BANK);
 m.load(path.join(dir, "RIGC"), sym("rig_code"));
 m.load(path.join(dir, "LMORE"), sym("logic_more"));
+const infoData = fs.readFileSync(path.join(dir, "IDATA"));
 
 let failures = 0;
 function fail(msg) {
@@ -210,12 +211,13 @@ async function sampled(entry) {
     return { marks: [0, m.tm.elapsedCycles - t0] };
 }
 
-let passes = 0, steps = 0, runsOk = 0, froze = 0;
+let passes = 0, steps = 0, runsOk = 0, froze = 0, infoScreens = 0;
 const KEYS = sym("keys");
 const SCRIPT = sym("CHK_SCRIPT");
 for (const r of trace.runs) {
     m.write(sym("LOGIC_WORK"), work);
     m.write(0x8000, bank, LOGIC_BANK);
+    m.write(sym("info_data"), infoData);
     exp.set(start);
     await m.call(sym("chk_init"));
     let diffs = compare();
@@ -240,6 +242,11 @@ for (const r of trace.runs) {
         } else if (rec.end) {
             // the game's end (logic_go_end), after the pass that found it
             await m.call(sym("chk_end"));
+        } else if (rec.info_answer) {
+            // the information screen's key (logic_go_info): its text first,
+            // as the transcription built it
+            m.write(KEYS, rec.keys);
+            await m.call(sym("chk_info"));
         } else if (rec.restart) {
             // its wait answered by the keys, or run out (the demo next),
             // and the new game (logic_go_restart)
@@ -273,6 +280,17 @@ for (const r of trace.runs) {
                 ok = false;
                 break;
             }
+            if (rec.info_lines) {
+                // the information screen's text, the transcription's
+                const want = rec.info_lines.join("");
+                const got = String.fromCharCode(...m.read(sym("InfoText"), want.length));
+                if (got !== want) {
+                    fail(`${rec.line}: the information screen's text:\n  ${got}\n  not\n  ${want}`);
+                    ok = false;
+                    break;
+                }
+                infoScreens++;
+            }
         }
         for (const [a, v] of rec.changes) exp[a] = v;
         diffs = compare();
@@ -291,7 +309,7 @@ for (const r of trace.runs) {
 }
 const scenarios = trace.runs.filter((r) => !r.name.startsWith("fuzz-")).length;
 console.log(`logic6502: ${trace.runs.length} runs (${scenarios} scenarios, ${trace.runs.length - scenarios} random walks), ` +
-    `${steps} steps, ${passes} passes compared; ${trace.runs.length - runsOk} differ` +
+    `${steps} steps, ${passes} passes compared, ${infoScreens} information screens' text; ${trace.runs.length - runsOk} differ` +
     (froze ? `; ${froze} hung where the transcription does` : ""));
 
 // --- the arithmetic ----------------------------------------------------------

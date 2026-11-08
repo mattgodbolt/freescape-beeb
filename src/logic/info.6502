@@ -1,0 +1,240 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the information screen's logic
+\ (tools/logic/info.py: the original's $C3DC-$C59C and $C5A2-$C80D)
+\
+\ The entries in section LogicMore, main RAM, with the end's
+\ (src/logic/end.6502): they reach both of the logic's banks, and copy the
+\ area's name from the database (LOGIC_BANK) into the screen's text, which
+\ the includer keeps in section InfoData, in bank INFO_BANK (the live
+\ disc's front end's bank, where src/info.6502 draws it), with the code
+\ that writes the rest of its fields. The text is the original's buffer
+\ ($C2B2): nine lines of ZX_INFO_COLS characters, static but for the
+\ fields each showing writes, as the original's.
+\ ***************************************************************************
+
+SECTION InfoData
+.InfoText   EQUB ZX_INFO_TEXT                   ; the nine lines
+.InfoWords  EQUB ZX_INFO_WORDS                  ; "  AREA", "SECTOR", ... "ZERO"
+.info_cft   EQUB 'C', 'F', 'T'                  ; (and CFT after them: INFO_CFT)
+ENDSECTION
+INFO_LINES = LEN(ZX_INFO_ROWS)
+ASSERT LEN(ZX_INFO_TEXT) = INFO_LINES * ZX_INFO_COLS
+FUNCTION it(line, col) = InfoText + line * ZX_INFO_COLS + col
+INFO_SHOW = &19             ; frames the screen shows before a key is read ...
+INFO_BACK = &0B             ; ... and after one that goes on
+INFO_ABORT = '1'
+INFO_SHOWN = 4              ; logic_pass's answer: the screen shows, its key awaited
+TERMINATED_OVER = 6         ; GameOver while it shows, and after 1
+INFO_P10 = {1, 10, 100, 1000, 10000, 100000}    ; (digits' powers of ten)
+
+SECTION LogicMore
+
+\ info_begin ($C3DC-$C59C), action &29 from input_pass (LOGIC_CODE_BANK
+\ paged): only for I alone in the pass's keys. GameOver 6 while it shows,
+\ the screen's colours black and yellow a moment ($A77A with the area's
+\ last two 0 and 6), the text, and INFO_SHOW frames. A = INFO_SHOWN (the
+\ pass stops there: logic_go_info answers it), or 1 if not shown. Returns
+\ with LOGIC_CODE_BANK paged.
+.info_begin
+{
+    LDA KeyCount : CMP #1 : BEQ shown
+    LDA #1
+    RTS
+.shown
+    LDA #TERMINATED_OVER : STA GameOver
+    LDA #INFO_SHOW : STA Countdown
+    LDA AreaColours+2 : PHA
+    LDA AreaColours+3 : PHA
+    STZ AreaColours+2
+    LDA #6 : STA AreaColours+3
+    LOGIC_PAGE A, LOGIC_BANK
+    JSR screen_update
+    PLA : STA AreaColours+3
+    PLA : STA AreaColours+2
+    JSR info_name
+    JSR info_build                              ; (in INFO_BANK, paged)
+    LDA #INFO_SHOW : JSR wait
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+    LDA #INFO_SHOWN
+    RTS
+}
+
+\ info_name ($C429-$C444): the right halves of the first five lines
+\ cleared, and the area's name from the database (LOGIC_BANK) into the
+\ first's; returns with INFO_BANK paged.
+.info_name
+{
+    ZA_AUTO2 p
+    LDA #INFO_BANK : STA romsel
+    LDX #12
+.clear
+    LDA #' '
+    FOR k = 0..4
+        STA it(k, 13),X
+    NEXT
+    DEX : BPL clear
+    LDA AreaNamePtr : STA p
+    LDA AreaNamePtr+1 : STA p+1
+    LDY #11
+.name
+    LDA #LOGIC_BANK : STA romsel
+    LDA (p),Y : TAX
+    LDA #INFO_BANK : STA romsel
+    TXA : STA it(0, 13),Y
+    DEY : BPL name
+    RTS
+}
+
+\ logic_go_info ($C5A2-$C80D): the keys in the logic's bitmap answer the
+\ screen, read as $943C reads them: 1 abandons the game (GameOver 6 kept:
+\ the next pass goes to the end), any other goes on (S and L too: decision
+\ 153), INFO_BACK frames, the area's colours back, GameOver 0.
+.logic_go_info
+{
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+    JSR read_keys
+    CMP #INFO_ABORT : BEQ done
+    LDA #INFO_BACK : JSR wait
+    LOGIC_PAGE A, LOGIC_BANK
+    JSR screen_update
+    STZ GameOver
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+.done
+    RTS
+}
+ENDSECTION
+
+\ The rest of the text's fields, with the text (section InfoData), run
+\ with INFO_BANK paged.
+SECTION InfoData
+
+\ info_build ($C446-$C561), after info_name: AREA and NOT REQUIRED from
+\ area &13 on, else SECTOR and the rig: UNPOSITIONED; or POSITIONED and
+\ the gas found (the yield, two digits and 000 CFT), the share (three, and
+\ %) and the gas tapped (yield x 10 x share, five, and CFT), or NONE, ZERO,
+\ NONE for a rig that found none; dashes for those three with no rig; and
+\ the safe sectors, two digits. Leading zeros are spaces as the original's.
+.info_build
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 c, d, t0, t1
+    ZA_AUTO 3, iv
+    LDA AreaId : CMP #&13 : BMI sector
+    LDY #0 : LDX #it(0, 5) - InfoText : LDA #6 : JSR copy        ; "  AREA"
+    LDY #12 : LDX #it(1, 13) - InfoText : LDA #12 : JSR copy     ; NOT REQUIRED
+    BRA dashes
+.sector
+    LDY #6 : LDX #it(0, 5) - InfoText : LDA #6 : JSR copy        ; SECTOR
+    LDX AreaId : DEX : STX c
+    LDA RigPlaced,X : BNE placed
+    LDY #24 : LDX #it(1, 13) - InfoText : LDA #12 : JSR copy     ; UNPOSITIONED
+.dashes
+    LDA #'-' : STA it(2, 13) : STA it(3, 13) : STA it(4, 13)
+    JMP safe
+.placed
+    CMP #2 : BPL found
+    JMP dry
+.found
+    \ the yield (GasYields: an original's address in the mirror)
+    LDA GasYields : CLC : ADC c : STA p
+    LDA GasYields+1 : ADC #0 : STA p+1
+    LDA p : CLC : ADC #LO(zxv - ZXV_ORG) : STA p
+    LDA p+1 : ADC #HI(zxv - ZXV_ORG) : STA p+1
+    LDA (p) : STA iv : STZ iv+1 : STZ iv+2
+    LDX #it(2, 13) - InfoText : LDA #2 : JSR digits
+    LDX #it(2, 13) - InfoText : LDA #1 : JSR blank
+    LDA #'0' : STA it(2, 15) : STA it(2, 16) : STA it(2, 17)
+    LDY #INFO_CFT : LDX #it(2, 19) - InfoText : LDA #3 : JSR copy
+    \ the share
+    LDX c : LDA RigState,X : STA iv : STZ iv+1 : STZ iv+2
+    LDX #it(3, 15) - InfoText : LDA #3 : JSR digits
+    LDX #it(3, 15) - InfoText : LDA #2 : JSR blank
+    LDA #'%' : STA it(3, 19)
+    \ the gas tapped: the yield x 10 (t0, t1) added share times (the original's
+    \ $928C then $910E: both below &80, so unsigned)
+    LDA (p) : STA t0 : STZ t1
+    ASL t0 : ROL t1                             ; 2y
+    LDA t0 : LDX t1
+    ASL t0 : ROL t1 : ASL t0 : ROL t1           ; 8y
+    CLC : ADC t0 : STA t0
+    TXA : ADC t1 : STA t1                       ; 10y
+    STZ iv : STZ iv+1 : STZ iv+2
+    LDX c : LDY RigState,X : BEQ tapped
+.add
+    LDA iv : CLC : ADC t0 : STA iv
+    LDA iv+1 : ADC t1 : STA iv+1
+    BCC added
+    INC iv+2
+.added
+    DEY : BNE add
+.tapped
+    LDX #it(4, 13) - InfoText : LDA #5 : JSR digits
+    LDX #it(4, 13) - InfoText : LDA #4 : JSR blank
+    LDY #INFO_CFT : LDX #it(4, 19) - InfoText : LDA #3 : JSR copy
+    BRA positioned
+.dry
+    LDY #46 : LDX #it(2, 13) - InfoText : LDA #4 : JSR copy      ; NONE
+    LDY #46 : LDX #it(4, 13) - InfoText : LDA #4 : JSR copy
+    LDY #50 : LDX #it(3, 13) - InfoText : LDA #4 : JSR copy      ; ZERO
+.positioned
+    LDY #36 : LDX #it(1, 13) - InfoText : LDA #10 : JSR copy     ; POSITIONED
+.safe
+    LDA FclVar32 : STA iv : STZ iv+1 : STZ iv+2
+    LDX #it(6, 19) - InfoText : LDA #2 : JSR digits
+    LDX #it(6, 19) - InfoText : LDA #1
+    \ (on into blank)
+\ blank: up to A '0's from InfoText + X on as spaces, to the first other.
+.blank
+    STA d
+.zero
+    LDA InfoText,X : CMP #'0' : BNE blanked
+    LDA #' ' : STA InfoText,X
+    INX
+    DEC d : BNE zero
+.blanked
+    RTS
+\ copy: A characters of InfoWords + Y on (or the CFT after them, INFO_CFT)
+\ to InfoText + X on.
+.copy
+    STA d
+.byte
+    LDA InfoWords,Y : STA InfoText,X
+    INY : INX
+    DEC d : BNE byte
+    RTS
+\ digits ($9390): iv's low A digits (24 bits) as characters at InfoText + X
+\ on, leading zeros as they are.
+.digits
+    TAY
+.mod
+    JSR take : BCS mod                          ; (iv's low digits only)
+.digit
+    DEY
+    LDA #'0' : STA d
+.count
+    JSR take : BCC put
+    INC d
+    BRA count
+.put
+    LDA d : STA InfoText,X
+    INX
+    CPY #0 : BNE digit
+    RTS
+\ take: iv less 10 to the Y if it goes (C set), else iv as it was (C
+\ clear). Keeps X and Y.
+.take
+    LDA iv : SEC : SBC p10_0,Y : STA t0
+    LDA iv+1 : SBC p10_1,Y : STA t1
+    LDA iv+2 : SBC p10_2,Y : BCC kept
+    STA iv+2
+    LDA t1 : STA iv+1
+    LDA t0 : STA iv
+.kept
+    RTS
+.p10_0  EQUB LO(INFO_P10)
+.p10_1  EQUB HI(INFO_P10)
+.p10_2  EQUB INFO_P10 DIV 65536
+}
+ENDSECTION
+INFO_CFT = info_cft - InfoWords
+ASSERT INFO_CFT < 256 AND LEN(ZX_INFO_WORDS) = 54

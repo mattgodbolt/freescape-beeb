@@ -76,7 +76,7 @@ KEY_MAP = {
     {&27, K_0}, {&13, K_5}, {&34, K_6}, {&24, K_7}, {&15, K_8},
     {&32, K_D}, {&52, K_C}, {&62, K_SPACE}, {&64, K_B}, {&25, K_I},
     {&23, K_T}, {&44, K_Y},
-    {&70, K_1},                                 ; ESCAPE
+    {&70, K_1}, {&30, K_1},                     ; ESCAPE, and 1 (the information screen's ABORT)
     {&49, K_ENTER},                             ; RETURN
     {&69, K_0},                                 ; COPY
     {&39, K_7}, {&29, K_6}, {&19, K_5}, {&79, K_8}  ; the cursor keys: up, down, left, right

@@ -42,12 +42,12 @@ LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros
                src/screen.6502 src/irq.6502 src/input.6502 src/raster.6502 src/writer.6502 \
                src/area.6502 src/matrix.6502 src/transform.6502 src/objects.6502 src/clip.6502 \
                src/order.6502 src/maths.6502 src/project.6502 src/sound.6502 src/laser.6502 src/sensors.6502 \
-               $(wildcard src/logic/*.6502)
+               src/info.6502 $(wildcard src/logic/*.6502)
 LIVE_SHOTS  ?= 0 18 26 40 57
 # (every scenario of tests/logic/ but keys, whose E the disc doesn't read)
 LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise fcl jet ticks minutes steps turns corner crosshair \
                   fuzz-23 fuzz-28 fuzz-30 fuzz-34 fuzz-47 fuzz-109 fuzz-1239 fuzz-1244 pace rigs rig-sensor rig-win \
-                  shoot sensors end demo clock
+                  shoot sensors end demo clock info
 # mk/maths.mk, mk/objects.mk and mk/logic6502.mk name these too, but are
 # read after this file.
 MATHS_GEN   ?= build/maths/consts.6502 build/maths/tables.6502

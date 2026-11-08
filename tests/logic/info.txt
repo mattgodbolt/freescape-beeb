@@ -1,0 +1,32 @@
+# The information screen ($C3DC): I alone shows the sector's rig, its gas
+# and the safe sectors, and waits for a key: 1 abandons the game
+# (TERMINATED, the end), any other goes on. Its text is held to the
+# original's as printed.
+# Amethyst, no rig yet: UNPOSITIONED, answered by O.
+info O
+expect GameOver 0
+# I held on answers it itself.
+info
+expect GameOver 0
+# A rig that found no gas: POSITIONED, NONE, ZERO.
+D
+expect RigPlaced[0] 1
+info SPACE
+C
+# One beside the gas (rigs.txt's): 87%, its yield, the gas tapped.
+at 6304 160 5920
+angles 0 0 0
+D
+expect RigState[0] 87
+info Q
+# Into an area past the sectors: AREA, NOT REQUIRED.
+goto 19 1
+info K
+# With another key: no screen, the pass goes on.
+I O
+# 1: the game abandoned, the end, TERMINATED; a new game.
+info 1
+expect GameOver 6
+end
+expect GameOver 0
+O

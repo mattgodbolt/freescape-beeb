@@ -23,6 +23,12 @@ ENDSECTION
 SECTION LogicMore, org = rig_code_end, guard = &3000, filename = "LMORE", cmos = TRUE
 .logic_more
 ENDSECTION
+\ ... and the information screen's text (src/logic/info.6502) after it
+\ (IDATA), in main RAM, so the bank paged to reach it doesn't matter.
+SECTION InfoData, org = logic_more_end, guard = &3000, filename = "IDATA", cmos = TRUE
+.info_data
+ENDSECTION
+INFO_BANK = LOGIC_CODE_BANK
 INCLUDE "../src/logic/bank.6502"
 
 CHK_BUF = &3000                     ; the arithmetic's records, up to CHK_TOP
@@ -146,7 +152,16 @@ ENDMACRO
     LDA chk_result
     JSR logic_go_restart
     RTS
+
+\ The information screen's key, in keys.
+.chk_info
+    ZA_ENTRY
+    JSR logic_go_info
+    RTS
 ENDSECTION
 SECTION RigCode
 .rig_code_end
+ENDSECTION
+SECTION LogicMore
+.logic_more_end
 ENDSECTION

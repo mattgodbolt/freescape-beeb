@@ -553,6 +553,13 @@ def assembly(build, packed):
     for ch, name in ((" ", "SPACE"), ("0", "DIGIT0"), ("A", "LETTER_A"), (".", "DOT"), ("^", "DEGREE"),
                      ("%", "PERCENT")):
         L.append(f"PC_{name} = {panel.CHARSET.index(ch)}")
+    # the font's glyphs, line nibbles (a line's four pixels, bit 3 the
+    # leftmost), and each character's glyph from space to Z, for the
+    # information screen's text in the view (src/info.6502)
+    L.append(f"PANEL_FONT_H = {panel.FONT_H}")
+    L.append(f"PANEL_FONT = {{{', '.join(str(v) for v in panel.table_lines('font'))}}}")
+    ascii_cells = [panel.CHARSET.index(chr(c)) if chr(c) in panel.CHARSET else 0 for c in range(0x20, 0x5B)]
+    L.append(f"PANEL_ASCII = {{{', '.join(str(v) for v in ascii_cells)}}}")
     # the free camera's message's words (src/live.6502's entrance_text)
     for name, text in (("ENTRANCE", panel.ENTRANCE_WORDS[0]), ("DEMO", panel.ENTRANCE_WORDS[1])):
         L.append(f"PANEL_{name} = {{{', '.join(str(c) for c in panel.text_cells(text, len(text)))}}}")

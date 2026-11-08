@@ -125,10 +125,6 @@ ELSE
     RTS
 ENDIF
 
-\ hook_info ($C3DC): I shows the information screen and waits for a key.
-.hook_info
-    RTS
-
 \ hook_game_over ($9AB7): GameOver is set: the end of the game.
 .hook_game_over
     RTS

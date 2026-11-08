@@ -1787,3 +1787,64 @@ at the median (`make logic6502`), a field of the clock a few dozen.
 
 Left: nothing shows the clock (the panel has no field for it); the
 information screen.
+
+## 2026-11-08: the information screen
+
+I alone in a pass shows the original's information screen ($C3DC,
+`docs/research/info.md`): the sector or area and its name, its rig's
+status, the gas found and tapped and the share, the sectors in all and
+the safe ones, and its keys, nine lines of 26 characters printed from the
+original's own buffer ($C2B2), whose static parts never change; then the
+keys read until one is held: 1 abandons the game (TERMINATED, the end),
+S and L save and load to tape, any other goes on.
+
+**Transcribed** (`tools/logic/info.py`) and checked against the original:
+a scenario step `info K` holds I through the input to the screen's read
+of the keys ($C5A2), where the original's buffer must hold the
+transcription's text, then K. `tests/logic/info.txt`: no rig, I held on
+(a long press shows it only a moment, as the original's), a rig that
+found no gas, one with 87% (49000 CFT, 42630 tapped), an area past the
+sectors (AREA, NOT REQUIRED), I with another key (no screen), and 1: the
+end, TERMINATED, and a new game. All the same.
+
+**In 6502** (`src/logic/info.6502`): the entries in `LogicMore`, the text
+and the code that writes its fields in a section of the includer's
+(`InfoData`: the live disc's front end's bank, after its code; the check
+build's main RAM). `make logic6502` holds each screen's text and every
+variable after its key to the transcription's.
+
+**On the disc**: the pass answers 4 and the screen shows (`lv_info`): a
+frame of its own (`live_info`, `src/info.6502`'s `info_draw`) clears the
+view and draws the text in the panel's font, four pixels a character so
+the 26 columns fill the view, yellow on black; its buffer's crosshair and
+lines go with the view and the rasteriser forgets what either buffer
+held. The sensors' clock stops while it shows, and the clock too (its
+`GameOver` 6), as the original's. Its 25 frames are the pass's waits, and
+then any key is the next pass's call (`logic_go_info`). S and L go on
+(decision 153). The BBC's 1 is the ZX's 1 now, beside ESCAPE, for the
+screen's ABORT. `make live`: six screens, each frame the model's render of
+the transcription's text (`tools/mklive.py`'s `info_view`), byte for
+byte.
+
+Two faults on the way: the drawing code first went into the front end's
+bank with the text and overflowed it (it's in `LogicMore` now, the font
+and the text in the bank), and `LIVE` grew past the gap before
+`ObjMore`'s page, moving it a page on (the clock and the end's wait went
+to `LiveData`); and `logic_go_info` landed in `InfoData` when the file was
+split, which the check build (where that section is main RAM) couldn't
+see: the disc jumped into the paged bank. `src/live.6502` now ASSERTs
+that the entries that page the banks are in main RAM.
+
+**Room** (the logic disc, before the clock's layer and after this one):
+`LOGIC_BANK` 453 to 453; `BANK_DATA` 376 to 271 (the clock and the end's
+wait, moved there); `ObjMore`'s room 433 to 83 (`LogicMore` 756 to 1,106:
+the information screen's entries, its name's copy and its drawing); the
+front end's bank's room 1,176 to 142 (`InfoData`, 1,034: the text and
+words, the fields' code, the font and its table by character); shadow
+RAM 52 to 52; `Work` 13 to 12. The free disc's `LiveGlue` 359 to 353.
+**Speed** (as before, over the runs without the new scenarios): walking
+1.58 / 4.52, turning 2.2 / 5.75, entrances 8.6 / 14.38. (The screen's own
+pass and frame weren't timed: each comes once, on a key.)
+
+Left: save and load (decision 153's options); the original wipes the
+view back in, where the disc draws the next frame whole.

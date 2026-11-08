@@ -263,6 +263,12 @@ ASSERT IX_HIDDEN = &60          ; (src/area.6502's: bit 6 invisible, bit 5 destr
 \ before it back.
 SECTION ObjCode, org = OBJ_CODE_ORG, guard = &C000, filename = "OCODE", cmos = TRUE
 ENDSECTION
+\ After it in that bank, the information screen: its text and the code that
+\ writes its fields (src/logic/info.6502, called from LogicMore with this
+\ bank paged), and the font and rows src/info.6502 draws it with.
+SECTION InfoData, org = obj_code_end, guard = &C000, filename = "IDATA", cmos = TRUE
+ENDSECTION
+INFO_BANK = BANK_OBJ
 SECTION ObjAndy, org = &8000, guard = &9000, filename = "OANDY", cmos = TRUE
 ENDSECTION
 SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
@@ -486,8 +492,8 @@ IF LIVE_LOGIC
 .unlit
     \ the clock's and the sensors' fields since the last loop (the
     \ original's interrupt's), and the panel's shield after their shots
-    JSR lv_clock
     PAGE_IN BANK_DATA
+    JSR lv_clock
     JSR sn_clock
     LDA sn_shot : BEQ unshot
     STZ sn_shot
@@ -534,6 +540,9 @@ ENDIF
 IF NOT(LIVE_LOGIC)
     JSR panel_values                            ; (the camera's moved, or the area's changed)
 ELSE
+    LDA lv_info : BEQ viewed
+    JMP live_info
+.viewed
     \ only the crosshair moved, and the buffer frame_begin gives holds this
     \ view already: the crosshair moved alone
     LDA draw_buffer : EOR #1 : TAX
@@ -575,6 +584,7 @@ IF LIVE_LOGIC
     PAGE_IN BANK_DATA
     JSR lv_cross_on                             ; (and the crosshair now, if it's shown)
     PAGE_IN BANK_GLUE
+.live_info_done
 ENDIF
     JSR live_measure
     PAGE_IN BANK_DATA
@@ -595,6 +605,23 @@ IF LIVE_LOGIC
     PAGE_IN BANK_DATA
     JSR lv_cross_off
     JMP live_cross_on
+\ live_info: the information screen's frame (src/info.6502): the view
+\ cleared and the screen's text drawn into the buffer frame_begin gives;
+\ what that buffer held over its view (the crosshair, the lines) goes with
+\ it, its view is none (lv_bview: its next is drawn whole), and neither
+\ screen holds what the rasteriser last drew (raster_forget).
+.live_info                                      ; (tools/livecheck.mjs: the information screen's frame)
+    JSR frame_begin
+    LDX draw_buffer
+    STZ lv_xon,X : STZ lv_lon,X
+    LDA #&80 : STA lv_bview,X
+    PAGE_IN BANK_DATA
+    STZ sb_n,X
+    PAGE_IN BANK_RASTER
+    JSR raster_forget
+    JSR info_draw                               ; (it pages its bank in)
+    PAGE_IN BANK_GLUE
+    JMP live_info_done
 ENDIF
 NAMED_CELLS = PF_NAME + PN_NAME                 ; (the cells before the name's end: the message's in them)
 ASSERT PF_MESSAGE < PF_NAME
@@ -700,7 +727,8 @@ SECTION Work
 .cl_more        SKIP 1
 .lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer), till a new game
 .lv_end_t0      SKIP 2      ; ... fields at the end
-.lv_call        SKIP 1      ; the pass's call: 0 logic_go_pass, else logic_go_restart's A + 1
+.lv_call        SKIP 1      ; the pass's call: 0 logic_go_pass, 1 or 2 logic_go_restart's A + 1, 3 logic_go_info
+.lv_info        SKIP 1      ; non-zero while the information screen shows
 .lv_switch      SKIP 1      ; non-zero: the area changes once the old area's frames are shown
 .lv_request     SKIP 1      ; non-zero: tools/livecheck.mjs has set the logic's state (lv_requested)
     \ what the hooks saw in the pass
@@ -773,7 +801,7 @@ ENDSECTION
 .lv_requested
     STZ lv_request
     JSR logic_go_init
-    STZ lv_over : STZ lv_call
+    STZ lv_over : STZ lv_call : STZ lv_info
     STZ lv_msg_on                               ; (a rig's messages, if any, end)
     LDA lv_now : STA lv_until
     LDA lv_now+1 : STA lv_until+1
@@ -837,6 +865,19 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 .waiting
     RTS
 .alive
+    LDA lv_info : BEQ playing
+    \ The information screen's wait ($C59C-$C5A2): its frames (the pass's
+    \ waits, lv_until) done, any key held or gone down answers it: the
+    \ pass's call (lv_call 3, logic_go_info)
+    LDX #KEYS_BYTES - 1
+.info_key
+    LDA keys,X : ORA keys_made,X : BNE info_answered
+    DEX : BPL info_key
+    RTS
+.info_answered
+    LDA #3 : STA lv_call
+    JMP timed
+.playing
     \ The shot's pick is from the frame last drawn (src/laser.6502), which
     \ must be the logic's camera, as the original's is its last redraw: so a
     \ pass that may fire waits while the last pass's frames show, until the
@@ -897,10 +938,18 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     BRA called
 .restart
     \ the end's wait answered (1, by the keys) or run out (2, the demo
-    \ next), and the new game: answered as a pass after which one began
-    DEC A : JSR logic_go_restart
+    \ next), and the new game: answered as a pass after which one began;
+    \ or (3) the information screen's key, answered as a pass, its view gone
     STZ lv_call
+    CMP #3 : BEQ info
+    DEC A : JSR logic_go_restart
     LDA #3
+    BRA called
+.info
+    JSR logic_go_info
+    STZ lv_info
+    INC lv_entered                              ; (the view's again: lv_inputs)
+    LDA #1
 .called
     TAX
     LDA #ACCCON_X : TRB acccon
@@ -915,6 +964,12 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_now+1 : STA lv_end_t0+1
     BRA ran
 .not_over
+    CMP #4 : BNE not_info
+    \ the information screen: its frame (live_info) till its key
+    LDA #1 : STA lv_info
+    INC lv_entered                              ; (a view of its own: lv_inputs)
+    BRA ran
+.not_info
     CMP #3 : BNE ran
     \ a new game: the end over, its message gone (the clock's text 04:00:00
     \ again, and the area entered as for any pass that loads one)
@@ -983,6 +1038,12 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     RTS
 }
 
+\ In BANK_DATA (LiveData, called with it paged, which is the logic's code
+\ bank, LOGIC_CODE_BANK, so logic_go_clock leaves it so): the clock, and
+\ the end's wait.
+ASSERT LOGIC_CODE_BANK = BANK_DATA
+SECTION LiveData
+
 \ lv_clock (each loop): the original's interrupt's clock, a frame a field,
 \ for the fields counted since the last loop (decision 152): its seconds,
 \ a minute's end (which the next pass takes), the time out. Held by
@@ -1034,6 +1095,7 @@ END_FIELDS = 13 * END_DEAF
     CLC
     RTS
 }
+ENDSECTION
 
 \ The hooks (src/logic/hooks.6502) this disc fills in, called from the
 \ logic's banks. They page nothing.
@@ -2078,7 +2140,8 @@ ENDSECTION
     ZA_ENTRY
     JSR logic_go_init : JSR logic_go_clock : JSR logic_go_tick : JSR logic_go_pass
     JSR logic_go_colours : JSR logic_go_shown
-    JSR logic_go_end : JSR logic_go_restart
+    JSR logic_go_end : JSR logic_go_restart : JSR logic_go_info
+    JSR info_draw
     RTS
 
 \ live_first: the demo off, and the first entrance.
@@ -2332,6 +2395,9 @@ IF LIVE_LOGIC
 INCLUDE "laser.6502"
 INCLUDE "sensors.6502"
 ENDIF
+\ The information screen's drawing (in InfoCode; the free disc assembles it
+\ too, as the logic, so the map is the same: live_no_logic)
+INCLUDE "info.6502"
 
 \ Where each section ends, for the next's org and the clearing.
 SECTION ObjCode
@@ -2360,6 +2426,9 @@ SECTION ObjMore
 ENDSECTION
 SECTION LogicMore
 .logic_more_end
+ENDSECTION
+SECTION InfoData
+.info_data_end
 ENDSECTION
 SECTION ObjCache
 .obj_cache_end
@@ -2452,6 +2521,10 @@ ASSERT PANEL_BOUNCE >= RASTER_IN_ORG AND PANEL_BOUNCE + 256 <= raster_in_end
 ASSERT logic_code_end <= live_data_end
 ASSERT logic_db_code_end <= live_glue_end AND live_glue_end <= LOGIC_DB
 ASSERT OBJ_CODE_ORG >= &8000 AND obj_code_end <= &C000
+ASSERT obj_code_end <= info_data_end AND info_data_end <= &C000
+\ (the entries that page the banks, in main RAM: LogicMore's)
+ASSERT logic_go_end < &3000 AND logic_go_restart < &3000 AND info_begin < &3000 AND logic_go_info < &3000
+ASSERT info_name < &3000 AND info_draw < &3000 AND info_build >= &8000
 \ ANDY, over the pipeline's bank's first 4K: what its code reaches there
 \ is past it.
 ASSERT obj_andy_end <= &9000 AND obj_andy_reach >= &9000
@@ -2499,6 +2572,7 @@ LIVE_PARTS = {
     {"PDATA", BANK_DATA, live_data_end, panel_data_end},
     {"ACONV", BANK_DATA, panel_data_end, area_conv_end},
     {"OCODE", BANK_OBJ, OBJ_CODE_ORG, obj_code_end},
+    {"IDATA", BANK_OBJ, obj_code_end, info_data_end},
     {"RRUNS", BANK_RASTER, &8000, raster_runs_end},
     {"RCODE", BANK_RASTER, raster_runs_end, raster_code_end},
     {"LIVE", -1, raster_state_end, live_end},

@@ -30,7 +30,7 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from logic import end as lend, fcl, move, scenario  # noqa: E402
+from logic import end as lend, fcl, info as linfo, move, scenario  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.move import Freeze  # noqa: E402
 from logic.oracle import Original, SCRIPT, Waiting  # noqa: E402
@@ -195,6 +195,7 @@ def sight_check(st, s, projected, redrawn):
 
 
 ENDS = collections.Counter()   # the ends and new games compared, by how
+INFO = collections.Counter()   # the information screens compared, by the key that answered
 
 
 # What the logic's end and new game set of the variables the renderer's
@@ -293,8 +294,9 @@ def run(steps, snap, verbose=False):
             fcl.run(s, SCRIPT, len(st.code), hooks)
         else:
             s0 = s.copy()
+            info_keys = getattr(st, "info_keys", None)
             try:
-                alive = run_pass(s, st.keys, st.tick, hooks)
+                alive = run_pass(s, st.keys, st.tick, hooks, info_keys=info_keys)
             except Freeze as e:
                 # The original hangs here too, or it's a difference.
                 try:
@@ -304,7 +306,14 @@ def run(steps, snap, verbose=False):
                     passes += 1
                     break
                 raise Mismatch(f"{st.line}: the transcription hangs ({e}); the original doesn't")
-            after = orig.run_pass(st.keys, st.tick, ends=alive == "over")
+            after = orig.run_pass(st.keys, st.tick, ends=alive == "over", info_keys=info_keys)
+            if info_keys is not None:
+                # the information screen's text, as the original printed it
+                want = linfo.lines(State(orig.info_mem))
+                if want != linfo.lines(s):
+                    raise Mismatch(f"{st.line}: the information screen's text differs:\n  " +
+                                   "\n  ".join(f"{a!r}  {b!r}" for a, b in zip(want, linfo.lines(s)) if a != b))
+                INFO[" ".join(info_keys)] += 1
             if alive == "new" or (alive != "over" and orig.new_game):
                 # a new game after the pass (the demo's end, or a key in it):
                 # the original's from the main loop's top after it
@@ -460,6 +469,9 @@ def main():
         print("the sensors: " + ", ".join(f"{k} {v}" for k, v in sorted(SENSORS.items())))
     if ENDS:
         print("the ends and new games: " + ", ".join(f"{k} {v}" for k, v in sorted(ENDS.items())))
+    if INFO:
+        print("the information screens, their text the original's, by the key that answered: " +
+              ", ".join(f"{k} {v}" for k, v in sorted(INFO.items())))
     if REDRAWN[0]:
         print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
     if FROZE[0]:

@@ -1053,4 +1053,21 @@ original's frame, so the clock runs at its speed, but a loop that waits
 longer than 255 fields (a sound's wait, decision 110) counts no more than
 that.
 
+## 153. The information screen's S and L go on, as any other key (2026-11-08, autonomous, proposed for Matt)
+
+The original's information screen ($C3DC) saves the game to tape on S and
+loads it on L (the ROM's `SA-BYTES` and `LD-BYTES`: 333 bytes of its
+variables and every object's flags), and its text says so (L-LOAD S-SAVE).
+The disc has no tape, and its engine owns the machine, so the DFS isn't
+there to save to a disc file either (`docs/research/game-audit.md`). On
+the disc S and L go on as any other key does; the screen's text is the
+original's, words and all. The screen itself is the original's text in
+the panel's font, four pixels a character, so its 26 columns fill the
+view's 104 pixels, in yellow on black, as the original's ink 6 on black
+paper; its frame is drawn whole, and the view is drawn whole after it,
+where the original wipes the buffer back in. The options, for Matt: as
+built; the words left out of the text; or a save to the disc, which
+would want the loader's own disc access kept and a write (a sector or two
+of the disc), a layer of its own.
+
 

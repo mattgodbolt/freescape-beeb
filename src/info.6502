@@ -1,0 +1,100 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the information screen in the view
+\ (docs/research/info.md; tools/mklive.py's info_view is its model; the
+\ text's place and its fields' code are src/logic/info.6502's)
+\
+\ The logic builds the screen's text (src/logic/info.6502: the original's
+\ nine lines of 26 characters, InfoText, in this bank's InfoData); this
+\ draws it into the buffer being drawn, between frame_begin and frame_end:
+\ the view cleared to black and each line on its character row (the
+\ original's rows, ZX_INFO_ROWS), each character the panel's font's glyph
+\ (tools/model/panel.py's FONT: four pixels a character, so 26 fill the
+\ view's 104), in yellow, as the original's ink 6 on black. The code in
+\ main RAM (section LogicMore, after the front end's ObjMore), the tables
+\ with the text (section InfoData, in the front end's bank, INFO_BANK),
+\ which it pages in.
+\ ***************************************************************************
+
+SECTION LogicMore
+INFO_INK   = 3              ; yellow, as the panel's text
+INFO_INK_L = mode2_left(INFO_INK)
+INFO_INK_R = mode2_right(INFO_INK)
+ASSERT ZX_INFO_COLS * 4 = VIEW_W AND MAX(ZX_INFO_ROWS) < VIEW_H DIV 8 AND PANEL_FONT_H <= 8
+
+\ info_draw: the view cleared and the text drawn, into the buffer ACCCON's
+\ X selects (frame_begin's). Pages INFO_BANK in.
+.info_draw
+{
+    ZA_AUTO2 p, q
+    ZA_AUTO1 line, ch, n
+    LDA #INFO_BANK : STA ROMSEL_COPY : STA romsel
+    \ the view, a character row at a time: VIEW_BYTES columns of eight bytes
+    LDA #LO(VIEW_ADDR) : STA p
+    LDA #HI(VIEW_ADDR) : STA p+1
+    LDX #VIEW_H DIV 8
+.row
+    LDA #0
+    LDY #0
+.low
+    STA (p),Y
+    INY : BNE low
+    INC p+1
+    LDY #VIEW_BYTES * 8 - 256 - 1
+.high
+    STA (p),Y
+    DEY : CPY #&FF : BNE high
+    LDA p+1 : CLC : ADC #HI(SCREEN_ROW) - 1 : STA p+1
+    DEX : BNE row
+    \ the lines
+    STZ line
+    LDA #LO(InfoText) : STA q
+    LDA #HI(InfoText) : STA q+1
+.text
+    LDX line
+    LDA #LO(VIEW_ADDR) : STA p
+    LDA info_rows,X : ASL A                     ; (SCREEN_ROW a row: its high byte twice the row)
+    CLC : ADC #HI(VIEW_ADDR) : STA p+1
+    LDA #ZX_INFO_COLS : STA n
+.char
+    LDA (q) : SEC : SBC #' '
+    CMP #LEN(PANEL_ASCII) : BCC known
+    LDA #0                                      ; (anything else a space)
+.known
+    TAX : LDA info_ascii,X                      ; its glyph ...
+    STA ch
+    ASL A : ASL A : ADC ch : TAX                ; ... whose lines start at 5 g
+.glyph
+    LDA info_font,X
+    PHA
+    LSR A : LSR A : TAY : LDA ink,Y             ; the left two pixels
+    LDY #0 : STA (p),Y                          ; (p: the glyph's line)
+    PLA
+    AND #3 : TAY : LDA ink,Y                    ; the right two
+    LDY #8 : STA (p),Y
+    INC p                                       ; (the next line down)
+    INX
+    LDA p : AND #7 : CMP #PANEL_FONT_H : BNE glyph
+    \ on to the next character: two columns on, from its top
+    LDA p : AND #&F8 : CLC : ADC #16 : STA p
+    BCC same
+    INC p+1
+.same
+    INC q : BNE q_same
+    INC q+1
+.q_same
+    DEC n : BNE char
+    INC line
+    LDA line : CMP #INFO_LINES : BNE text
+    RTS
+.ink    EQUB 0, INFO_INK_R, INFO_INK_L, INFO_INK_L OR INFO_INK_R
+}
+\ (a glyph's lines are five, from 5 g, and a character's columns start on
+\ an eight-byte boundary, so p's low bits count its lines; no glyph's line
+\ is past a byte's reach)
+ASSERT PANEL_FONT_H = 5 AND (LO(VIEW_ADDR) AND 15) = 0 AND LEN(PANEL_FONT) <= 256
+ENDSECTION
+SECTION InfoData
+.info_rows  EQUB ZX_INFO_ROWS
+.info_ascii EQUB PANEL_ASCII
+.info_font  EQUB PANEL_FONT
+ENDSECTION

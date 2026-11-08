@@ -123,6 +123,8 @@ ASSERT ZXI_RigScratch[2] = 1                    ; (the instruction's ADDSCORE, w
     STZ Countdown
     RTS
 
-\ The game's end, a new game and the demo (in LogicMore, main RAM, which
-\ the includer declares).
+\ The game's end, a new game and the demo, and the information screen (in
+\ LogicMore, main RAM, which the includer declares, with InfoData in bank
+\ INFO_BANK).
 INCLUDE "end.6502"
+INCLUDE "info.6502"

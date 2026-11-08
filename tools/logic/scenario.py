@@ -21,6 +21,10 @@ in-play snapshot (make zx: area 1, entrance 19, on the probe).
                       finds it), its wait answered by ENTER, and the new
                       game it starts ($9C36, $97CD)
     end demo          ... its wait left to run out: the demo next
+    info 1            a pass of I alone: the information screen ($C3DC),
+                      its wait answered by the keys named (1 abandons the
+                      game, any other goes on), I let go; "info" alone, by
+                      I held on
     demo x20          passes with no key held while the demo plays (a pass
                       of keys ends it, and a new game starts)
     expect AreaId 2   a variable's value after the last step (decimal or
@@ -76,6 +80,14 @@ def parse(text, name="scenario"):
             if words[1:] not in ([], ["demo"]):
                 raise ValueError(f"{where}: an end is 'end' or 'end demo': {line!r}")
             steps.append(Step("end", where, demo=words[1:] == ["demo"]))
+        elif w0 == "info":
+            # I alone, the information screen, answered by the keys named
+            # (held once it reads them, I let go), or with none by I held on
+            answer = tuple(words[1:]) or ("I",)
+            for k in answer:
+                if not KEY.match(k):
+                    raise ValueError(f"{where}: not a key: {k!r}")
+            steps.append(Step("pass", where, keys=("I",), tick=False, info_keys=answer))
         elif w0 == "demo":
             repeat = 1
             if len(words) == 2 and re.fullmatch(r"x\d+", words[1]):
@@ -106,8 +118,10 @@ def parse(text, name="scenario"):
             for k in words:
                 if not KEY.match(k):
                     raise ValueError(f"{where}: not a key or a command: {k!r}")
+            # (I alone is the information screen's, answered by I held on)
+            extra = {"info_keys": ("I",)} if words == ["I"] else {}
             for _ in range(repeat):
-                steps.append(Step("pass", where, keys=tuple(words), tick=False))
+                steps.append(Step("pass", where, keys=tuple(words), tick=False, **extra))
     return steps
 
 

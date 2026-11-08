@@ -22,6 +22,7 @@ Addresses written `$` are the original's; the 6502's are symbols.*
 | `src/logic/rig.6502` | the rigs (`$BEFA`): D drills and C collects, the gas, the score, the messages, the redraw (in `LOGIC_CODE_BANK`) |
 | `src/logic/rigdb.6502` | the rigs' part in `LOGIC_BANK`: whether a rig fits (it scans the records), and the messages that never change |
 | `src/logic/end.6502` | the game's end (`$9AB7`), a new game (`$9C36`, `$97CD`) and the demo's stream (`$9A27`), in main RAM (`LogicMore`), reaching both banks (`docs/research/end.md`) |
+| `src/logic/info.6502` | the information screen (`$C3DC`): its entries in main RAM, its text and the code that writes its fields in `InfoData`, the includer's (`docs/research/info.md`) |
 | `src/logic/hooks.6502` | where the logic calls what it leaves out (`tools/logic/hooks.py`'s list) |
 | `src/logic/call.6502` | main RAM: the frame's way in, and the way between the two banks |
 | `src/logic/bank.6502` | the two sideways RAM banks' layout |
@@ -91,7 +92,9 @@ bank it needs in:
   pass takes the minute. `logic_go_tick` is the checks' minute, held as
   the oracle holds it (the seconds 00, the frame the second's last).
 - `logic_go_end` and `logic_go_restart`, the game's end and the new game
-  after its wait (`docs/research/end.md`).
+  after its wait (`docs/research/end.md`); `logic_go_info`, the
+  information screen's key, after a pass that answered 4
+  (`docs/research/info.md`).
 - `logic_go_colours`, the original's `$A77A`, for the frame's redraw when
   `AreaChanged` is set: `ScreenColours` takes the area's colours, the
   sensors' flash counters restart, `AreaChanged` is cleared.
@@ -209,8 +212,9 @@ other form, which runs on past its target to an object without hanging.
 - The hooks (the live disc fills in the sound, `docs/research/sound.md`,
   the laser and the pick, `docs/research/laser.md`, and runs the sensors,
   `docs/research/sensors.md`; this check build keeps the defaults): the
-  panel's key lights, the draw list (the renderer's), the information
-  screen (`$C3DC`). The game's end (`$9AB7`), a new game (`$9C36`) and
-  the demo (`$9A27`) are the logic's since 2026-11-08
-  (`src/logic/end.6502`, `docs/research/end.md`).
+  panel's key lights, the draw list (the renderer's). The game's end
+  (`$9AB7`), a new game (`$9C36`), the demo (`$9A27`) and the
+  information screen (`$C3DC`) are the logic's since 2026-11-08
+  (`src/logic/end.6502`, `src/logic/info.6502`, `docs/research/end.md`,
+  `docs/research/info.md`).
 - The clock is the logic's since 2026-11-08 (`logic_go_clock`).

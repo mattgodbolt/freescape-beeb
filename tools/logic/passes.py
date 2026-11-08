@@ -10,6 +10,7 @@ MATRIX). tick: a minute of the clock ends during the pass, as the
 interrupt counts it ($BB27), which ends the pass at once. With no keys and
 no tick, the original waits in its input for one or the other.
 """
+from . import info
 from .arith import minus
 from .fcl import events, wait
 from .hooks import Hooks
@@ -341,8 +342,8 @@ def _act(s, n, hooks, first=None):
             rig(s, a, hooks)
             return True
         elif a == 0x29:
-            hooks.info(s)
-            return True
+            # the information screen, waiting for its key (info.answer)
+            return "info" if info.begin(s, hooks) else True
         i += 1
         s.ActionIndex = i
         if i == n:
@@ -359,17 +360,37 @@ def waiting(s, hooks=None):
         pass
 
 
-def run_pass(s, keys=(), tick=False, hooks=None):
+def run_pass(s, keys=(), tick=False, hooks=None, info_keys=None):
     """One pass's logic: the minute (if tick), the input and the events.
     Returns "over" if the input found the game over (the original goes to
-    its end, $9AB7, and the pass goes no further), else whether the game
-    goes on after the pass. Raises move.Freeze where the original hangs."""
+    its end, $9AB7, and the pass goes no further), "new" if a new game
+    began after it, else whether the game goes on after the pass. The
+    information screen's wait is answered by info_keys, held then; with
+    none, the pass stops there and returns "info", and info_answered goes
+    on with it. Raises move.Freeze where the original hangs."""
     hooks = hooks or Hooks()
     if tick:
         hold_minute(s)
         clock_frame(s, hooks)
-    if not input_pass(s, keys, hooks):
+    done = input_pass(s, keys, hooks)
+    if not done:
         return "over"
+    if done == "info":
+        if info_keys is None:
+            return "info"
+        info.answer(s, hooks, info_keys)
+    return after_input(s, hooks, keys)
+
+
+def info_answered(s, hooks, keys):
+    """The rest of a pass that stopped at the information screen's wait
+    (run_pass's "info"): the keys held then answer it."""
+    info.answer(s, hooks, keys)
+    return after_input(s, hooks, keys)
+
+
+def after_input(s, hooks, keys):
+    """$9828-$9833: the events, and a new game if one is due."""
     events(s, hooks)
     if new_game_due(s, hooks, keys):
         return "new"

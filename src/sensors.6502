@@ -394,7 +394,7 @@ SECTION LiveData
 .few
     LDA lv_now : STA sn_f0 : LDA lv_now+1 : STA sn_f0+1
 .go
-    LDA lv_over : BNE done
+    LDA lv_over : ORA lv_info : BNE done        ; (none while the end or the information screen shows)
     LDA n : BEQ done
 .field
     JSR sn_field

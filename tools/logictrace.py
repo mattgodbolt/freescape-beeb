@@ -36,11 +36,11 @@ import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from logic import arith, end as lend, fcl, move, scenario  # noqa: E402
+from logic import arith, end as lend, fcl, info, move, scenario  # noqa: E402
 from logic.check import entrances, walk  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.oracle import Original, SCRIPT  # noqa: E402
-from logic.passes import KEYS, run_pass  # noqa: E402
+from logic.passes import KEYS, info_answered, run_pass  # noqa: E402
 from logic.state import VARS, State, database, original_sizes, port_start  # noqa: E402
 from mklogicdata import ZXV_ORG, ZXV_END  # noqa: E402
 
@@ -140,7 +140,16 @@ def run(steps, start_mem, where):
                 rec["freeze"] = True
                 out.append(rec)
                 break
-            rec["result"] = {"over": 2, "new": 3}.get(alive, 1)
+            rec["result"] = {"over": 2, "new": 3, "info": 4}.get(alive, 1)
+            if alive == "info":
+                # the information screen: its text, then its key's answer, a
+                # step of its own (logic_go_info)
+                rec["info_lines"] = info.lines(s)
+                rec["changes"] = changes(before, s.mem, where)
+                out.append(rec)
+                before = bytes(s.mem)
+                rec = {"line": st.line, "info_answer": True, "keys": rows(st.info_keys), "names": list(st.info_keys)}
+                alive = info_answered(s, Hooks(), st.info_keys)
             if alive == "over" or not alive:
                 over = True
                 ending = alive == "over"
