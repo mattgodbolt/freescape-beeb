@@ -31,7 +31,7 @@ On the logic's disc the keys are Driller's (decision 10, `src/input.6502`):
 O and K step, Q and W turn, P and L look, N and M roll, R and F rise and
 fall, U turns round, A and Z the turn's size, S and X the step's; B shows
 and hides the crosshair, SPACE is shooting mode (the movement keys move the
-crosshair), 0 fires (nothing is hit yet). The cursor keys are the ZX's
+crosshair), 0 fires (the laser: `docs/research/laser.md`). The cursor keys are the ZX's
 cursor joystick. On the free disc: cursor left and right (or Q and W) turn
 5° a frame, cursor up and down (or O and K) walk `LIVE_STEP` world units
 along the view a frame, through anything; P and L look up and down, N and
@@ -44,15 +44,20 @@ fields a demo turns on the spot and goes on after a whole turn.
 
 1. `lv_now`: the fields counted, the frame's one time.
 2. `lv_requested`, if the check has set the logic's state from outside
-   (`lv_request`; below).
+   (`lv_request`; below). The laser's lines off once their fields are done
+   (`docs/research/laser.md`); the sensors' fields since the last loop,
+   their shots, and the panel's values after one (`sn_clock`,
+   `docs/research/sensors.md`).
 3. `lv_pass`: the logic's pass, if one is due (below), and the frames that
-   show it set up (`lv_setup`).
+   show it set up (`lv_setup`). A pass that may fire, or after a pass whose
+   sensors' test waits for its frame, isn't due until that frame is drawn.
 4. `lv_camera`: the frame's camera into `lv_cam`: the logic's, or a point
    on the way to it while a pass's frames show.
 5. `lv_inputs`: has anything the view is made from changed since the frame
-   last handed over? If not, nothing is drawn: the figures if a window's
-   frames are all shown (`live_idle_measure`), and on to the next loop
-   (`live_idle`; below, "The idle loop").
+   last handed over? If not, nothing is drawn: the sensors' test after the
+   last pass's redraw, if it's due and waits for this frame (`sn_redraw`);
+   the figures if a window's frames are all shown (`live_idle_measure`),
+   and on to the next loop (`live_idle`; below, "The idle loop").
 6. The camera into `cam_x` .. `cam_roll`; ACCCON's X cleared (the cache is
    in main RAM's `&3000` on); `objects_frame` with `BANK_OBJ` paged. Its
    output is the rasteriser's input already (below); the glue copies one
@@ -170,13 +175,18 @@ ends.
 fields in turn from the pass (`lv_messages`, decision 121), and a pass
 that showed PROCESSING, a rig's redraw, enters the area again, so that the
 working copy has the rig's parts where the logic moved them (decision
-122). The rest do nothing yet,
+122). `hook_laser` (2026-11-08) keeps the crosshair a shot is fired at and
+holds the next pass for the lines' fields, and `hook_shot` is the pick
+from the frame last drawn (`lv_pick`, `docs/research/laser.md`). The rest
+do nothing yet,
   as the transcription's defaults: the panel (the disc draws
   its own from the logic's variables after each pass: `panel_values`,
   `docs/research/panel.md`) and its key lights, the crosshair's drawing
   (the frame draws it, below), the screen's colours,
-  the rest of the FCL's `REDRAW`, the draw list, the sensors, the laser and
-  the shot, the information screen and the game's end.
+  the rest of the FCL's `REDRAW`, the draw list, a sensor's hiding (whose
+  stop in the list is the logic's own), the information screen and the
+  game's end. The sensors' test after a redraw and their shots are the
+  disc's (`docs/research/sensors.md`).
 - **The clock**: a minute is `MINUTE_FIELDS` fields, as the original's
   interrupt counts 50 to a second; `logic_go_minute` goes in just before
   the pass the minute's end comes before, which takes it.
@@ -334,6 +344,13 @@ that holds the older view; from then on each move is the crosshair alone.
 `tools/livecheck.mjs` counts these frames, holds each to the model's render
 as every frame is, and leaves out the BBC's timing of the halves they
 don't run.
+
+The laser's lines and the sensors' shots' lines (2026-11-08) are drawn and
+taken off with the crosshair, by EOR, each buffer keeping those it has
+(`lv_lon`, `lv_lx`, `lv_ly`; `sb_n`, `sb_x`, `sb_y`), and the frame's inputs
+count them (`VW_LASER`, `VW_LINES`), so they come and go in frames of the
+crosshair alone. All of it (`lv_cross_off`, `lv_cross_on`, `cross_eor`
+and the lines) is in `BANK_DATA`'s `LiveData`.
 
 ### The glue
 
@@ -576,6 +593,15 @@ gone down at the same loop. It fails unless:
 - each time the panel's values are set while a rig's messages show, the
   message is the one the transcription's pass showed in that turn, after as
   many `RIG_SHOWN` fields as turns before it;
+- each shot's lines are fired at the transcription's crosshair, for
+  `LASER_FIELDS` (the transcription's shot is the model's pick from the
+  frame the pass began with, `docs/research/laser.md`);
+- after each pass that redraws, the sensors' test (the trace's "then",
+  on the model's frame of its end) is done before the next step, and a
+  scenario's `sensors` step, the disc's clock of their shots held
+  (`sn_hold`) and given the step's fields (`sn_more`) once its input
+  waits, leaves the transcription's state and asks for its sounds
+  (`docs/research/sensors.md`);
 - a key pressed when the disc has settled is taken by a pass (`lv_pass`'s
   `key_take`) within `KEY_FIELDS` fields of its going down: the next
   vertical sync reads it, and the next loop's pass takes it, after the loop
@@ -659,10 +685,10 @@ disc's demo.
 ## What's left
 
 - The hooks still empty: the panel's key lights (and what else
-  `docs/research/panel.md` leaves), the laser and the shot's pick (`$B153`, from the renderer's faces), the draw
-  list (`hook_undraw`), the sensors' tests and shots, the information
-  screen, the game's end and a new game (`docs/research/game-audit.md`
-  has what each needs).
+  `docs/research/panel.md` leaves), the draw list (`hook_undraw`), the
+  information screen, the game's end and a new game
+  (`docs/research/game-audit.md` has what each needs; the laser and the
+  sensors, 2026-11-08: `docs/research/laser.md`, `sensors.md`).
 - Shooting mode moves the crosshair a pass a frame; since 2026-11-06 only
   the first move after the view changes draws a whole frame (into the
   buffer with the older view), and the rest move the crosshair alone ("The

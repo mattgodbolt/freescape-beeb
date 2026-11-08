@@ -31,12 +31,12 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | The rig's parts as areas load | `$CD3B` | yes | yes | yes | view | `rigs` (back to area 1, into its legs) | nothing |
 | The rig's animation, the drill's depth | none on the ZX: the rig stands still; the ST animates a rig in its panel | - | - | - | - | - | the ST's panel animation, if wanted (decision 47 left it out) |
 | The panel's area message | `$B76E` | - (the panel's model) | - | yes | GAS BUILD UP, SECTOR CLEARED, AREA NEUTRAL | `make panel` | the 50-frame highlight (inverted line) |
-| The laser and shooting mode | `$A95C`, `$AA50`-`$AA8C` | the keys, the crosshair, shooting mode; the lines a hook | crosshair, shooting mode | crosshair, shooting mode, sound 1 | the crosshair (decision 38) | `crosshair` | the four laser lines from the view's corners, shown while sound 1 plays |
-| The shot's pick | `$B153`, the draw list `$8A9D` | a hook (hits nothing) | hook | hook | - | - | which object is under the crosshair, from the frame's projected faces |
-| Shot scripts (ECDs and the like) | FCL bit 7, `ShotFlag` | yes | yes | yes, but nothing is hit | - | `fcl`'s `shot` steps | needs the pick |
-| Guard sensors: line of sight | `$9841` (state 1 by the pick, state 2 by a walk with `Margin` 0) | no (`SensorList` is the oracle's, synced) | no | no | - | the oracle's own runs | the projection's list (`$7592`), the pick and the walk |
-| Sensors' shots, shield | `$BAE6`'s list, `$BBA4`-`$BC94` | no (the harness silences them: `tools/logic/oracle.py`) | no | no | - | - | each interval's shot: sound 2, the lines to the sensor, the border, `Shield` down, `GameOver` 1 at 0 |
-| A rig redraw's line of sight | `$9841` inside `$C259` leaves `Collided` | the oracle's `Collided` (`tests/logic/rig-sensor.txt`) | no | no | - | `rig-sensor` | with the sensors |
+| **The laser and shooting mode** | `$A95C`, `$AA50`-`$AA8C` | the keys, the crosshair, shooting mode; the lines the disc's (the model's `laser`) | crosshair, shooting mode | **yes**: the four lines at half width, for sound 1's fields (decision 130) | **the lines, in frames of their own** | `crosshair`, **`shoot`** (the frames, byte for byte) | nothing |
+| **The shot's pick** | `$B153`, the draw list `$8A9D` | **the BBC's frame's** (`tools/logic/view.py`, decision 131) | the hook (the check build: hits nothing) | **yes** (`lv_pick`, from the front end's draw list) | - | **`shoot`, against the original's own pick** | nothing |
+| **Shot scripts** | FCL bit 7, `ShotFlag` | yes | yes | **yes** | the objects hidden, destroyed | `fcl`'s `shot` steps, **`shoot`** | nothing |
+| **Guard sensors: the list, line of sight** | `$7592`, `$9841` (state 1 by the pick, state 2 by a walk with `Margin` 0) | **yes** (`tools/logic/sensors.py`, on the BBC's frame: decision 132) | the hide's stop (`$B467`) | **yes** (`src/sensors.6502`, after a pass that redraws) | - | **every redraw against the original's (`sensors`, the fuzz)** | inside a rig's redraw or the FCL's `REDRAW` |
+| **Sensors' shots, shield** | `$BAE6`'s list, `$BB93`-`$BC94` | **yes** (`tick`; the harness lets them fire in a `sensors` step) | - | **yes**: counted by the main loop (decision 133), sound 2, `Shield`, `GameOver` 1 | **the lines to the sensor (decision 134), the shield's bar** | **`sensors`** | the border's flash (decision 133) |
+| A rig redraw's line of sight | `$9841` inside `$C259` leaves `Collided` | the oracle's `Collided` (`tests/logic/rig-sensor.txt`) | no | no | - | `rig-sensor` | the test inside the pass |
 | Energy, the jet and the probe | FCL 2, `$15`, the minute | yes | yes | yes | bars, vehicle | `fcl`, `jet` | nothing |
 | Game over | `$9AB7`: the message (SHIELD OUT, OUT OF TIME, ENERGY OUT, NASTY FALL, TASK COMPLETED, TERMINATED), sound 20, area 127 with the safe sectors in its name, a wait for a key | the input's answer | answer 2 | no more passes; the panel's GAME OVER | message | `fall-high`, `rig-win` reach it | the end scene, its messages by cause, sound 20, the wait |
 | New game | `$9C36`, `$BD74`, `$97CD`: the header's values, the objects' flags from bit 7, the control menu | no | no | no | - | - | all of it (LOGICW and the database's flags restored) |
@@ -44,7 +44,7 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | Save and load | `$C3DC`: to tape by the ROM (`$04C6`, `$0562`), 333 bytes of state and every object's flags | no | no | no | - | - | to the BBC's disc, if wanted (a decision: the ZX's is tape) |
 | Title, protection, control menu | `$97A4`, `$CB7A`, `$C9C6` | no | no | the disc's own boot | - | - | the protection is the original's copy protection (not ported); the menu's choices are the ZX's joysticks |
 | The demo | `$9A27` (`$891F` 3), after the end's wait | no (`NotImplementedError`) | no | the free disc has a demo of its own | - | - | the recorded stream from the header's `$CF84` |
-| Sounds | `$9574` and the interrupt's 2 | yes (hooks) | yes | yes (decisions 110-113) | sound | every pass's | sound 2 (sensors), 20 and 6 (the end) with their layers |
+| Sounds | `$9574` and the interrupt's 2 | yes (hooks) | yes | yes (decisions 110-113; **2 from the main loop**) | sound | every pass's, **every `sensors` step's** | 20 and 6 (the end) with their layer |
 
 Two harness changes came with the rigs (`tools/logic/oracle.py`,
 `tools/logic/check.py`): the oracle now keeps every sensor from firing
@@ -63,7 +63,14 @@ back, `goto 7 13`). It now settles first.
 
 Costs are estimates from what each touches; cycles are the 6502's.
 
-### The laser (next)
+*The laser and the sensors are done (the journal's entry of 2026-11-08,
+"the laser and the sensors"; `docs/research/laser.md`,
+`docs/research/sensors.md`). Their plans, as written before, follow; what
+was built differs where those notes say: the pick needed no byte a face
+(the front end's draw list says which slot each face is), and the shots
+are counted by the main loop.*
+
+### The laser (done)
 
 - **The lines**: four EOR lines from the view's bottom corners to the
   crosshair ($AA50), at half width, shown while sound 1 plays and taken
@@ -93,7 +100,7 @@ Costs are estimates from what each touches; cycles are the 6502's.
 - **Shot scripts** run already (`ShotFlag`); ECDs are database objects
   whose shot scripts destroy them and score, so they come with the pick.
 
-### The sensors
+### The sensors (done)
 
 - **Their list** ($7592, the projection): each visible sensor's state by
   range (|x| + |y| + |z| from the camera against its record's range) and
@@ -119,7 +126,7 @@ Costs are estimates from what each touches; cycles are the 6502's.
   scenarios, which then hold the clock of the shots as the scenarios hold
   the minute.
 
-### Game over and a new game
+### Game over and a new game (next)
 
 - **The end** ($9AB7): the message by cause in the panel (the six texts
   are in the original's table, `$8CBA` on), sound 20 unless won, then area

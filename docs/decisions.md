@@ -916,3 +916,76 @@ rig, where the original's redraw and its 50 frames' wait are anyway. The
 logic's own index of the objects (`index_objects`, which the original
 doesn't have: it scans the records) is made again with them.
 
+## 130. The laser's lines at half width, shown for sound 1's fields (2026-11-08, autonomous, proposed for Matt)
+
+The original draws its four lines to the crosshair ($AA50, by its line
+$A803), plays sound 1 and draws them again, which takes them off: they
+show while the sound plays, the game held. The disc draws the same four by
+the same DDA, each end's x halved as the crosshair's is (decision 38), the
+DDA run in the BBC's pixels, each pixel EORed with colour 7 as the
+crosshair's; in frames of their own (as the crosshair's: the view isn't
+drawn again), from the pass for sound 1's fields (`LASER_FIELDS`, the
+sound's script's); and the next pass waits as long, as the original holds
+the game. Why the DDA in the BBC's pixels: run in the ZX's, two of its
+pixels fall in one of the BBC's and EOR each other away. Against: the
+lines are a pixel coarser than the original's across, as the whole view
+is.
+
+## 131. The shot's pick from the BBC's frame (2026-11-08, autonomous, proposed for Matt)
+
+The original hits the first object of its last redraw's draw list, from
+the nearest, with a face round the crosshair ($B153) in its own projection.
+The disc's projection is the BBC's (decision 2), within a pixel of the
+ZX's but not the same, so the disc picks from its own last frame: its draw
+list nearest first, the first face whose polygon holds the crosshair
+pixel's centre (decision 38's pixel), its edges counting. The
+transcription asks the model's frame of the state the pass began with
+(`tools/logic/view.py`), so the original, the transcription and the disc
+agree wherever the two projections do: `tests/logic/shoot.txt`'s targets
+all do; a target a pixel wide, or the crosshair within a pixel of an edge,
+can differ. The frame picked from must be the logic's camera, as the
+original's is: a pass that may fire waits while the last pass's frames
+show, until the frame of its end is drawn. The options, for Matt: as
+built; or a projection of the ZX's own for the pick (the oracle's), which
+the disc has no room or cycles for and which would hit what the BBC's view
+doesn't show.
+
+## 132. A sensor is on the screen when the BBC's frame draws it (2026-11-08, autonomous)
+
+The original's sensor in range is in state 1 (its line of sight by the
+pick at its point) when its projected point is on the screen, else state 2
+(by a walk to it). The disc's is on the screen when its last frame drew
+its pixel (the front end's draw list), and its point is that pixel, the
+pick at it decision 131's; the transcription asks the model's frame. As
+for the pick, the two views differ by up to a pixel at the view's edges,
+where a sensor can be on one screen and off the other: `make logic`
+counts those and checks everything else (`docs/research/sensors.md`).
+
+## 133. The sensors' shots counted by the main loop, without the border (2026-11-08, autonomous, proposed for Matt)
+
+The original's interrupt counts each sensor's frames and fires there, the
+game held while sound 2 plays inside it, and flashes the border in the
+screen's second colour. The disc's interrupt can't wait for the sound's
+queue or draw the lines into the buffer being drawn, so the main loop
+counts the fields since its last loop, a field at a time, as the
+interrupt's frames (`sn_clock`): a shot comes up to a frame late, and the
+shots' rate is the original's. Sound 2 is asked for from the main loop; the
+shield's bar is drawn with the panel's values. The BBC's border is blank
+(the CRTC's), so there is no flash; a flash of the panel's colours would
+take a palette change for two fields, which the frames' flips would have
+to follow. The sensors' test after a redraw waits for the frame of the
+pass's end (it needs that frame's draw list, decision 132), and the next
+pass waits for it, as the original's does: in an area with a sensor, keys
+held go a frame slower a pass. Against counting in the interrupt: the
+checks hold the clock from the main loop, as they hold the minute.
+
+## 134. A sensor's shot's lines show for sound 2's fields and a frame (2026-11-08, autonomous)
+
+The original draws a shot's four lines at the frame its counter wraps,
+plays sound 2 (two fields, the game held) and takes them off at the next
+frame's interrupt. The disc shows them from the shot for sound 2's fields
+and one more (`SENSOR_LINES`), in frames of their own as the laser's
+(decision 130), by the same line, halved the same way; a line's end on the
+view's last line but one (y 0, which the original draws below the view)
+isn't drawn.
+

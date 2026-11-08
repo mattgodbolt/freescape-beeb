@@ -1579,3 +1579,90 @@ or `ObjWork`, both read whatever X (main RAM's `&3000` room is not: the
 logic reads with X set). A table of runs by object (slot and first output
 face, 2 bytes an object, about 20 cycles an object, the laser scanning it)
 costs less.
+
+## 2026-11-08: the laser and the sensors
+
+The next two of Matt's layers after the rigs, from the original's listing
+(`docs/research/laser.md`, `docs/research/sensors.md`), on a branch with
+the fifteenth round merged in (its room in `ObjMore`).
+
+**The pick needed no byte a face.** Neither of the fifteenth round's
+plans: the front end's draw list (`dl_obj`, `dl_ord`, `dl_f0`, `dl_nf`) and
+its faces' records (`tf_*`, in `ObjWork`) and polygons (`ObjOut`) all stay
+until its next frame, and `emit_faces` takes them nearest first, so the
+pick walks them as the original walks its own draw list, at no cost to a
+frame. The test is the original's in spirit (the vertices bracket the
+crosshair, then the edges), done exactly: the crosshair pixel's centre
+inside the polygon by the signs of its edges' cross products (decision
+131). The model has it (`tools/model/pick.py`), and the transcription's
+shot asks the model's frame of the state the pass began with
+(`tools/logic/view.py`): `tests/logic/shoot.txt`, 23 passes from four
+views, the sky, cuboids, a pyramid, a cuboid far up whose shot destroys
+it, a sensor and the wall beside it, the original's own pick the same on
+every one. A probe of the original's pick round a sensor of area 14 showed
+the two projections a pixel apart there (area 28's agree, so the scenario
+uses those).
+
+**The lines** (decision 130) are the original's four by its own DDA, at
+half width, shown for sound 1's fields in frames of the crosshair alone;
+the next pass waits as long. A pass that may fire waits while the last
+pass's frames show, so the frame it picks from is the logic's camera.
+
+**The sensors**, transcribed (`tools/logic/sensors.py`): the projection's
+list ($7592), the line of sight after the redraw ($9841: the pick at the
+sensor's point, or a walk to it with `Margin` 0), the interrupt's shots
+($BB93) and a hidden sensor's stop ($B467), with what's on the screen the
+BBC's frame's (decision 132). The oracle no longer empties the fire list
+before a pass; a scenario's `sensors N` step runs the original's input,
+waiting, then its interrupt N times with the shots let fire; and every pass
+that redraws in a sensor's area is stopped at $9841 and after it, the
+transcription's projection and test held to the original's. Two faults
+found on the way: the stop's write to the redraw's list (the original's
+`IY - $1B` is the entry's state, not three past it), and the order of the
+screen's colours after the test (they put the interrupt's counters back to
+2 after the copy, not before). `make logic`: every scenario and 60 walks,
+4,630 redraws' tests compared, 100 entries on the screen picked, 562 off
+it walked, two on one screen and off the other (counted, not failed);
+`tests/logic/sensors.txt`, 240 frames of shots, 23 of them.
+
+**On the disc** (`src/sensors.6502`): the test runs after a pass that
+redraws, at once when nothing of the frame is needed (no sensor in range:
+the global sensor 248 is in every area, hidden), else in the idle loop once
+the frame of the pass's end is drawn, the next pass waiting for it; the
+shots are counted by the main loop from the fields (decision 133), sound 2
+asked for there, the shield's bar with the panel's values; a shot's lines
+for sound 2's fields and a frame (decision 134). The live check holds the
+clock of the shots (`sn_hold`) and gives each `sensors` step its fields;
+it found its own early writes (a step's pokes put in with the keys held
+for the next pass) going in before the disc's test, which must come first:
+they now wait for it.
+
+**Room** (the disc's, before and after: the merged branch's, then this):
+`LOGIC_BANK` 863 to 975 bytes (the crosshair moved out to `LiveData` with
+the lines); `BANK_DATA` 1,723 to 44 (the pick, the lines, the sensors'
+clock); `ObjMore` 1,445 to 1,189 (`LIVE` grew past a page of its
+alignment); shadow RAM past `RigCode` 715 to 60 (the sensors' test);
+`Work` 44 to 18. The free disc's `LiveGlue` room 400 to 368 (the logic's
+stop in the FCL, which both assemble).
+
+**Cycles** (`tools/livecheck.mjs --time`, the shooting and sensors
+scenarios): the pick 4,450 / 6,489 / 10,362 a call (median / p90 / most);
+the laser's four lines 46,027 / 63,937 / 65,432 a draw (a field or so: two
+a frame of them, off and on); a sensor's shot's lines up to 178,280 for
+four sensors at once; the test after a redraw 25,504 / 80,598 / 612,727
+(the most is a walk to a sensor off the screen: it holds the next pass
+that long, as the original's holds its game); the projection 5,643 /
+7,201; finding a sensor's pixel 414 / 495; the clock 61 a loop with no
+shot. Whole frames, flip to flip in fields (median / p90 / max), the
+merged branch's `make check` against this one's over the same scenarios
+(this run's frames of `shoot` and `sensors` left out): all 1.81 / 5.1 /
+113.78 to 1.83 / 5.18 / 104.8; entrances 8.47 / 13.22 / 18.23 to 8.43 /
+12.99 / 18.24; walking 1.57 / 4.36 / 13.84 to 1.57 / 4.44 / 13.75;
+turning 2.11 / 5.51 / 11.83 to 2.13 / 5.53 / 11.84. With them, all 1.86 /
+5.4 / 104.8 over 4,166 frames.
+
+Left: the test inside a rig's redraw or the FCL's `REDRAW`; the border's
+flash (decision 133); the lines' plot, which works out each pixel's
+address afresh; `BANK_DATA`'s room, which the end of the game will want
+some of back (the pick could go to `LOGIC_BANK` behind a trampoline).
+Decisions 130 to 134 are Matt's to take or change.

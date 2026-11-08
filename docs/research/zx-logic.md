@@ -189,7 +189,9 @@ the size keys, which exit at `$A581`; each ORs its flags into
 - **Fire** (`$16`), if the crosshair is shown: the laser drawn, the
   object under the crosshair found (`$B153`, from the renderer's
   projected faces) into `Collided`, and `ShotFlag` and `EventsDue` set,
-  so the events run that object's shot instructions [read: a hook].
+  so the events run that object's shot instructions [checked, 2026-11-08:
+  the pick from the BBC's view, `docs/research/laser.md`;
+  `tests/logic/shoot.txt`].
 
 ## Moving
 
@@ -384,7 +386,8 @@ left ends the game (3) [checked]. The input takes the changed
 `MinuteCount` as a pass of its own. The global conditions show globals
 248-250 at minute 8 and hide them at minute 9, setting `MinuteCount`
 back to 0, so the next pass is a minute's too, and its keys do nothing.
-The sensors' shots at the shield are the interrupt's too [read].
+The sensors' shots at the shield are the interrupt's too [checked,
+2026-11-08: `docs/research/sensors.md`, `tests/logic/sensors.txt`].
 
 ## The original's bugs
 
@@ -425,7 +428,7 @@ snapshot: keys held from `$9825` until the input returns (`$9828`), the
 state read when the events are done (`$982B`), then on to the next
 pass's top. It holds what's real time: the clock's seconds at 59 before
 each pass (00 and 49 frames for a scenario's `tick`), and the sensors'
-fire list emptied. The transcription takes the variables the renderer,
+shots (below). The transcription takes the variables the renderer,
 the copy and the interrupt write (`"sync"` in `tools/logic/state.py`)
 from the original at each pass's start, and from its end after a pass
 that ran the FCL's REDRAW; everything else it carries itself, and every
@@ -440,16 +443,25 @@ every sensor from firing (`SENSOR_SHOTS`: the interrupt's read of the fire
 list answers none), as a rig's pass redraws inside itself and waits 200
 frames; and a rig's pass takes the original's `Collided` as its redraw
 leaves it (`tools/logic/check.py`), and keeps its own energy, shield and
-end through the sync after the redraw.
+end through the sync after the redraw. Since the sensors (the same day)
+the list is no longer emptied before each pass (hiding a sensor takes it
+out of the list as it stands); a scenario's `sensors N` step runs the
+original's input, waiting, for a frame and then its interrupt N times
+with the shots let fire; and after each pass that redraws in an area with
+a sensor, the original is stopped at its sensors' test (`$9841`) as well as
+after it, and the transcription's projection and test (on the BBC's
+frame) are held to its (`docs/research/sensors.md`, "The checks"). The
+transcription's shot is the BBC's view's (`tools/logic/view.py`).
 `tests/logic/*.txt` are the scenarios (format in
 `tools/logic/scenario.py`); `tools/logic/check.py --fuzz` walks random
 keys from random entrances and keeps a failing walk as a scenario.
 
 ## What's left
 
-- The renderer's parts the logic calls: the shot's pick (`$B153`), the
-  draw list's removal (`$B492`), the sensors' tests (`$9841`) and their
-  shots in the interrupt.
+- The renderer's parts the logic calls: the draw list's removal
+  (`$B492`). (The shot's pick, the sensors' tests and their shots are
+  transcribed, on the BBC's view: `tools/logic/view.py`,
+  `tools/logic/sensors.py`.)
 - The information screen (`$C3DC`), the end of the game (`$9AB7`) and a
   new game (`$9C36`) (`docs/research/game-audit.md` has what each does).
 - The demo's playback (`$9A27`, when `$891F` is 3).

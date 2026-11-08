@@ -340,9 +340,12 @@ come with it, to see where the cycles go.
   back, then the rigs' code (`RigCode`, `src/logic/rig.6502` and
   `rigdb.6502`), which only a pass runs, with X set; the loader puts the
   scripts and that code in main RAM at these addresses (`SDATA`, `RIGC`)
-  and `sound_init` copies them across. Code that only a pass runs, and
-  that calls nothing but main RAM and its own bank's routines with that
-  bank paged, can go here, whichever bank it was in (the logic's check
+  and `sound_init` copies them across. The sensors' test after a redraw
+  (`src/sensors.6502`'s `sn_redraw`, 2026-11-08) is there too, run with X
+  set by the main loop after a pass, paging the logic's banks itself. Code
+  that only a pass runs, and that calls nothing but main RAM and its own
+  bank's routines with that bank paged, can go here, whichever bank it was
+  in (the logic's check
   build keeps `RigCode` in main RAM, `RIGC`). The rest of it to
   `RasterEnds` is free, for data the front end can reach so or such code
   (`docs/journal.md`, 2026-11-08, "room in the logic's banks", for what is
@@ -377,7 +380,14 @@ come with it, to see where the cycles go.
   actions by code from `KEY_LOW` (shooting mode's by a rule), the sines of
   a half turn, and the areas' ids searched for (`docs/journal.md`,
   2026-11-08, "room in the logic's banks"); and `next_crossing` and
-  `move` walk the three axes by index.
+  `move` walk the three axes by index. `LOGIC_CODE_BANK`'s room after the
+  logic's code (`LiveData`) holds the shot's pick, which the pass calls
+  there, the crosshair, the laser's and the sensors' lines and the
+  sensors' clock (2026-11-08, `docs/research/laser.md`,
+  `docs/research/sensors.md`). The pick and the sensors need no record of
+  the front end's beyond its frame's: its draw list (`dl_*`, `tf_*` in
+  `ObjWork`) and polygons (`ObjOut`) stay until its next frame, and say
+  which slot each face is.
 - The front end's bank (`ObjCode`), ANDY (`ObjAndy`) and `ObjMore` (main
   RAM below `&3000`, after the maths' code, the projection and the 2D
   clip) share repeated code where a frame hardly spends the cycles: one

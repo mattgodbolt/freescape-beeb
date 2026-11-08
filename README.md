@@ -25,7 +25,9 @@ logic, and every frame worked out live.** The disc starts at Driller's
 start, in Amethyst. **Z and X turn, : and / walk** (or the cursor keys,
 or Driller's own Q, W, O and K); P and L look up and down, N and M roll,
 R and F rise and fall, U turns round, f0 and f1 set the turn's size and f2
-and f3 the step's, B shows the crosshair, D drills and C collects a rig. You collide, climb, fall and go through
+and f3 the step's, B shows the crosshair, SPACE is shooting mode (the
+walking keys move the crosshair), 0 or COPY fires, D drills and C collects
+a rig. You collide, climb, fall and go through
 doorways into other areas as in the original, because it is the
 original's logic, transcribed into 6502 and checked pass by pass against
 the original running headless. A tap turns 5° or steps 25 units, one
@@ -49,8 +51,18 @@ line says what happened: PROCESSING, RIG POSITIONED, how much gas it
 found and what share of it, or why not (no room, the jet, too little
 energy, a neutral area, a rig there already). Near an area's gas a rig
 finds more and scores more; half or more makes the sector safe, and
-eighteen safe sectors win the game. The laser, the guard sensors and the
-end of the game are next.
+eighteen safe sectors win the game.
+
+*2026-11-08.* **The laser and the guard sensors.** 0 fires: the
+original's four beams from the view's bottom corners to the crosshair,
+for as long as its sound plays, and whatever is under the crosshair is
+hit, so its own script runs: a pyramid vanishes, a cuboid scores, a
+sensor can be shot out. The guard sensors watch: one in range with a
+clear line to the probe fires at it every so often, its four beams
+flashing down the view if it's on the screen, a crack of sound, and a
+unit of shield gone; with none left the game ends. Both are the
+original's code transcribed and checked against it, the picks made from
+the BBC's own frame. The end of the game and a new one are next.
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the

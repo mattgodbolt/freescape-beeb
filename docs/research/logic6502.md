@@ -116,10 +116,14 @@ original waits in the logic while the interrupt counts `Countdown` down,
 for the size keys, the crosshair keys and the FCL's `DELAY`), the panel
 and its key lights, the crosshair, the screen's colours, the FCL's
 `REDRAW`, the draw list's removal (`hook_undraw`, which answers "not
-drawn"), the sensors, the laser and the shot's pick (`hook_shot`, which
-hits nothing), the messages (`hook_message`, the rigs': the rigs
-themselves are the logic's since 2026-11-08), the information screen and
-the game's end.
+drawn"), a sensor's hiding (`hook_sensor_off`: its stop in the list is
+the logic's own since 2026-11-08), the laser and the shot's pick
+(`hook_shot`, which hits nothing here; the live disc picks from its
+frame, `docs/research/laser.md`), the messages (`hook_message`, the
+rigs': the rigs themselves are the logic's since 2026-11-08), the
+information screen and the game's end. The sensors' test after a redraw
+and their shots are the live disc's (`src/sensors.6502`), as they need
+its frame.
 
 ## The keys
 
@@ -197,10 +201,10 @@ other form, which runs on past its target to an object without hanging.
 
 ## What's left
 
-- The hooks (the live disc fills in the sound: `docs/research/sound.md`;
-  this check build keeps the defaults): the waits' timing, the panel, the crosshair, the
-  laser, the shot's pick and the draw list (the renderer's), the sensors'
-  tests and their shots (`$9841` and the interrupt's), the information
+- The hooks (the live disc fills in the sound, `docs/research/sound.md`,
+  the laser and the pick, `docs/research/laser.md`, and runs the sensors,
+  `docs/research/sensors.md`; this check build keeps the defaults): the
+  panel's key lights, the draw list (the renderer's), the information
   screen (`$C3DC`), the game's end (`$9AB7`) and a new game (`$9C36`).
 - The clock: the interrupt's seconds and minutes (`$BAE6`), which call
   `logic_go_minute`.
