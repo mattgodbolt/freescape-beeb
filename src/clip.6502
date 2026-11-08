@@ -613,7 +613,7 @@ ASSERT CLIP_RBITS = 9 AND LEN(CLIP_M) = 256
 \ axis, then the other's; keep the axis's coordinate <= bound if below,
 \ else >= bound (which is 0); a crossing from the edge's inside end. Z set
 \ if nothing's left.
-MACRO CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below
+MACRO CLIP_HEAD sa_l, sa_h, bound, below
     LDX clip2d.src
     TXA : CLC : ADC p_n : STA clip2d.end
 .f
@@ -630,7 +630,15 @@ MACRO CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below
     LDA p_fl,Y : STA p_fl,X
     LDA p_fh,Y : STA p_fh,X
     LDA #NP2 : SEC : SBC clip2d.src : STA clip2d.m
+    LDA #LO(bound) : STA clip2d.bl
+    LDA #HI(bound) : STA clip2d.bh
     TYA : TAX
+ENDMACRO
+
+\ CLIP_BODY sa_l, sa_h, so_l, so_h: the pass's vertices (from X = the half's
+\ first), as a routine for the axis's two passes, the bound in clip2d.bl and
+\ bh; Z set if nothing's left.
+MACRO CLIP_BODY sa_l, sa_h, so_l, so_h
 .vertex
     STX clip2d.i
     LDA p_fh,X : BMI a_out
@@ -668,8 +676,8 @@ MACRO CLIP_PASS sa_l, sa_h, so_l, so_h, bound, below
     LDA so_h,Y : STA clip_cut.qo+1
     JSR clip_cut
     LDY clip2d.m
-    LDA #LO(bound) : STA sa_l,Y
-    LDA #HI(bound) : STA sa_h,Y
+    LDA clip2d.bl : STA sa_l,Y
+    LDA clip2d.bh : STA sa_h,Y
     LDA clip_cut.r : STA so_l,Y
     LDA clip_cut.r+1 : STA so_h,Y
     INC clip2d.m
@@ -692,13 +700,14 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
 \ of the pa and pb arrays.
 .clip2d
 {
-    ZA_AUTO1 m, i, ip, iq, edges, src, end
+    ZA_AUTO1 m, i, ip, iq, edges, src, end, bl, bh
     STA edges
     STZ src
     LDA #OC_LEFT : BIT edges : BNE pass1
     JMP pass2
 .pass1
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, 0, FALSE
+    CLIP_HEAD pa_xl, pa_xh, 0, FALSE
+    JSR body_x
     BNE pass2
     CLC
     RTS
@@ -706,7 +715,8 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
     LDA #OC_RIGHT : BIT edges : BNE pass2_do
     JMP pass3
 .pass2_do
-    CLIP_PASS pa_xl, pa_xh, pa_yl, pa_yh, CLIP_W, TRUE
+    CLIP_HEAD pa_xl, pa_xh, CLIP_W, TRUE
+    JSR body_x
     BNE pass3
     CLC
     RTS
@@ -714,7 +724,8 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
     LDA #OC_TOP : BIT edges : BNE pass3_do
     JMP pass4
 .pass3_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, 0, FALSE
+    CLIP_HEAD pa_yl, pa_yh, 0, FALSE
+    JSR body_y
     BNE pass4
     CLC
     RTS
@@ -722,13 +733,20 @@ ASSERT NP2 >= 4 + 4 * 2                 ; a widened line, cut by every edge
     LDA #OC_BOTTOM : BIT edges : BNE pass4_do
     JMP passed
 .pass4_do
-    CLIP_PASS pa_yl, pa_yh, pa_xl, pa_xh, CLIP_H, TRUE
+    CLIP_HEAD pa_yl, pa_yh, CLIP_H, TRUE
+    JSR body_y
     BNE passed
     CLC
     RTS
 .passed
     LDY src
     JMP dedupe_stage
+.body_x
+    CLIP_BODY pa_xl, pa_xh, pa_yl, pa_yh
+    RTS
+.body_y
+    CLIP_BODY pa_yl, pa_yh, pa_xl, pa_xh
+    RTS
 }
 
 ENDSECTION
