@@ -1881,9 +1881,17 @@ wins were all in tables the build generates or cold code:
 - The area names keep their twelve characters, not fourteen cells (the
   spaces each side are written by `names`). `BANK_DATA` 609 to 657.
 - `sensor_watching` (ANDY) is a loop over its three axes: ANDY 70 to 196.
+- The logic's cold code shared: `mul64` and a loop for `suitable`'s axes
+  and `gas`'s times 100 in the rigs' and sensors' shadow RAM code; the
+  pick's negation loop and bracket test; `times78`'s tail; the FCL's
+  bit handlers' store tail and one `object_flags` for `show_hide` and
+  `fcl_there`; `lookup`'s one scan. `LOGIC_BANK` 226 to 337, shadow RAM
+  52 to 151. (A loop over `Yaw`, `Pitch`, `Roll` in `lv_camera` broke
+  frames, memory order not being the logic's, and was backed out.)
 Room, logic disc, before and after: `BANK_DATA` 271 to 657, front end bank
 142 to 377, ANDY 70 to 196, main RAM after `LogicMore` 314 to 300,
-`LOGIC_BANK` 226, shadow RAM 52, raster bank 1,024.
+`LOGIC_BANK` 226 to 337, shadow RAM 52 to 151, raster bank 1,024.
+`make check` exits 0.
 Not taken: moving `new_game`'s object-flag loop into `LOGIC_BANK` (a
 transfer that spends the bank's room) and `info_draw` into ANDY (it would
 spend the ANDY room just gained). Not done: `ac_cuboid`'s unrolled faces
