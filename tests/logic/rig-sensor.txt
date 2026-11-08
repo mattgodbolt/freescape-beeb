@@ -1,0 +1,9 @@
+# Found by tools/logic/check.py --fuzz, seed 5009: a rig placed in sight of
+# a sensor. The rig's redraw inside its pass runs the sensors' line of
+# sight ($9841), whose walk leaves Collided set to what it reached, so the
+# pass's events run that object's collided script (here, a shield's loss).
+goto 4 20
+Q R
+D
+expect RigPlaced[3] 1
+expect Shield 49

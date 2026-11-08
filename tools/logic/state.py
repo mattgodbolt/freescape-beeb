@@ -73,9 +73,11 @@ VARS = [
     ("InJet", 0x877A, 1, "logic", "non-zero in the jet"),
     ("RigPlaced", 0x877B, ("bytes", 18), "logic", "a rig in each of areas 1-18 (0: none)"),
     ("RigState", 0x878D, ("bytes", 18), "logic", "the rigs' second byte an area"),
-    ("AreaGas", 0x87A0, ("bytes", 3), "logic", "the area's header bytes 10-12"),
+    ("GasChosen", 0x879F, 1, "logic", "non-zero once GasYields is chosen (the first rig placed)"),
+    ("AreaGas", 0x87A0, ("bytes", 3), "logic", "the area's header bytes 10-12: the gas's cell x, z and reach"),
+    ("GasYields", 0x87A3, 2, "logic", "the yields, one an area, from GasTable: picked by the clock"),
     ("Globals", 0x87A5, ("bytes", 0x882C - 0x87A5), "logic", "the eight global objects' records"),
-    ("RigPositions", 0x882C, ("bytes", 54), "const", "where each area's rig stands, 3 cells an area"),
+    ("RigPositions", 0x882C, ("bytes", 54), "logic", "where each area's rig stands, 3 cells an area"),
     # The area.
     ("AreaId", 0x8862, 1, "logic", "the current area's id"),
     ("AreaObjects", 0x8863, 1, "logic", "its object count"),
@@ -151,6 +153,8 @@ VARS = [
     ("MoveScratch", 0x9F33, ("bytes", 15), "sync", "the move's target cells, crossing point and delta"),
     ("HitRemembered", 0xA596, 1, "sync", "$A597's last solid hit"),
     ("FclOp", 0xB31F, 1, "logic", "the FCL instruction being run"),
+    ("RigFigures", 0x8C3C, ("bytes", 28), "logic", "the rig's two messages its figures are written into"),
+    ("RigScratch", 0xBEF4, ("bytes", 6), "logic", "the rig's percentage and yield, then the score's FCL instruction"),
 ]
 
 # The database (areas, objects, conditions), as long as its header says:

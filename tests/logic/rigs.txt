@@ -1,0 +1,79 @@
+# The drilling rigs ($BEFA): D drills and C collects, each alone in a pass.
+# A rig goes down in front of the probe, if it fits; it finds as much of the
+# area's gas as it's near it, scores for it, and a rig with half or more
+# counts in FclVar32. Each refusal is a message of its own.
+
+# Area 1, entrance 19: the gas is far off, so the rig finds none.
+D
+expect RigPlaced[0] 1
+expect RigState[0] 0
+expect Energy 43
+D                                   # already placed
+C                                   # collected: its energy spent too
+expect RigPlaced[0] 0
+expect Energy 38
+C                                   # no rig to collect
+D O                                 # not alone: nothing
+expect RigPlaced[0] 0
+
+# Beside the gas, facing along z: 87% of it, and the score.
+at 6304 160 5920
+angles 0 0 0
+D
+expect RigPlaced[0] 3
+expect RigState[0] 87
+expect FclVar32 1
+expect Score 42630
+O x3                                # into the rig's legs, which stop the probe
+expect PlayerZ 6006
+Q x6
+O x4
+W x12
+O x3
+
+# Another area's rig, 57%; then back, where the first rig stands again.
+goto 2 4
+D
+expect RigPlaced[1] 3
+expect FclVar32 2
+goto 1 19
+at 6304 160 5920
+angles 0 0 0
+O x2                                # the rig's legs again, as the area loaded them
+expect PlayerZ 6006
+C                                   # its score taken back
+expect RigPlaced[0] 0
+expect FclVar32 1
+expect Score 20520
+O                                   # and nothing in the way now
+
+# On a platform (the probe's feet above the floor): 45%, which doesn't count.
+goto 14 34
+D
+expect RigPlaced[13] 2
+expect RigState[13] 45
+expect FclVar32 1
+K x2
+# 11%: the percentage's leading zeros are spaces.
+goto 7 13
+D
+expect RigState[6] 11
+tick
+O
+# Where it doesn't fit, in a neutral area, in the jet, and with too little
+# energy.
+goto 3 29
+D
+expect RigPlaced[2] 0
+goto 19 7
+D
+goto 6 13
+fcl 15
+D
+fcl 15
+poke 8875 04
+D
+expect RigPlaced[5] 0
+poke 8875 20
+D
+expect RigPlaced[5] 1

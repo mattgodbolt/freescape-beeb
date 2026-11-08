@@ -13,8 +13,9 @@ on both sides:
   set to 00 and 49, so the interrupt ends a minute in its first frame,
   while the input waits;
 - the sensors: the interrupt's list of sensors to fire ($8A25) is emptied
-  before each pass, so no shot lands inside it. (After the pass, the
-  redraw's $9841 fills it again.)
+  before each pass, and the interrupt's read of it answers none
+  (SENSOR_SHOTS), so no shot lands at all: the redraw's $9841 fills the list
+  again, inside a pass that redraws (a rig's, the FCL's REDRAW) too.
 
 Everything else is the original's own code.
 """
@@ -39,6 +40,13 @@ GAME_OVER = 0x9AB7       # the input's way to the end of the game
 # A pass's limit. Area 18's last condition redraws seven times, and the
 # busiest redraw is 62 frames (docs/research/zx-driller.md).
 PASS_FRAMES = 2000
+# The interrupt's read of the fire list's count ($BBA4, LD A,($8A25)), which
+# the harness makes LD A,0 : NOP: no sensor fires. A pass that redraws inside
+# itself (a rig's, the FCL's REDRAW) fills the list again, and its waits let
+# the interrupt fire at the shield mid-pass otherwise.
+SENSOR_SHOTS = 0xBBA4
+SENSOR_SHOTS_WAS = (0x3A, 0x25, 0x8A)
+SENSOR_SHOTS_OFF = (0x3E, 0x00, 0x00)
 
 
 class Waiting(Exception):
@@ -49,6 +57,9 @@ class Original:
     def __init__(self, snap, contended=False):
         self.spec = zx.Spectrum(snap, contended=contended)
         assert self.spec.regs[zx.PC] == MAIN_LOOP, "the snapshot isn't at the main loop's top"
+        m = self.spec.mem
+        assert tuple(m[SENSOR_SHOTS:SENSOR_SHOTS + 3]) == SENSOR_SHOTS_WAS, "the interrupt isn't as expected"
+        m[SENSOR_SHOTS:SENSOR_SHOTS + 3] = bytes(SENSOR_SHOTS_OFF)
 
     @property
     def mem(self):

@@ -1,0 +1,8 @@
+# The eighteenth rig with half the gas or more ends the game, won
+# (GameOver 5): FclVar32 counts them ($C197).
+poke 889E 11
+at 6304 160 5920
+angles 0 0 0
+D
+expect FclVar32 18
+expect GameOver 5

@@ -14,6 +14,7 @@ from .arith import minus
 from .fcl import events, wait
 from .hooks import Hooks
 from .move import movement
+from .rig import rig
 
 KEY_CODES = 0x9414    # a code for each key, 5 a half-row, $FEFE's first
 KEY_ROWS = 0x9404     # the half-rows as read, CPL AND $1F
@@ -248,7 +249,7 @@ def input_pass(s, held, hooks):
         elif not minus(a, 0x15) and minus(a, 0x1F):
             crosshair_action(s, a, hooks)
         elif a in (0x28, 0x2A):
-            hooks.rig(s, a)
+            rig(s, a, hooks)
             return True
         elif a == 0x29:
             hooks.info(s)

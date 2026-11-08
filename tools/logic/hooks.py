@@ -70,9 +70,11 @@ class Hooks:
         renderer's projected faces decide it. The default hits nothing."""
         self._note("shot")
 
-    def rig(self, s, action):
-        """$BEFA: D drills (action $28) and C collects (action $2A) a rig."""
-        self._note("rig", action)
+    def message(self, s, addr):
+        """$93C4 then $BCA6: the 14-character message at addr shown, and
+        highlighted, in the panel's message line (the rigs' messages; the
+        wait after it is wait's)."""
+        self._note("message", addr)
 
     def info(self, s):
         """$C3DC: I shows the information screen, and waits for a key."""

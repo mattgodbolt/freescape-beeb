@@ -42,13 +42,22 @@ class OracleHooks(Hooks):
     """The hooks, answering from the original's renderer: which objects
     the last redraw drew."""
 
-    def __init__(self, drawn):
+    def __init__(self, drawn, after=None):
         super().__init__()
         self.drawn = drawn
+        self.after = after
 
     def undraw(self, s, obj_id):
         super().undraw(s, obj_id)
         return obj_id in self.drawn
+
+    def redraw(self, s):
+        """A rig's redraw inside its pass runs the sensors' line of sight
+        ($9841), whose walk leaves Collided for the pass's events: the
+        original's, from after the pass (nothing after the redraw writes it)."""
+        super().redraw(s)
+        if self.after is not None:
+            s.Collided = self.after[0x8A69]
 
 
 def expected(s, name):
@@ -137,13 +146,15 @@ def run(steps, snap, verbose=False):
                 s.mem[st.addr + i] = v & 0xFF
             last = orig.memory()
             continue
-        hooks = OracleHooks(orig.drawn())
+        orig_drawn = orig.drawn()
+        hooks = OracleHooks(orig_drawn)
         if st.kind == "fcl":
             after = orig.fcl(st.code, shot=st.shot)
             s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
             s.ShotFlag = 1 if st.shot else 0
             fcl.run(s, SCRIPT, len(st.code), hooks)
         else:
+            s0 = s.copy()
             try:
                 alive = run_pass(s, st.keys, st.tick, hooks)
             except Freeze as e:
@@ -156,15 +167,26 @@ def run(steps, snap, verbose=False):
                     break
                 raise Mismatch(f"{st.line}: the transcription hangs ({e}); the original doesn't")
             after = orig.run_pass(st.keys, st.tick, ends=alive == "over")
+            if any(n == "message" for n, _ in hooks.log) and any(n == "redraw" for n, _ in hooks.log):
+                # a rig's redraw: the pass again, with the original's Collided
+                s = s0
+                hooks = OracleHooks(orig_drawn, after)
+                alive = run_pass(s, st.keys, st.tick, hooks)
             passes += 1
             note(start, after, st.keys)
         last = after
         o = State(after)
         if any(name == "redraw" for name, _ in hooks.log):
-            # The FCL's REDRAW ran the renderer, the copy and the sensors
-            # ($6B12, $9841) inside the pass: their outputs are the
-            # original's, as at the start of a pass.
+            # The FCL's REDRAW, or a rig's, ran the renderer, the copy and
+            # the sensors ($6B12, $9841) inside the pass: their outputs are
+            # the original's, as at the start of a pass. A rig's pass keeps
+            # its own energy, shield and end, which the rig changes and
+            # the renderer doesn't.
+            keep = ("Energy", "Shield", "GameOver") if any(n == "message" for n, _ in hooks.log) else ()
+            kept = {k: getattr(s, k) for k in keep}
             s.sync_from(after)
+            for k, v in kept.items():
+                setattr(s, k, v)
             REDRAWN[0] += 1
         diffs = differences(o.snapshot(), s.snapshot())
         if verbose:
@@ -183,8 +205,8 @@ def run(steps, snap, verbose=False):
 
 # --- fuzzing --------------------------------------------------------------
 
-MOVE_KEYS = "O K Q W P L N M R F U A Z S X B SPACE".split()
-WEIGHTS = [8, 4, 3, 3, 2, 2, 1, 1, 2, 2, 1, 1, 1, 1, 1, 0.3, 0.3]
+MOVE_KEYS = "O K Q W P L N M R F U A Z S X B SPACE D C".split()
+WEIGHTS = [8, 4, 3, 3, 2, 2, 1, 1, 2, 2, 1, 1, 1, 1, 1, 0.3, 0.3, 0.3, 0.2]
 
 
 def entrances(snap):
