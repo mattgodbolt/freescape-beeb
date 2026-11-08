@@ -551,25 +551,28 @@ ENDIF
     LDA #1
 .off
     JMP panel_set
-\ names: area A's name, into the name's cells: pa_names + PANEL_MESSAGE A
+\ names: area A's name, into the name's cells: pa_names + PANEL_NAME_CELLS A,
+\ between two spaces
 .names
     TAX
     LDA #LO(pa_names) : STA nm : LDA #HI(pa_names) : STA nm+1
     TXA : BEQ names_go
 .names_add
-    LDA nm : CLC : ADC #PANEL_MESSAGE : STA nm
+    LDA nm : CLC : ADC #PANEL_NAME_CELLS : STA nm
     BCC names_more
     INC nm+1
 .names_more
     DEX : BNE names_add
 .names_go
+    LDX #PF_NAME                                ; (a space each side of the name's cells)
+    LDA #PC_SPACE : JSR panel_set : INX
     LDY #0
-    LDX #PF_NAME
 .names_cell
     LDA (nm),Y : JSR panel_set
-    INY : INX : CPX #PF_NAME + PN_NAME : BNE names_cell
-    RTS
+    INY : INX : CPY #PANEL_NAME_CELLS : BNE names_cell
+    LDA #PC_SPACE : JMP panel_set
 }
+ASSERT PN_NAME = PANEL_NAME_CELLS + 2
 ASSERT pm_over - pm_neutral < 256 AND pm_build - pm_neutral < 256 AND pm_cleared - pm_neutral < 256
 ASSERT PN_MESSAGE = PANEL_MESSAGE AND PN_NAME = PANEL_MESSAGE AND PN_X = 4 AND PN_Y = 4 AND PN_Z = 4
 ASSERT 2 * PANEL_PITCH0_PERIOD = PANEL_PITCH_LINES AND PANEL_PITCH_LINES MOD PANEL_PITCH1_PERIOD = 0

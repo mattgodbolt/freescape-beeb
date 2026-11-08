@@ -536,6 +536,7 @@ def assembly(build, packed):
         f"PANEL_END_AREA = {build['end_area']}",
         f"PANEL_END_DIGITS = {END_DIGITS + 1}       \\ (the safe sectors' two cells in its name's)",
         f"PANEL_MESSAGE = {MESSAGE_LEN}",
+        f"PANEL_NAME_CELLS = {panel.NAME_LEN}",
         f"PANEL_HEADING_SPAN = {2 * panel.HEADING_CELLS}",
         f"PANEL_PITCH_MID = {panel.PITCH_MID}",
         f"PANEL_PITCH_LINES = {panel.PITCH_LINES}",
@@ -598,8 +599,11 @@ def assembly(build, packed):
     for k in ("neutral", "cleared", "build", "over"):
         L += equb(f"pm_{k}", panel.text_cells(panel.centred(build["messages"][k], MESSAGE_LEN), MESSAGE_LEN))
     L += equb("pm_vehicle", (c for v in panel.VEHICLE_NAMES for c in panel.text_cells(panel.centred(v, 5), 5)))
-    L += equb("pa_names", (c for n in names
-                           for c in panel.text_cells(panel.name_text(n), MESSAGE_LEN)))
+    # (a name is the original's 12 characters with a space each side: the
+    # spaces are not kept)
+    name_cells = [panel.text_cells(panel.name_text(n), MESSAGE_LEN) for n in names]
+    assert all(c[0] == 0 and c[-1] == 0 and len(c) == panel.NAME_LEN + 2 for c in name_cells)
+    L += equb("pa_names", (c for cells_ in name_cells for c in cells_[1:-1]))
     L += ["ENDSECTION", "", "SECTION PanelPack"]
     L += equb("panel_packed", packed)
     L += ["ENDSECTION"]
