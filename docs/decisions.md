@@ -866,3 +866,53 @@ for them are the ZX's, and the ZX's sounds are the ones remade (decision
   it) and a transcription of its table and player; the driver and its
   checks would stay as they are, with the scripts made from the CPC's
   tables instead.
+
+## 120. The rigs' yields don't depend on the clock (2026-11-08, autonomous, proposed for Matt)
+
+The original picks the gas yields of the whole game the first time a rig
+finds gas: one of sixteen rotations of its table of eighteen (`$88EB`), by
+its interrupt's frames into the second then (`$C16F`, `SecondFrames AND
+15`), so a game's yields depend on the fiftieth of a second the first rig
+went down. The disc's logic reads `SecondFrames` as the original does, but
+nothing on the disc counts it (the disc keeps the minute, not the
+seconds), so it holds the snapshot's value and every game has the same
+yields: rotation 0, Amethyst's 49,000 cubic feet and so on.
+
+Why: the checks hold the disc's logic to the transcription's byte for byte,
+and the transcription's clock is the oracle's, held still (each pass starts
+at 59 seconds and frame 0); a clock the disc counted would make the choice
+differ from the trace's. The options, for Matt: keep it (one table, as
+now); or count `SecondFrames` from the fields (`lv_now` mod 50, a few
+cycles a pass) and have `tools/livecheck.mjs` write the trace's value into
+the disc before the pass that picks, as it writes the minute.
+
+## 121. A rig's messages show in the panel's message line while the game goes on (2026-11-08, autonomous, proposed for Matt)
+
+The original shows each of a rig's messages (PROCESSING, RIG POSITIONED,
+the yield, the percentage, or why not) in its message line, highlighted,
+for 50 frames, with the whole game stopped, the clock too: up to 200
+frames for a drilling. The disc shows each, in the panel's message line
+(the panel's font: the ST's console has no inverse line), for
+`RIG_SHOWN` (50) fields in turn from the pass, then the area's message
+again; the logic's next pass waits as long (the waits are the logic's
+`hook_wait`, as the size keys' are, decision 36), and the frames, the
+sounds and the clock's minute go on. The panel's font gained a `%`.
+
+Why: as decision 110 for the sounds, the disc never stops its frames; the
+pass the original would have held up still waits, so no key acts sooner.
+Against holding everything: the minute would be late by up to four
+seconds a rig, as it is in the original.
+
+## 122. A rig's redraw is the area entered again (2026-11-08, autonomous)
+
+When a rig goes down or comes up, the original moves its five global
+parts' records ($CD3B) and redraws there and then. The disc's working copy
+of an area builds the globals' slots from their records as an area is
+entered (decision 34, `src/area.6502`'s `ag_kept`), so a pass whose rig
+redrew (it showed PROCESSING: `lv_rigged`) enters the area again
+(`lv_enter_area`), which builds the slots of the parts that moved. It
+costs an entry's cycles (the journal's figures for `area_enter`) once a
+rig, where the original's redraw and its 50 frames' wait are anyway. The
+logic's own index of the objects (`index_objects`, which the original
+doesn't have: it scans the records) is made again with them.
+

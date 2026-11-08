@@ -217,9 +217,10 @@ The text (`src/text.6502`) stays the slideshow's.
 
 - The clock (hh:mm:ss): the disc counts the minutes (`lv_minute`) but not
   the original's countdown text; it would want drawing a second at a time.
-- The rig's animation in its slot, and the drill status's other messages,
-  once the rigs are in the logic (`hook_rig`); the sensors' and the shot's
-  messages (the original's temporary messages).
+- The rig's animation in its slot (the ST's; the ZX has none); the end's
+  messages by cause. The rigs' messages show in the message line since
+  2026-11-08 (decision 121; `src/live.6502`'s `lv_messages`), each its
+  turn, in place of the area's message; the font has a `%` for them.
 - The key lights (`hook_key_lights`): the ST's up and down buttons could
   light for R and F.
 - A display switch would want the panel's patterns for the other display

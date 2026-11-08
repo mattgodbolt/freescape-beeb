@@ -25,7 +25,7 @@ logic, and every frame worked out live.** The disc starts at Driller's
 start, in Amethyst. **Z and X turn, : and / walk** (or the cursor keys,
 or Driller's own Q, W, O and K); P and L look up and down, N and M roll,
 R and F rise and fall, U turns round, f0 and f1 set the turn's size and f2
-and f3 the step's, B shows the crosshair. You collide, climb, fall and go through
+and f3 the step's, B shows the crosshair, D drills and C collects a rig. You collide, climb, fall and go through
 doorways into other areas as in the original, because it is the
 original's logic, transcribed into 6502 and checked pass by pass against
 the original running headless. A tap turns 5° or steps 25 units, one
@@ -40,6 +40,17 @@ sounds as things are touched and the clock turns. They play from the interrupt w
 the game goes on, so they cost the frames nothing (the original stops
 while each plays). Driller has no key for the sound, so neither has the
 disc.
+
+*2026-11-08.* **Driller's drilling rigs.** D sets a rig down in front of
+the probe, if it fits there, and C picks it up again, as in the original,
+whose code for them is transcribed and checked against it. The rig stands
+in the view, solid (you can walk into its legs), and the panel's message
+line says what happened: PROCESSING, RIG POSITIONED, how much gas it
+found and what share of it, or why not (no room, the jet, too little
+energy, a neutral area, a rig there already). Near an area's gas a rig
+finds more and scores more; half or more makes the sector safe, and
+eighteen safe sectors win the game. The laser, the guard sensors and the
+end of the game are next.
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the
@@ -65,8 +76,9 @@ fields at the median. Standing still
 draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
-stock Master. Driller's game itself (the drilling rigs, the laser, the
-sensors) comes after; its sound is in. `docs/journal.md` has the
+stock Master. Driller's game itself is coming in layer by layer: its
+sound and its rigs are in, the laser and the sensors next
+(`docs/research/game-audit.md`). `docs/journal.md` has the
 story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)

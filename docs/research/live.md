@@ -164,13 +164,19 @@ ends.
   one is waiting already (decision 110); after a pass, `lv_copy_sound` asks
   for the copy's sound (`Sound`) by the original's rule. `hook_redraw` (the
   FCL's `REDRAW`) is, for now, its copy's sound alone: `Sound` asked for and
-  cleared. The rest do nothing yet,
+  cleared (a rig's redraw too). `hook_message` (the rigs' messages,
+2026-11-08) keeps up to `LV_MSGS` of a pass's messages' characters
+(`lv_msgs`); the panel shows each in its message line for `RIG_SHOWN`
+fields in turn from the pass (`lv_messages`, decision 121), and a pass
+that showed PROCESSING, a rig's redraw, enters the area again, so that the
+working copy has the rig's parts where the logic moved them (decision
+122). The rest do nothing yet,
   as the transcription's defaults: the panel (the disc draws
   its own from the logic's variables after each pass: `panel_values`,
   `docs/research/panel.md`) and its key lights, the crosshair's drawing
   (the frame draws it, below), the screen's colours,
   the rest of the FCL's `REDRAW`, the draw list, the sensors, the laser and
-  the shot, the rigs, the information screen and the game's end.
+  the shot, the information screen and the game's end.
 - **The clock**: a minute is `MINUTE_FIELDS` fields, as the original's
   interrupt counts 50 to a second; `logic_go_minute` goes in just before
   the pass the minute's end comes before, which takes it.
@@ -565,7 +571,11 @@ gone down at the same loop. It fails unless:
   transcription's walk, in the old area while an area's change waits;
 - every frame's objects' flags are the records' as the logic has them (the
   old area's while its frames show), and its view is the model's render of
-  its camera, with those flags and the crosshair, byte for byte;
+  its camera, with those flags, the globals where the logic's records have
+  them (the rig's parts move) and the crosshair, byte for byte;
+- each time the panel's values are set while a rig's messages show, the
+  message is the one the transcription's pass showed in that turn, after as
+  many `RIG_SHOWN` fields as turns before it;
 - a key pressed when the disc has settled is taken by a pass (`lv_pass`'s
   `key_take`) within `KEY_FIELDS` fields of its going down: the next
   vertical sync reads it, and the next loop's pass takes it, after the loop
@@ -650,9 +660,9 @@ disc's demo.
 
 - The hooks still empty: the panel's key lights (and what else
   `docs/research/panel.md` leaves), the laser and the shot's pick (`$B153`, from the renderer's faces), the draw
-  list (`hook_undraw`), the sensors' tests and shots, the rigs, the
-  information screen, the game's end and a new game (the database and
-  `LOGICW` would have to be kept to start again).
+  list (`hook_undraw`), the sensors' tests and shots, the information
+  screen, the game's end and a new game (`docs/research/game-audit.md`
+  has what each needs).
 - Shooting mode moves the crosshair a pass a frame; since 2026-11-06 only
   the first move after the view changes draws a whole frame (into the
   buffer with the older view), and the rest move the crosshair alone ("The

@@ -19,6 +19,8 @@ Addresses written `$` are the original's; the 6502's are symbols.*
 | `src/logic/area.6502` | objects by id (`$A8BA`), the areas (`$BE18`), the rigs' parts (`$CD3B`), the entrances (`$9D1C`) |
 | `src/logic/fcl.6502` | the events (`$9B6E`) and the FCL interpreter (`$B320`), every instruction Driller's ZX code has |
 | `src/logic/arith.6502` | the original's multiplies and divide as the logic uses them |
+| `src/logic/rig.6502` | the rigs (`$BEFA`): D drills and C collects, the gas, the score, the messages, the redraw (in `LOGIC_CODE_BANK`) |
+| `src/logic/rigdb.6502` | the rigs' part in `LOGIC_BANK`: whether a rig fits (it scans the records), and the messages that never change |
 | `src/logic/hooks.6502` | where the logic calls what it leaves out (`tools/logic/hooks.py`'s list) |
 | `src/logic/call.6502` | main RAM: the frame's way in, and the way between the two banks |
 | `src/logic/bank.6502` | the two sideways RAM banks' layout |
@@ -115,7 +117,9 @@ for the size keys, the crosshair keys and the FCL's `DELAY`), the panel
 and its key lights, the crosshair, the screen's colours, the FCL's
 `REDRAW`, the draw list's removal (`hook_undraw`, which answers "not
 drawn"), the sensors, the laser and the shot's pick (`hook_shot`, which
-hits nothing), the rigs, the information screen and the game's end.
+hits nothing), the messages (`hook_message`, the rigs': the rigs
+themselves are the logic's since 2026-11-08), the information screen and
+the game's end.
 
 ## The keys
 
@@ -159,6 +163,17 @@ ways of getting there faster or into the memory, each the same result:
   original's count from it, and sets `FclOp` as the script ends, which is
   what the original leaves there.
 
+- **The rigs** are in both banks: what scans the records (whether a rig
+  fits) is in `LOGIC_BANK` with them, and the rest in `LOGIC_CODE_BANK`
+  with the pass, whose bank had the room; the two call each other through
+  main RAM (`far_rig_*`), which also places the parts and builds the score's
+  ADDSCORE there. The rigs' parts move, so `index_objects` runs again after
+  them. The yield and the percentage multiply unsigned, as the original's
+  signed multiply does for factors below `&80` (`tools/mklogicdata.py`
+  checks the yields are), and the gas's reach divides unsigned, as the
+  original's signed divide does for the positive dividend the rig gives it
+  (the reach isn't 0 in any area with rigs: also checked).
+
 ## The check
 
 `tools/logictrace.py` runs `tools/logic/` with `move.FIX_CORNER` on, from
@@ -185,9 +200,8 @@ other form, which runs on past its target to an object without hanging.
 - The hooks (the live disc fills in the sound: `docs/research/sound.md`;
   this check build keeps the defaults): the waits' timing, the panel, the crosshair, the
   laser, the shot's pick and the draw list (the renderer's), the sensors'
-  tests and their shots (`$9841` and the interrupt's), the rigs (`$BEFA`),
-  the information screen (`$C3DC`), the game's end (`$9AB7`) and a new
-  game (`$9C36`).
+  tests and their shots (`$9841` and the interrupt's), the information
+  screen (`$C3DC`), the game's end (`$9AB7`) and a new game (`$9C36`).
 - The clock: the interrupt's seconds and minutes (`$BAE6`), which call
   `logic_go_minute`.
 - The disc: loading `LOGICW` into main RAM and the two banks into

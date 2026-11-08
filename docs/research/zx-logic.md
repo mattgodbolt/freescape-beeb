@@ -325,6 +325,56 @@ Showing an object sets `GameFlags` bit 2; hiding one in the last draw
 list sets `GameFlags2` bit 3 (the renderer's list, `$B492`). A hidden
 sensor leaves the interrupt's list.
 
+## The rigs
+
+`$BEFA` [checked, 2026-11-08: `tools/logic/rig.py`; `tests/logic/rigs.txt`,
+`rig-win.txt`, `rig-sensor.txt` and the fuzz, which presses D and C].
+D (action `$28`) drills and C (`$2A`) collects, only when the key is the
+pass's only one; either sets `EventsDue`, and ends the input. Each of
+areas 1 to 18 has `RigPlaced` (`$877B`: 0 none, 1 a rig that found no
+gas, 2 one that found some, 3 one that found half or more), `RigState`
+(`$878D`, its percentage) and `RigPositions` (`$882C`, its corner's
+cells). The refusals, in order, each a message for 50 frames and then
+`GameFlags2` bit 5 (the panel's message): an area from 19 on (AREA
+NEUTRAL); a rig there already, or none to collect (ALREADY PLACED, NO RIG
+PLACED); in the jet (NOT IN PROBE); `Energy` below 5 (ENERGY TOO LOW).
+The messages are 14 characters each at `$8BF6` on, the panel's two first
+(SECTOR CLEARED, GAS BUILD UP), then the rigs', then the end's.
+
+- **Drilling** (`$BF9E`): the rig's corner is the probe's cell less 6 or
+  12 on x and z by the yaw's sector (`$BFAA`: it goes in front, 12 cells
+  across), on the feet's cell (the eye's less `BodyHeight` − 1). It must
+  lie inside the area's extent, on the floor (feet cell 0) or on the top
+  of a shown cuboid that holds it with 6 cells to spare each side, and no
+  shown object may be in its box (12 by `$16` + 1 by 12 cells), all by the
+  signs of bytes (POS UNSUITABLE). Then `Energy` − 5 and the corner kept.
+  The gas: the rig's centre's distance from the area's gas (header bytes
+  10 and 11, `AreaGas`) is `|dx| + |dz|` by the signs of bytes; the
+  percentage is 100 − d · 100 / reach (header byte 12), by the signed
+  `$928C` and the divide `$91F1`; none above 0 is NO GAS FOUND
+  (`RigPlaced` 1). Else the first such rig of the game picks the yields
+  (`GasYields`, `$87A3`: `$88EB` + `SecondFrames` AND 15, a rotation of
+  eighteen yields in thousands of cubic feet), the score gains yield ×
+  percentage × 10 by an ADDSCORE the routine builds at `$BEF6`, and a rig
+  of 50% or more makes `RigPlaced` 3 and counts in `FclVar32`, whose 18th
+  ends the game won (`GameOver` 5). Its messages: RIG POSITIONED, "  nn000
+  CFT", " nnn% SUCCESS" (the figures written into the messages, leading
+  zeros as spaces).
+- **Collecting** (`$BF56`): the score loses what the rig scored (yield ×
+  percentage × −10: a rig with no gas, whose yields may not be picked yet,
+  reads a byte of the ROM and multiplies it by 0), `Energy` − 5, the rig
+  gone, `FclVar32` down if it counted; RIG COLLECTED.
+- **The redraw** (`$C259`): the rig's parts placed (`$CD3B`), PROCESSING,
+  and the redraw, the copy and the panel there and then with `GameFlags`
+  `$0404`, sound 5 after the copy (`Sound`), the copy wiping; then the
+  messages; then the flags put back as they were and `GameFlags2` bit 5.
+  The redraw's sensors' line of sight (`$9841`) walks with `Margin` 0 and
+  leaves `Collided` set to what it reached, so a rig set down in a sensor's
+  sight can run that object's collided script in the pass's events
+  (`tests/logic/rig-sensor.txt`: a shield's loss).
+- There is no animation: the rig's five parts stand where the load or the
+  redraw put them (two of them only for a rig that found gas).
+
 ## The clock
 
 The interrupt (`$BAE6`) counts frames into `Countdown` (`$8FC2`, waits)
@@ -385,7 +435,12 @@ clock and the frame counters (`$88A3`-`$88AB`, `$8A1D`), the interrupt's
 flags (`$8A21`), the divide's sign and remainder (`$92D4`-`$92D6`), and
 the sound's and the panel's locals (`$9590`, `$BA1C`) [measured over the
 scenarios and a fuzz, comparing all of RAM outside the screen, the view
-buffer and the stack].
+buffer and the stack]. Since the rigs (2026-11-08) the harness also keeps
+every sensor from firing (`SENSOR_SHOTS`: the interrupt's read of the fire
+list answers none), as a rig's pass redraws inside itself and waits 200
+frames; and a rig's pass takes the original's `Collided` as its redraw
+leaves it (`tools/logic/check.py`), and keeps its own energy, shield and
+end through the sync after the redraw.
 `tests/logic/*.txt` are the scenarios (format in
 `tools/logic/scenario.py`); `tools/logic/check.py --fuzz` walks random
 keys from random entrances and keeps a failing walk as a scenario.
@@ -395,6 +450,6 @@ keys from random entrances and keeps a failing walk as a scenario.
 - The renderer's parts the logic calls: the shot's pick (`$B153`), the
   draw list's removal (`$B492`), the sensors' tests (`$9841`) and their
   shots in the interrupt.
-- The rigs (`$BEFA`), the information screen (`$C3DC`), the end of the
-  game (`$9AB7`) and a new game (`$9C36`).
+- The information screen (`$C3DC`), the end of the game (`$9AB7`) and a
+  new game (`$9C36`) (`docs/research/game-audit.md` has what each does).
 - The demo's playback (`$9A27`, when `$891F` is 3).

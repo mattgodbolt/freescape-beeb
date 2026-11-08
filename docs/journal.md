@@ -1409,3 +1409,70 @@ Left for Matt: decisions 110 (whether and how long the logic waits), 112
 (the measured remake's choices) and 113 (the CPC's AY sounds instead).
 Left for the layers after: sound 2 with the sensors, 20 and 6 with the
 game's end, and when the laser's lines show around sound 1.
+
+## 2026-11-08: the audit, and Driller's drilling rigs
+
+Toward Driller whole, in Matt's order of layers (rigs, laser, sensors, the
+end and a new game; the sound and the panel done). First an audit of every
+part of the full game against the port, from the original's listing and
+the code (`docs/research/game-audit.md`, with what each layer left needs);
+then the rigs.
+
+**The original** (`$BEFA`, read from the listing; `zx-logic.md`, "The
+rigs"): D drills and C collects, alone in a pass. A rig goes 12 cells
+across in front of the probe by the yaw's sector, on the floor or on a
+shown cuboid wide enough, with nothing in its box; it finds 100 − 100 d /
+reach percent of the area's gas, d the cells from the gas; its yield is one
+of eighteen figures in a rotation picked by the clock's frames the first
+time; the score gains yield × percentage × 10; half or more counts a safe
+sector, and the eighteenth wins (`GameOver` 5). Every step shows a message
+for 50 frames with the game stopped, and a rig's redraw runs there and
+then. There's no animation of the rig on the ZX.
+
+**Transcribed** (`tools/logic/rig.py`) and checked against the original:
+`tests/logic/rigs.txt` (every refusal, no gas, 87%, 57%, 45% on a
+platform, 11%, walking into the legs before and after the area loads them,
+collecting), `rig-win.txt` (the eighteenth), and the fuzz with D and C
+among its keys (120 walks, 9,112 passes, the same). The fuzz found two
+things the harness had to hold: the sensors fired at the shield during a
+rig's 200 frames of waits (the oracle now keeps every sensor from firing:
+its interrupt's read of the fire list answers none), and the rig's redraw's
+line of sight leaves `Collided` for the pass's events, a quirk of the
+original's kept as `tests/logic/rig-sensor.txt` (the oracle's `Collided` is
+taken at the redraw).
+
+**In 6502** (`src/logic/rig.6502`, `rigdb.6502`): 1,352 bytes as first
+written, more than `LOGIC_BANK`'s room, so the part that scans the records
+stays there with the messages and the rest went to `LOGIC_CODE_BANK`, with
+the far calls in main RAM. `make logic6502`: every scenario and 60 walks,
+and a 300-walk fuzz, the same as the transcription.
+
+**On the disc**: a rig's pass enters the area again (decision 122), so the
+rig's parts are drawn where the logic moved them, and its messages show in
+the panel's message line in turn (decision 121; the font gained a `%`).
+The disc's yields are rotation 0 always, as nothing counts the seconds
+(decision 120). The live check renders each frame with the globals where
+the logic has them, and holds each message to the transcription's in its
+turn. Its first run with the rigs also found a fault older than them: a
+poke or a GOTO right after a pass that loaded an area could go in before
+the disc took the area's colours (`goto 14 34`, out and back by K, `goto 7
+13`); the check now settles first. `make check` passes.
+
+The cost, on the live check's scenarios before the rigs, the disc before and
+after (fields a frame, flip to flip, median / p90 / max): all 1.77 / 4.97 /
+113.76 to 1.76 / 5 / 113.75; walking 1.54 / 4.08 / 13.49 to 1.55 / 4.08 /
+13.49; turning 2.07 / 5.31 / 11.92 to 2.07 / 5.38 / 11.93; entrances 8.05 /
+12.21 / 18 to 8.05 / 12.22 / 18 (the check's settling before pokes moves
+its timings a little: 4,069 frames to 4,084). With the rigs' scenarios, all
+4,160 frames: 1.8 / 5.1 / 113.75; the rigs' own frames, after a rig's
+entry, are entrances' (8.35 / 12.98 / 18.2 over 87). The room, logic disc,
+before and after: `LOGIC_BANK` (`live_glue_end` to `LOGIC_DB`) 863 to 482
+bytes; `BANK_DATA` (`area_conv_end` to `&C000`) 1,100 to 135; `ObjMore` to
+`&3000` 1,292 to 780 (`LIVE` and `LogicWork` grew past a page of the maths'
+alignment); `Work` 185 to 180. The free disc, whose `LiveGlue` shares
+`LOGIC_BANK`, has 19 bytes left there.
+
+Not done: the laser (the audit's plan: the lines as frames of their own,
+as the crosshair is, and the pick from the front end's faces, which needs
+an object a face), the sensors, the end and a new game. Left for Matt:
+decisions 120 to 122.
