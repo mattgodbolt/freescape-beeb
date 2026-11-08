@@ -569,8 +569,26 @@ const memOf = (byte) => {
 };
 let panelMem = () => memOf((a) => ram[ZXV_ + a - sym("ZXV_ORG")]);
 const valued = [];
+// the rigs' messages: the last pass's, as the transcription showed them
+// (its trace's "messages"), which the panel shows in turn, each
+// RIG_SHOWN fields from the pass (src/live.6502's lv_messages)
+let passMessages = [], passMessagesT = 0, messagesShown = 0;
+const LV_MSG_ON = syms.lv_msg_on, LV_MSGS_AT = syms.lv_msgs, LV_MSG_T0 = syms.lv_msg_t0;
 function onValued() {
     const v = { want: panelCells(PANEL_WANT), mem: panelMem(), area: ram[PANEL_AREA], over: ram[PANEL_OVER], script };
+    const on = LV_MSG_ON === undefined ? 0 : ram[LV_MSG_ON];
+    if (on) {
+        const text = String.fromCharCode(...ram.subarray(LV_MSGS_AT + 14 * (on - 1), LV_MSGS_AT + 14 * on));
+        // its time: on - 1 whole RIG_SHOWN fields from the pass's (lv_now as
+        // the pass ran, lv_msg_t0)
+        const e = (ram[syms.lv_now] | (ram[syms.lv_now + 1] << 8)) - (ram[LV_MSG_T0] | (ram[LV_MSG_T0 + 1] << 8));
+        if (text !== passMessages[on - 1])
+            fail(`${script}: the panel shows message ${on} "${text}", the transcription's pass showed ${JSON.stringify(passMessages)}`);
+        else if (Math.floor(e / syms.RIG_SHOWN) !== on - 1)
+            fail(`${script}: message ${on} shown ${e} fields into the pass's messages`);
+        else messagesShown++;
+        v.msg = text;
+    }
     if (FREE) {
         const c = camera();
         v.cam = [c[0], c[1], c[2], c[3], c[4]];
@@ -801,6 +819,13 @@ async function logicScript() {
         for (let i = 0; i < exp[0x890f]; i++, p += exp[p + 8]) out.push(exp[p]);
         return out;
     }
+    // the globals' cells as the logic has them (the rig's parts move)
+    function expGlobals() {
+        const out = [];
+        let p = 0x87a5;
+        for (let i = 0; i < exp[0x890f]; i++, p += exp[p + 8]) out.push([exp[p + 1], exp[p + 2], exp[p + 3]]);
+        return out;
+    }
 
     const exp = new Uint8Array(0x10000);
     for (const [a, v] of trace.start) exp[a] = v;
@@ -961,7 +986,7 @@ async function logicScript() {
             want = null;
         }
         if (a !== rec.result) fail(`${where}: the pass answered ${a}, not ${rec.result}`);
-        const P0 = expCamera(), area0 = ram[LV_AREA], flags0 = expFlags();
+        const P0 = expCamera(), area0 = ram[LV_AREA], flags0 = expFlags(), globals0 = expGlobals();
         if (verbose) console.log(`  pass ${where}: answered ${a}, from ${P0}`);
         for (const [ad, v] of rec.changes) exp[ad] = v;
         const d = compare();
@@ -986,8 +1011,9 @@ async function logicScript() {
         if (asked.join() === (rec.sounds ?? []).join()) passSoundsOk++;
         else fail(`${where}: the pass asked for the sounds ${asked.join(",") || "none"}, the transcription ${(rec.sounds ?? []).join(",") || "none"}`);
         soundsAsked += asked.length;
-        passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, margin: exp[0x88d0],
-            run: script, t: tPass, made });
+        passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, globals0,
+            margin: exp[0x88d0], run: script, t: tPass, made, messages: rec.messages ?? [] });
+        passMessages = rec.messages ?? [];
         for (const [ad, v] of rec.then) exp[ad] = v;
     };
     // Each frame: the animation's state as lv_camera left it, the logic's
@@ -1000,6 +1026,7 @@ async function logicScript() {
         anOn: V("an_on"), e: (V16("lv_now") - V16("an_t0")) & 0xffff, pass: passLog.at(-1), over: V("lv_over") !== 0,
         ixFlags: [...ram.subarray(S("ix_flags"), S("ix_flags") + IX_MAX)], ixN: V("ix_n"),
         logicCam: expCamera(), expFlags: visibility ? visibility.slice(0, V("ix_n")) : expFlags(), switching: V("lv_switch") !== 0,
+        expGlobals: expGlobals(),
     });
 
     // The runs.
@@ -1039,6 +1066,10 @@ async function logicScript() {
                     continue;
                 }
                 hold([]);
+                // (once the disc has settled: what the renderer does after the
+                // last pass, an area's change and its colours, is done, and
+                // the writes don't land in between)
+                await settle(`${where}: before`);
                 writes = () => {
                     for (const [a, v] of batch) exp[a] = v;
                     for (const [a] of batch) put(a, exp[a]);
@@ -1161,6 +1192,7 @@ async function logicScript() {
         const flags = old ? f.pass.flags0 : f.expFlags;
         f.flags = f.ixFlags.slice(0, old ? flags.length : f.ixN);
         f.hidden = f.flags.map((v) => (v & 0x60) !== 0);
+        f.globals = old ? f.pass.globals0 : f.expGlobals;
         if (flags.join() !== f.flags.join()) fail(`frame ${f.n} (${f.pass?.where ?? f.script}): ix_flags ${f.flags}, not ${flags}`);
         else flagsOk++;
     }
@@ -1334,7 +1366,8 @@ async function freeScript() {
 
 // --- Every frame shown against the model.
 const requests = [];
-const keyOf = (f) => `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}`;
+const keyOf = (f) => `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}:` +
+    `${f.globals ? f.globals.join(";") : ""}`;
 const index = new Map();
 for (const { frame } of shown) {
     if (frame.camera.slice(3).some((a) => a >= 72) || frame.camera.slice(0, 3).some((v) => v >= 0x8000)) {
@@ -1346,6 +1379,7 @@ for (const { frame } of shown) {
         index.set(k, requests.length);
         const r = { area: frame.area, camera: frame.camera };
         if (frame.hidden) r.hidden = frame.hidden;
+        if (frame.globals) r.globals = frame.globals;
         if (frame.cross) r.cross = frame.cross;
         requests.push(r);
     }
@@ -1425,7 +1459,8 @@ const cyc = (xs) => {
     return s.length ? `${s[s.length >> 1]} / ${s[Math.min(s.length - 1, Math.ceil(0.9 * s.length) - 1)]} / ${s.at(-1)}` : "-";
 };
 console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} sets of cells, ${statesOk} the model's ` +
-    `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's; drawn as wanted when settled ` +
+    `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's ` +
+    `(${messagesShown} with a rig's message, the transcription's in its turn); drawn as wanted when settled ` +
     `${panelSettled} times; ${linesChecked} frames with their area's name and message; ${panelWaits} waits for the beam`);
 console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${cyc(valuesCycles)} (${valuesCycles.length}); ` +
     `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length}); ` +

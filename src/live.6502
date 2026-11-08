@@ -211,6 +211,7 @@ RASTER_NO_HORIZON = TRUE
 \ ... and, with the room that leaves, the line loop's and the background's
 \ ends written out (src/raster.6502's END_FIRST and END_LAST).
 RASTER_ENDS_INLINE = TRUE
+LV_MSGS = 4                 ; the most messages a pass shows (a rig's: PROCESSING and three)
 IF LIVE_LOGIC
     LOGIC_KEYS        = lv_lkeys
     LOGIC_HOOK_WAIT   = lv_hook_wait
@@ -218,6 +219,7 @@ IF LIVE_LOGIC
     LOGIC_HOOK_LOADED = lv_hook_loaded
     LOGIC_HOOK_SOUND  = snd_ask
     LOGIC_HOOK_REDRAW = lv_hook_redraw
+    LOGIC_HOOK_MESSAGE = lv_hook_message
 ENDIF
 \ The vertical sync's interrupt plays the sounds (src/sound.6502).
 IRQ_TICK = snd_tick
@@ -461,6 +463,9 @@ IF LIVE_LOGIC
     LDA lv_request : BEQ passing
     JSR lv_requested
 .passing
+    LDA lv_msg_on : BEQ no_messages
+    JSR lv_messages
+.no_messages
     JSR lv_pass
     PAGE_IN BANK_GLUE
     JSR lv_camera
@@ -654,6 +659,10 @@ SECTION Work
 .lv_walk_jet    SKIP 1      ; ... and InJet as it walked
 .lv_loaded      SKIP 1      ; non-zero: an area loaded
 .lv_wait        SKIP 1      ; the fields the original would have waited
+.lv_rigged      SKIP 1      ; non-zero: a rig's redraw moved its parts
+.lv_msg_n       SKIP 1      ; the messages the pass showed (the rigs': lv_hook_message), at most LV_MSGS ...
+.lv_msg_on      SKIP 1      ; ... the one the panel shows, its index + 1, or 0 for none ...
+.lv_msg_t0      SKIP 2      ; ... and fields when the first showed, each RIG_SHOWN after the last
     \ the animation (lv_setup, lv_camera)
 .an_on          SKIP 1      ; non-zero: the frames show a pass
 .an_t0          SKIP 2      ; fields at its start ...
@@ -692,6 +701,7 @@ ENDSECTION
     STZ lv_request
     JSR logic_go_init
     STZ lv_over
+    STZ lv_msg_on                               ; (a rig's messages, if any, end)
     LDA lv_now : STA lv_until
     LDA lv_now+1 : STA lv_until+1
     \ (on into lv_switched)
@@ -774,13 +784,16 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA Pitch : JSR mod72 : STA an_a0+1
     LDA Roll : JSR mod72 : STA an_a0+2
     STZ lv_walks : STZ lv_loaded : STZ lv_wait
+    STZ lv_rigged : STZ lv_msg_n
     LDA #ACCCON_X : TSB acccon                  ; (LogicFaces: shadow RAM's)
     JSR logic_go_pass
     TAX
     LDA #ACCCON_X : TRB acccon
     TXA
 .live_passed                                    ; (tools/livecheck.mjs: A, the pass's answer)
-    BEQ done
+    BNE answered
+    RTS
+.answered
     CMP #2 : BNE ran
     STA lv_over
     PAGE_IN BANK_DATA
@@ -804,6 +817,17 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_now : CLC : ADC #REPEAT_FIELDS : STA lv_repeat
     LDA lv_now+1 : ADC #0 : STA lv_repeat+1
 .held
+    \ a rig's messages, each in turn from now (lv_messages); and a rig's
+    \ parts moved, so the area's working copy built again (its globals' slots
+    \ from their records), as the original redraws there and then
+    LDA lv_msg_n : BEQ no_messages
+    LDA #1 : STA lv_msg_on
+    LDA lv_now : STA lv_msg_t0
+    LDA lv_now+1 : STA lv_msg_t0+1
+.no_messages
+    LDA lv_rigged : BEQ unrigged
+    LDA lv_area : JSR lv_enter_area
+.unrigged
     LDA lv_loaded : BNE away
     JSR logic_go_shown                          ; (with an area's change, once it's entered)
     LDA #&FF : STA vw_flags
@@ -863,6 +887,67 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 .quiet
     RTS
 }
+
+\ lv_hook_message (hook_message): the 14 characters at Y X (the logic's
+\ bank paged) kept for the panel, which shows each RIG_SHOWN fields in turn
+\ from the pass's end (lv_messages), as the original shows each while it
+\ waits; PROCESSING is a rig's redraw, whose parts have moved (lv_rigged).
+.lv_hook_message
+{
+    ZA_AUTO2 p
+    STX p : STY p+1
+    CPX #LO(msg(&8C90)) : BNE kept
+    CPY #HI(msg(&8C90)) : BNE kept
+    LDA #1 : STA lv_rigged
+.kept
+    LDX lv_msg_n : CPX #LV_MSGS : BCS full
+    LDA panel_msg_at,X : TAX
+    LDY #0
+.copy
+    LDA (p),Y : STA lv_msgs,X
+    INX : INY : CPY #14 : BNE copy
+    INC lv_msg_n
+.full
+    RTS
+}
+
+\ lv_messages, while a rig's messages show (lv_msg_on): the panel's message
+\ the one whose RIG_SHOWN fields these are, then the area's again.
+.lv_messages
+{
+    LDA lv_now : SEC : SBC lv_msg_t0 : TAX
+    LDA lv_now+1 : SBC lv_msg_t0+1 : BNE ended
+    TXA
+    LDY #1
+.k
+    CMP #RIG_SHOWN : BCC got
+    SBC #RIG_SHOWN
+    INY
+    BRA k
+.got
+    CPY lv_msg_on : BEQ done
+    TYA : CMP lv_msg_n : BEQ show : BCS ended
+.show
+    STY lv_msg_on
+    BRA valued
+.ended
+    STZ lv_msg_on
+.valued
+    PAGE_IN BANK_DATA
+    JMP panel_values
+.done
+    RTS
+}
+ASSERT LV_MSGS * RIG_SHOWN < 256
+\ the messages' characters, as the original's (lv_msg_n; in main RAM, for
+\ panel_values too), and where each starts
+.lv_msgs
+    SKIP LV_MSGS * 14
+.panel_msg_at
+    FOR i = 0..LV_MSGS - 1
+        EQUB i * 14
+    NEXT
+ASSERT PN_MESSAGE = 14
 
 \ mod72: A mod 72. The logic's angles are bytes, and the database can make
 \ any byte one: a GOTO to an id an entrance shares with an object before it

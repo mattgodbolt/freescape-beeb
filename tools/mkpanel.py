@@ -544,7 +544,8 @@ def assembly(build, packed):
     for f in fields:
         L.append(f"PF_{f[0].upper()} = {first[f[0]]} : PN_{f[0].upper()} = {f[3]}")
     L.append(f"PF_PICTURE = {glyphs} : PN_PICTURE = {len(build['tile_places'])}")
-    for ch, name in ((" ", "SPACE"), ("0", "DIGIT0"), (".", "DOT"), ("^", "DEGREE")):
+    for ch, name in ((" ", "SPACE"), ("0", "DIGIT0"), ("A", "LETTER_A"), (".", "DOT"), ("^", "DEGREE"),
+                     ("%", "PERCENT")):
         L.append(f"PC_{name} = {panel.CHARSET.index(ch)}")
     # the free camera's message's words (src/live.6502's entrance_text)
     for name, text in (("ENTRANCE", panel.ENTRANCE_WORDS[0]), ("DEMO", panel.ENTRANCE_WORDS[1])):
@@ -612,7 +613,8 @@ def check(req):
     (panel_values), in order: the original's variables as {"mem": [[ZX
     address, byte], ...]} (the transcription's state, or the free disc's
     own), the area whose name shows ("area": its index in the records'
-    directory), whether the game's over ("over"), and with the free camera
+    directory), whether the game's over ("over"), a rig's message it shows
+    in place of the area's ("msg", its 14 characters), and with the free camera
     its position, yaw and pitch ("cam"); answered with the cells cells()
     gives, each after the last (the heading stays where the compass
     doesn't turn)."""
@@ -633,6 +635,8 @@ def check(req):
         mem = dict(v["mem"])
         names = build["names"]
         values = panel.values_of(mem, names[v["area"]] if v["area"] < len(names) else None, bool(v["over"]))
+        if v.get("msg"):
+            values["message_text"] = v["msg"]       # (a rig's message, as the original's)
         if v.get("cam"):
             scale = mem[panel.ZX["AreaScale"]] or 1
             x, y, z, yaw, pitch = v["cam"]

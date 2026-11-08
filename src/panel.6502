@@ -463,7 +463,32 @@ ENDIF
     JSR names
 .no_name
 IF NOT(PANEL_FREE)
-    \ the message: the game's end; or the area's gas, as $B76C
+    \ the message: one of a rig's while it shows (src/live.6502's
+    \ lv_messages: ASCII, as the original's, into the font's places) ...
+    LDA lv_msg_on : BEQ no_rig
+    TAY : LDA panel_msg_at - 1,Y : TAY
+    LDX #PF_MESSAGE
+.rig_cell
+    LDA lv_msgs,Y
+    CMP #'A' : BCC rig_not_letter
+    SBC #'A' - PC_LETTER_A
+    BRA rig_glyph
+.rig_not_letter
+    CMP #'0' : BCC rig_not_digit
+    SBC #'0' - PC_DIGIT0
+    BRA rig_glyph
+.rig_not_digit
+    CMP #'%' : BNE rig_space
+    LDA #PC_PERCENT
+    BRA rig_glyph
+.rig_space
+    LDA #PC_SPACE
+.rig_glyph
+    JSR panel_set
+    INY : INX : CPX #PF_MESSAGE + PN_MESSAGE : BNE rig_cell
+    JMP valued
+.no_rig
+    \ ... else the game's end; or the area's gas, as $B76C
     LDY #LO(pm_over - pm_neutral)
     LDA panel_over : BNE message
     LDY #0                                      ; (pm_neutral)

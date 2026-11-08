@@ -161,8 +161,10 @@ def crosshair(rows, cross_x, cross_y):
 def render_cameras(db, layout_areas, cameras):
     """Each request's view: {"area": its directory index, "camera": [x, y,
     z, yaw, pitch, roll]}, and with the logic "hidden" (each object's, in
-    the logic's index order: the area's records, then the globals) and
-    "cross" ([CrossX, CrossY] if it's shown)."""
+    the logic's index order: the area's records, then the globals),
+    "globals" (each global's cell, [x, y, z], as the logic's records have
+    it: the rig's parts move) and "cross" ([CrossX, CrossY] if it's
+    shown)."""
     by_id = {a["id"]: a for a in db["areas"]}
     out = []
     for c in cameras:
@@ -175,7 +177,10 @@ def render_cameras(db, layout_areas, cameras):
                 raise SystemExit(f"area {area['id']}: {len(hidden)} objects' flags for "
                                  f"{len(objs)} records and {len(db['globals'])} globals")
             area = dict(area, objects=[dict(o, initially_invisible=h) for o, h in zip(objs, hidden)])
-            d = dict(db, globals=[dict(o, initially_invisible=h) for o, h in zip(db["globals"], hidden[len(objs):])])
+            # the globals where the logic has them (the rig's parts move)
+            at = c.get("globals") or [g["pos"] for g in db["globals"]]
+            d = dict(db, globals=[dict(o, initially_invisible=h, pos=list(p))
+                                  for o, h, p in zip(db["globals"], hidden[len(objs):], at)])
         v = render.render(d, area, cam.Camera(*c["camera"]))
         rows = [bytearray(row) for row in writer.view_bytes(v.lines)]
         if c.get("cross"):
@@ -229,6 +234,7 @@ def trace(snap, out_path, paths):
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
     from logic.passes import run_pass
+    from logic.rig import message_text
     from logic.state import VARS, State, database, port_start
     lmove.FIX_CORNER = True     # decision 18: the port's logic
     seen = {"walks": [], "loaded": False, "first": False}
@@ -236,13 +242,18 @@ def trace(snap, out_path, paths):
     class LiveHooks(Hooks):
         """The disc's hooks, as far as they change the logic's state: the
         FCL's REDRAW copies the screen there and then, which plays Sound
-        and clears it (src/live.6502's lv_hook_redraw)."""
+        and clears it (src/live.6502's lv_hook_redraw); and the messages a
+        pass shows (lv_hook_message), as their text then."""
 
         def redraw(self, s):
             super().redraw(s)
             if s.Sound:
                 self.sound(s, s.Sound)
                 s.Sound = 0
+
+        def message(self, s, addr):
+            super().message(s, addr)
+            self.messages.append(message_text(s.mem, addr))
     real_move, real_keep, real_load = lmove.move, lmove.keep_clear, larea.load_area
 
     def move(s):
@@ -304,6 +315,7 @@ def trace(snap, out_path, paths):
                 rec["names"] = list(st.keys)
                 rec["tick"] = bool(st.tick)
                 hooks = LiveHooks()
+                hooks.messages = []
                 try:
                     alive = run_pass(s, st.keys, st.tick, hooks)
                 except lmove.Freeze:
@@ -316,6 +328,9 @@ def trace(snap, out_path, paths):
                 rec["sounds"] = [args[0] for name, args in hooks.log if name == "sound"]
                 if s.Sound and (s.GameFlags & 0x04 or s.GameFlags2 & 0x08):
                     rec["sounds"].append(s.Sound)
+                # the messages it showed (the rigs'), as their text then
+                if hooks.messages:
+                    rec["messages"] = hooks.messages
             rec["changes"] = logictrace.changes(before, s.mem, where)
             rec["then"] = then(s)
             out.append(rec)

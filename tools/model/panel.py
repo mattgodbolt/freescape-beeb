@@ -137,6 +137,7 @@ FONT = {
     ")": ["#..", ".#.", ".#.", ".#.", "#.."],
     "'": [".#.", ".#.", "...", "...", "..."],
     "^": [".#.", "#.#", ".#.", "...", "..."],    # a degree sign
+    "%": ["#.#", "..#", ".#.", "#..", "#.#"],    # (the rigs' "000% SUCCESS")
 }
 # Glyphs narrower than three pixels, closed up in static text: the columns
 # each keeps.
@@ -185,7 +186,7 @@ STEPS = 72                  # a turn, in the logic's 5-degree steps
 
 # The characters the font table holds, in order: a cell's value is its
 # character's place here.
-CHARSET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.:-+/()'^"
+CHARSET = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.:-+/()'^%"
 
 
 def font_table():
