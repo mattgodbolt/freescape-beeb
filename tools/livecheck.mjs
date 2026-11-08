@@ -263,13 +263,22 @@ const LZ_ON = FREE ? 0 : sym("lz_on"), LZ_X = FREE ? 0 : sym("lz_x"), LZ_Y = FRE
 const VIEW_CENTRE = FREE ? 0 : sym("ViewCentre");
 const hiddenOf = (flags) => flags.map((v) => v & 0x60).join(",");
 const inputsOf = (f) => `area ${f.area} (entered ${f.gen}), camera ${f.camera}` +
-    (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}, laser ${f.laser ?? "off"}`);
+    (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}, laser ${f.laser ?? "off"}, ` +
+        `sensors' lines ${f.slines ? f.slines.join(";") : "none"}`);
+// the sensors' lines (src/sensors.6502, in BANK_DATA's LiveData): the set
+// shown now, or a buffer's
+const BANK_DATA_ = sym("BANK_DATA");
+const dataByte = (a) => ram[bankAt(BANK_DATA_, a)];
+const SL_N = FREE ? 0 : sym("sl_n"), SL_X = FREE ? 0 : sym("sl_x"), SL_Y = FREE ? 0 : sym("sl_y");
+const SB_N = FREE ? 0 : sym("sb_n"), SB_X = FREE ? 0 : sym("sb_x"), SB_Y = FREE ? 0 : sym("sb_y");
+const linesOf = (n, xs, ys) => (n ? [...Array(n).keys()].map((i) => [dataByte(xs + i), dataByte(ys + i)]) : null);
 function inputsNow() {
     const f = { area: ram[LV_AREA], gen: genNow(), camera: camera() };
     if (!FREE) {
         f.hiddenAll = hiddenOf([...ram.subarray(IX_FLAGS, IX_FLAGS + IX_MAX)]);
         f.cross = ram[CROSS_ON] ? [ram[CROSS_X], ram[CROSS_Y]] : null;
         f.laser = ram[LZ_ON] ? [ram[LZ_X], ram[LZ_Y], ram[VIEW_CENTRE]] : null;
+        f.slines = linesOf(dataByte(SL_N), SL_X, SL_Y);
     }
     return inputsOf(f);
 }
@@ -331,10 +340,31 @@ const restRoutineOf = (key) => {
 };
 let restAcc = new Map(), restInHalf = false, restLastKey = -1, restLastT = 0;
 
+// --time NAME,...: each named routine's cycles a call, from its first
+// instruction (its own bank paged, for one in sideways RAM) to its return
+// (the stack back above where it was entered), reported at the end.
+const timed = (opt("time", "") || "").split(",").filter(Boolean).map((name) => {
+    const all = JSON.parse(fs.readFileSync(disc.replace(/\.ssd$/, ".json"), "utf8"));
+    let bank = -1;
+    for (const a of all.assemblies) for (const s of a.sections) if (s.labels?.[name] && /^Live(Data|Glue)$|^Logic/.test(s.name))
+        bank = { LiveData: sym("BANK_DATA"), LiveGlue: sym("BANK_GLUE"), Logic: sym("BANK_DB"), LogicCode: sym("BANK_DATA") }[s.name] ?? -1;
+    return { name, addr: sym(name), bank, calls: [], open: null };
+});
+const timing = (addr, bank) => {
+    for (const t of timed) {
+        if (t.open && ((cpu.s - t.open.s) & 0xff) > 0 && ((cpu.s - t.open.s) & 0xff) < 0x80) {
+            t.calls.push(now() - t.open.t);
+            t.open = null;
+        }
+        if (!t.open && addr === t.addr && (t.bank < 0 || bank === t.bank)) t.open = { s: cpu.s, t: now() };
+    }
+};
+
 cpu.debugInstruction.add((addr, opcode) => {
     // the bank paged at a hooked address, unless ANDY (ROMSEL's bit 7, over
     // a bank's first 4K) is there instead: none then
     const bank = cpu.isBankPagedAt(cpu.romsel & 15, addr) ? cpu.romsel & 15 : -1;
+    if (timed.length) timing(addr, bank);
     if (profileRest) {
         const t = now();
         if (restLastKey >= 0 && (!restInHalf || profileAll)) {
@@ -462,6 +492,10 @@ cpu.debugInstruction.add((addr, opcode) => {
             // ... and the laser's lines it has
             current.laser = ram[LV_LON + b] ? [ram[LV_LX + b], ram[LV_LY + b], ram[VIEW_CENTRE]] : null;
             if (current.laser) laserFrames++;
+            // ... and the sensors' lines it has
+            current.slines = linesOf(dataByte(SB_N + b), SB_X + 5 * b, SB_Y + 5 * b);
+            current.centre = [ram[VIEW_CENTRE], ram[VIEW_CENTRE + 1]];
+            if (current.slines) sensorLineFrames++;
         }
         current.inputs = inputsOf(current);
         // nothing is drawn again that's drawn already (the idle loop)
@@ -749,7 +783,7 @@ let lastTaking = null;
 let passAsks = 0, passSoundsOk = 0, soundsAsked = 0; // (the sounds asked for since the pass began)
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
 const LV_LON = FREE ? 0 : sym("lv_lon"), LV_LX = FREE ? 0 : sym("lv_lx"), LV_LY = FREE ? 0 : sym("lv_ly");
-let laserFrames = 0, lasersOk = 0, lasersShown = 0;
+let laserFrames = 0, lasersOk = 0, lasersShown = 0, sensorLineFrames = 0, sensorSteps = 0, sensorShots = 0;
 const LV_LASERED = FREE ? -1 : sym("lv_pass.unfired"); // (lv_pass has set the laser's lines up)
 let onLasered = null;
 let summary = "";
@@ -868,6 +902,7 @@ async function logicScript() {
     // What the live_loop hook does next: write the queued state and ask the
     // disc to take it; keep the clock's minute away, or bring it on.
     let writes = null, minuteDue = false, applied = 0;
+    let sensorFields = null; // (a sensors step: its record, for the next loop's sn_clock)
     // the visibility probe's flags: to be written at the next loop, and as
     // they stand (the frames' expected flags, not the logic's records)
     let flagWrites = null, visibility = null;
@@ -893,7 +928,10 @@ async function logicScript() {
             minuteDue = false;
             want.rec.keys.forEach((r, i) => (ram[KEYS_MADE + i] |= r));
         }
-        if (writes) {
+        // (once the sensors' test after the last pass is done, as the
+        // transcription's comes before the step: the next pass waits for
+        // both, so the writes still go in before it)
+        if (writes && !V("sn_due")) {
             writes();
             writes = null;
             ram[LV_REQUEST] = 1;
@@ -901,11 +939,25 @@ async function logicScript() {
             events++;
             idleSeen = false;
         }
+        if (sensorFields) {
+            // this loop's sn_clock counts the step's fields; the state the
+            // transcription's after them
+            ram[S("sn_more")] = sensorFields.sensors;
+            for (const [a, v] of sensorFields.changes) exp[a] = v;
+            sensorAsks = sounds.log().asks.length;
+            sensorFields = null;
+            events++;
+            idleSeen = false;
+        }
     };
+    let sensorAsks = 0;
     // (settled, with the logic: the request taken, no pass's frames, no
     // wait for the next pass)
-    settledExtra = () => !writes && !V("lv_request") && !V("an_on") && !V("lv_switch") &&
+    settledExtra = () => !writes && !sensorFields && !V("lv_request") && !V("an_on") && !V("lv_switch") && !V("sn_due") &&
         s16((V16("lv_until") - V16("fields")) & 0xffff) <= 0;
+    // The sensors' clock (src/sensors.6502's sn_clock) is held, as the
+    // minute is: their fields come only as a step asks (sensorFields)
+    ram[S("sn_hold")] = 1;
     // A pass with no key held is the original waiting in its input
     // ($9990): what its first part has cleared, and no keys read.
     let waited = false;
@@ -1076,6 +1128,25 @@ async function logicScript() {
             steps++;
             if (rec.frames) {
                 await settle(where);
+            } else if (rec.sensors !== undefined) {
+                // the sensors' fields, between passes: their shots, the
+                // state and the sounds the transcription's
+                // (the keys up, and the disc's input waiting for one, as
+                // the transcription's is: its pass of none has come)
+                hold([]);
+                await settle(`${where}: before`);
+                await until(() => waited, `${where}: the input waiting`);
+                waiting();
+                sensorFields = rec;
+                await settle(where);
+                const d = compare();
+                if (d.length) report(where, d);
+                else sensorSteps++;
+                const asked = sounds.log().asks.slice(sensorAsks).map((a) => a[1]);
+                if (asked.join() !== (rec.sounds ?? []).join())
+                    fail(`${where}: the sensors asked for the sounds ${asked.join(",") || "none"}, the transcription ${(rec.sounds ?? []).join(",") || "none"}`);
+                sensorShots += asked.length;
+                for (const [ad, v] of rec.then) exp[ad] = v;
             } else if (rec.poke || rec.fcl) {
                 // the results of this step and those straight after it (a
                 // poke's bytes, an FCL script's changes, and what the
@@ -1395,7 +1466,7 @@ async function freeScript() {
 // --- Every frame shown against the model.
 const requests = [];
 const keyOf = (f) => `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}:` +
-    `${f.globals ? f.globals.join(";") : ""}:${f.laser ?? ""}`;
+    `${f.globals ? f.globals.join(";") : ""}:${f.laser ?? ""}:${f.slines ? f.slines.join(";") : ""}`;
 const index = new Map();
 for (const { frame } of shown) {
     if (frame.camera.slice(3).some((a) => a >= 72) || frame.camera.slice(0, 3).some((v) => v >= 0x8000)) {
@@ -1410,6 +1481,7 @@ for (const { frame } of shown) {
         if (frame.globals) r.globals = frame.globals;
         if (frame.cross) r.cross = frame.cross;
         if (frame.laser) r.laser = frame.laser;
+        if (frame.slines) (r.slines = frame.slines), (r.centre = frame.centre);
         requests.push(r);
     }
 }
@@ -1565,7 +1637,8 @@ console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
     `${compared - wrong} the model's view byte for byte (${requests.length} views); ` +
     `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ` +
     `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times` +
-    (FREE ? "" : `; ${lasersOk} shots' lasers fired as the transcription's, ${lasersShown} shown, ${laserFrames} frames with the lines`));
+    (FREE ? "" : `; ${lasersOk} shots' lasers fired as the transcription's, ${lasersShown} shown, ${laserFrames} frames with the lines; ` +
+        `${sensorSteps} steps of the sensors' fields as the transcription's (${sensorShots} shots), ${sensorLineFrames} frames with their lines`));
 if (pace) {
     const rate = ([d, f], unit) => (f ? `${((2e6 / FIELD_CYCLES) * d / f).toFixed(1)} ${unit} a second over ${f} fields` : "-");
     console.log(`${NAME}: the pace: ${pace.taps} taps held ${sym("REPEAT_FIELDS") - 2} fields, each one pass; ` +
@@ -1617,6 +1690,8 @@ if (profileRest)
         for (const [r, c] of [...sum.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(opt("top", 25))))
             console.log(`  ${r.padEnd(28)} ${String(Math.round(c / fs_.length)).padStart(8)} ${(100 * c / total).toFixed(1).padStart(5)}%`);
     }
+for (const t of timed)
+    console.log(`${NAME}: ${t.name}'s cycles a call (median / p90 / most): ${t.calls.length ? stats(t.calls) : "-"} (${t.calls.length})`);
 console.log(`${NAME}: ${emulated.toFixed(1)}s emulated in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 if (verbose)
     for (const f of counted)

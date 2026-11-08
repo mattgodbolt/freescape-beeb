@@ -11,6 +11,7 @@ only for a collision or a condition) and operands; its length is the
 original's table at $8939. A test that fails ends the script.
 """
 from .area import lookup, go_to_entrance, word, OBJECT_HEADER
+from . import sensors
 
 import collections
 
@@ -38,6 +39,7 @@ def _show_hide(s, ix, op, hooks):
         return
     m[ix] |= 0x40
     if m[ix] & 0x0F == 2 and s.mem[0x8A25]:
+        sensors.off(s, m[ix + 7])
         hooks.sensor_off(s, m[ix + 7])
     if s.mem[0x8918] and hooks.undraw(s, s.FoundId):
         s.GameFlags2 = s.GameFlags2 | 0x08

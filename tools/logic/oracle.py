@@ -12,10 +12,15 @@ on both sides:
   count to 0, so no minute ends inside the pass; for a tick pass they're
   set to 00 and 49, so the interrupt ends a minute in its first frame,
   while the input waits;
-- the sensors: the interrupt's list of sensors to fire ($8A25) is emptied
-  before each pass, and the interrupt's read of it answers none
-  (SENSOR_SHOTS), so no shot lands at all: the redraw's $9841 fills the list
-  again, inside a pass that redraws (a rig's, the FCL's REDRAW) too.
+- the sensors: the interrupt's read of its list of sensors to fire ($8A25)
+  answers none (SENSOR_SHOTS), so no shot lands inside a pass, even one
+  that redraws inside itself (a rig's, the FCL's REDRAW). A scenario's
+  "sensors" step lets them: the interrupt is run that many frames
+  (sensors()), its read put back, with the original waiting between
+  passes.
+
+Since the sensors' layer (2026-11-08) the list is no longer emptied before
+each pass: hiding a sensor ($B467) takes it out of the list as it stands.
 
 Everything else is the original's own code.
 """
@@ -37,6 +42,8 @@ SENSOR_FIRE = 0x8A25
 DRAW_LIST = 0x8A9D
 N_DRAWN = 0x8918
 GAME_OVER = 0x9AB7       # the input's way to the end of the game
+INTERRUPT = 0xBAE6       # the frame's interrupt: the clock and the sensors
+SIGHT = 0x9841           # the sensors' test after the redraw
 # A pass's limit. Area 18's last condition redraws seven times, and the
 # busiest redraw is 62 frames (docs/research/zx-driller.md).
 PASS_FRAMES = 2000
@@ -86,7 +93,6 @@ class Original:
         else:
             m[CLOCK_SECONDS], m[CLOCK_SECONDS + 1] = ord("5"), ord("9")
             m[SECOND_FRAMES] = 0
-        m[SENSOR_FIRE] = 0
 
     def _run_to(self, addr, frames=PASS_FRAMES):
         pc = self.spec.run_tstates(frames * self.spec.frame, stop=addr)
@@ -116,8 +122,36 @@ class Original:
             return self.memory()
         self._run_to(AFTER_EVENTS)
         after = self.memory()
+        # the redraw's projection, before the sensors' test ($9841), if it
+        # redraws; and after it all
+        self.projected = None
+        if after[0x8920] & 0x04 or after[0x8921] & 0x08:
+            self._run_to(SIGHT)
+            self.projected = self.memory()
         self._run_to(MAIN_LOOP)
+        self.redrawn = self.memory()
         return after
+
+    def sensors(self, frames):
+        """Time going by between passes, its sensors let fire: the input
+        entered with no key held, which clears its pass's flags and waits
+        (a frame of it), then the interrupt ($BAE6) run frames times.
+        Returns the memory after, and leaves the original at the main loop's
+        top again (its stack as it was). The clock's seconds are held as for
+        a pass."""
+        assert self.spec.regs[zx.PC] == MAIN_LOOP
+        r, m = self.spec.regs, self.spec.mem
+        sp = r[zx.SP]
+        self._hold(False)
+        self.spec.run_tstates(self.spec.frame)
+        m[SENSOR_SHOTS:SENSOR_SHOTS + 3] = bytes(SENSOR_SHOTS_WAS)
+        try:
+            for _ in range(frames):
+                self.spec.call(INTERRUPT)
+        finally:
+            m[SENSOR_SHOTS:SENSOR_SHOTS + 3] = bytes(SENSOR_SHOTS_OFF)
+        r[zx.PC], r[zx.SP] = MAIN_LOOP, sp
+        return self.memory()
 
     def fcl(self, code, shot=False):
         """Run FCL bytes with the original's interpreter ($B320), from the

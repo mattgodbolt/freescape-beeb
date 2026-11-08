@@ -1,0 +1,502 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - Driller's guard sensors on the live disc
+\ (tools/logic/sensors.py is the transcription, docs/research/sensors.md the
+\ design)
+\
+\ After a pass that redraws, once the frame of its end is drawn (the
+\ original's redraw: src/live.6502's sn_due), sn_redraw finds the sensors
+\ in range ($7592: sn_project) and their line of sight ($9841: sn_sight):
+\ one the frame drew (its pixel in the front end's draw list, lv_spot) is in
+\ sight if the shot's pick at its pixel hits it (lv_pick), one off the
+\ screen if the logic's walk to it with Margin 0 gets there (move); then the
+\ interrupt's list from the redraw's. It runs with ACCCON's X set, from
+\ shadow RAM (RigCode), and pages the logic's banks itself.
+\
+\ The original's interrupt counts each listed sensor's frames and fires at
+\ the shield ($BB93); on the disc the main loop counts them, a field at a
+\ time, by the fields counted since the last loop (sn_clock, decision 133):
+\ each shot sound 2 and a unit of Shield or the game's end, and for one on
+\ the screen its four lines to the view's top and bottom, EORed as the
+\ laser's are, for SENSOR_LINES fields (decision 134).
+\ ***************************************************************************
+
+\ SensorList's offsets (src/logic/vars.6502): the counts, then each list
+SN_FOUND_N  = SensorList
+SN_FIRING_N = SensorList + 1
+SN_FOUND    = SensorList + SL_FOUND
+SN_FIRING   = SensorList + SL_FIRING
+ASSERT SL_ENTRY = 6 AND SL_ENTRIES = 5
+
+\ ---------------------------------------------------------------------------
+\ The redraw's part, in shadow RAM with the rigs' code (only a pass's
+\ aftermath runs it, with X set).
+SECTION RigCode
+
+\ sn_need: A non-zero (and Z clear) if the test needs the frame of the
+\ pass's end: re-projecting (sn_proj), a sensor in range (sn_in_range), whose
+\ pixel the frame may have drawn; else one the list has on the screen, whose
+\ pick is the frame's. Otherwise the test can come at once.
+.sn_need
+{
+    ZA_AUTO1 k
+    LDA sn_proj : BEQ listed
+    LDA ix_n : BEQ none
+    STA k
+.object
+    DEC k
+    LDA k : JSR sn_in_range : BCS found
+    LDA k : BNE object
+.none
+    LDA #0
+    RTS
+.listed
+    LDX SN_FOUND_N : BEQ none
+.entry
+    DEX
+    TXA : ASL A : STA k : ASL A : ADC k : TAY   ; (6 X)
+    LDA SN_FOUND + 3,Y : CMP #1 : BEQ found
+    TXA : BNE entry
+    BRA none
+.found
+    LDA #1
+    RTS
+}
+
+\ sn_in_range: whether indexed object A is a sensor in range ($7592's
+\ tests before the projection): C set if so. Shown, the camera on a side
+\ its mask (byte &0D) names (the projection's which-side bits: the camera
+\ below each axis's low face, above its high one), and |x| + |y| + |z| of
+\ its point less the camera (16-bit, as the original sums them) short of its
+\ range (bytes &0B, &0C). With LOGIC_BANK paged; sn_rec its record.
+.sn_in_range
+{
+    ZA_AUTO1 bits
+    ZA_AUTO2 sum
+    TAY
+    LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
+    LDA ix_pl,Y : STA sn_rec
+    LDA ix_ph,Y : STA sn_rec+1
+    LDA (sn_rec) : AND #&4F : CMP #SENSOR_TYPE : BEQ shown   ; (a sensor, not hidden)
+    CLC
+    RTS
+.shown
+    STZ bits : STZ sum : STZ sum+1
+    LDY #1
+.axis
+    LDA (sn_rec),Y : JSR cells                  ; lo = 64 o - camera
+    LDA sn_lo+1 : BMI high
+    ORA sn_lo : BEQ high                        ; (0: neither)
+    LDA sn_bit,Y : TSB bits
+.high
+    \ hi = lo + 64 size: its sign
+    PHY
+    INY : INY : INY
+    LDA (sn_rec),Y : STA sn_hi : STZ sn_hi+1
+    LDX #6
+.times64
+    ASL sn_hi : ROL sn_hi+1
+    DEX : BNE times64
+    PLY
+    LDA sn_lo : CLC : ADC sn_hi
+    LDA sn_lo+1 : ADC sn_hi+1 : BPL summed
+    LDA sn_bit,Y : ASL A : TSB bits
+.summed
+    \ the sum, of each axis's magnitude
+    LDA sn_lo+1 : BMI minus
+    LDA sum : CLC : ADC sn_lo : STA sum
+    LDA sum+1 : ADC sn_lo+1 : STA sum+1
+    BRA added
+.minus
+    LDA sum : SEC : SBC sn_lo : STA sum
+    LDA sum+1 : SBC sn_lo+1 : STA sum+1
+.added
+    INY : CPY #4 : BNE axis
+    LDY #&0D : LDA (sn_rec),Y : AND bits : BEQ out
+    LDY #&0B : LDA sum : SEC : SBC (sn_rec),Y
+    INY : LDA sum+1 : SBC (sn_rec),Y : BPL out
+    SEC
+    RTS
+.out
+    CLC
+    RTS
+\ cells: sn_lo = 64 A - the camera's coordinate on axis Y - 1 (1 to 3).
+.cells
+    STZ sn_lo+1
+    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
+    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
+    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
+    STA sn_lo
+    LDX sn_axis,Y
+    LDA sn_lo : SEC : SBC PlayerX,X : STA sn_lo
+    LDA sn_lo+1 : SBC PlayerX+1,X : STA sn_lo+1
+    RTS
+.sn_axis    EQUB 0, 0, 2, 4                     ; (by Y: PlayerX's offset for x, y, z)
+.sn_bit     EQUB 0, 1, 4, 16                    ; (by Y: the low face's bit; the high's is twice it)
+}
+
+\ sn_redraw: the projection's list if the pass re-projected (sn_proj), then
+\ the line of sight and the interrupt's list. Pages LOGIC_CODE_BANK in last.
+.sn_redraw
+    LDA sn_proj : BEQ sn_sight
+    JSR sn_project
+    \ (on into sn_sight)
+
+\ sn_sight ($9841): each sensor the redraw found keeps its state if it's in
+\ sight, else goes off; then the interrupt's count and list from the
+\ redraw's, each counter the old list's at its place, or 2 for 0 or 1.
+.sn_sight
+{
+    ZA_AUTO1 i, e, cx, cy, jet, margin
+    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (move and the pick)
+    LDA SN_FOUND_N : BNE some
+    JMP merge
+.some
+    STA i
+    LDX #0
+.entry
+    STX e
+    LDA SN_FOUND + 3,X
+    CMP #1 : BNE not_seen
+    \ on the screen: the shot's pick at its point
+    LDA CrossX : STA cx : LDA CrossY : STA cy
+    STZ Collided
+    LDA SN_FOUND + 4,X : STA CrossX
+    LDA SN_FOUND + 5,X : STA CrossY
+    JSR lv_pick
+    LDA cx : STA CrossX : LDA cy : STA CrossY
+    LDX e
+    LDA Collided : CMP SN_FOUND,X : BEQ next
+    STZ SN_FOUND + 3,X
+    BRA next
+.not_seen
+    CMP #2 : BNE next
+    \ off the screen: a walk from the camera to its corner, with Margin 0
+    \ as the jet ($A8BA finds it: the index's cells are its record's)
+    LDA SN_FOUND,X : STA FoundId
+    LDY #0
+.find
+    CMP ix_id,Y : BEQ found
+    INY : CPY ix_n : BNE find
+    BRA next                                    ; (none: every sensor has a record)
+.found
+    LDA InJet : STA jet : LDA Margin : STA margin
+    LDA #1 : STA InJet : STZ Margin
+    LDA ix_xo,Y : LDX #0 : JSR target
+    LDA ix_yo,Y : LDX #2 : JSR target
+    LDA ix_zo,Y : LDX #4 : JSR target
+    JSR move
+    LDA margin : STA Margin : LDA jet : STA InJet
+    LDX #4
+.reached
+    LDA TargetX,X : CMP sn_want,X : BNE missed
+    LDA TargetX+1,X : CMP sn_want+1,X : BNE missed
+    DEX : DEX : BPL reached
+    BRA next_e
+.missed
+    LDX e
+    STZ SN_FOUND + 3,X
+.next_e
+    LDX e
+.next
+    TXA : CLC : ADC #SL_ENTRY : TAX
+    DEC i : BEQ merge
+    JMP entry
+.merge
+    LDA SN_FOUND_N : STA SN_FIRING_N
+    LDX #SL_ENTRY * (SL_ENTRIES - 1)
+.counter
+    LDA SN_FIRING + 2,X : CMP #2 : BCS kept
+    LDA #2
+.kept
+    STA SN_FOUND + 2,X
+    TXA : SEC : SBC #SL_ENTRY : TAX
+    BCS counter
+    LDX #SL_ENTRY * SL_ENTRIES - 1
+.copy
+    LDA SN_FOUND,X : STA SN_FIRING,X
+    DEX : BPL copy
+    RTS
+\ target: the target's coordinate X (0, 2, 4) and sn_want's, cell A's
+\ first unit (64 A). Keeps Y.
+.target
+    STZ sn_want+1,X
+    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
+    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
+    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
+    STA sn_want,X : STA TargetX,X
+    LDA sn_want+1,X : STA TargetX+1,X
+    RTS
+}
+ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
+
+\ sn_project ($6B33's start and $7592): each sensor of the area's records
+\ and the globals' in the index's order, the original's: its id and
+\ interval, and its state: 0 hidden, with the camera on none of the sides
+\ its mask (byte &0D) names, or |x| + |y| + |z| (16-bit) not short of its
+\ range (bytes &0B, &0C); else 1 if the frame drew its pixel (lv_spot),
+\ which is its point, else 2.
+.sn_project
+{
+    ZA_AUTO1 k, e
+    STZ SN_FOUND_N
+    STZ e
+    LDA ix_n : BEQ done
+    STZ k
+.object
+    LDA k : JSR sn_in_range
+    PHP
+    LDA (sn_rec) : AND #&0F : CMP #SENSOR_TYPE : BNE other
+    INC SN_FOUND_N
+    LDX e
+    LDY #7 : LDA (sn_rec),Y : STA SN_FOUND,X
+    LDY #&0A : LDA (sn_rec),Y : STA SN_FOUND + 1,X
+    LDA #0
+    PLP : BCC state
+    \ in range: drawn?
+    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (lv_spot, with the pick)
+    LDA k : JSR lv_spot
+    LDX e
+    BCC unseen
+    STA SN_FOUND + 4,X
+    TYA : STA SN_FOUND + 5,X
+    LDA #1 : BRA state
+.unseen
+    LDA #2
+.state
+    STA SN_FOUND + 3,X
+    TXA : CLC : ADC #SL_ENTRY : STA e
+    BRA next
+.other
+    PLP
+.next
+    INC k
+    LDA k : CMP ix_n : BNE object
+.done
+    RTS
+}
+SENSOR_TYPE = 2
+ZA_AUTO2 sn_lo, sn_hi, sn_rec
+ENDSECTION
+ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
+
+\ ---------------------------------------------------------------------------
+\ The drawn sensor's pixel, in LiveData with the pick (BANK_DATA).
+SECTION LiveData
+
+\ lv_spot: whether the frame drew the indexed object A (the draw list's
+\ objects, by their slot's ob_ix): C set if so, and its face's pixel (the
+\ one the fill takes inside its square: (least x + 7) DIV 16, likewise y)
+\ as the crosshair's point: A = 2 px + 1, Y = VIEW_H - py. ACCCON's X put
+\ back as found.
+.lv_spot
+{
+    ZA_AUTO1 want, k, v, n, xs
+    ZA_AUTO2 lx, ly
+    STA want
+    LDA dl_n : BEQ none
+    STA k
+    LDA acccon : AND #ACCCON_X : STA xs
+    LDA #ACCCON_X : TRB acccon                  ; (ob_ix: main RAM's &3000 on)
+.object
+    DEC k
+    LDY k : LDX dl_obj,Y
+    LDA ob_ix,X : CMP want : BEQ found
+    LDA k : BNE object
+    LDA xs : TSB acccon
+.none
+    CLC
+    RTS
+.found
+    LDA xs : TSB acccon
+    \ its first face's least x and y
+    LDX dl_f0,Y
+    LDA tf_fv,X : STA v
+    LDA tf_fn,X : STA n
+    LDA #&FF : STA lx : STA ly
+    LDA #&7F : STA lx+1 : STA ly+1
+    LDY v
+.vertex
+    LDA out_vxl,Y : CMP lx : LDA out_vxh,Y : SBC lx+1 : BPL x_more
+    LDA out_vxl,Y : STA lx : LDA out_vxh,Y : STA lx+1
+.x_more
+    LDA out_vyl,Y : CMP ly : LDA out_vyh,Y : SBC ly+1 : BPL y_more
+    LDA out_vyl,Y : STA ly : LDA out_vyh,Y : STA ly+1
+.y_more
+    INY
+    DEC n : BNE vertex
+    \ (v + 7) DIV 16, each under VIEW_W or VIEW_H
+    LDA #VIEW_H : STA n
+    LDA ly : CLC : ADC #SUB DIV 2 - 1 : STA ly
+    LDA ly+1 : ADC #0
+    LSR A : ROR ly : LSR A : ROR ly : LSR A : ROR ly : LSR A : ROR ly
+    LDA n : SEC : SBC ly : TAY
+    LDA lx : CLC : ADC #SUB DIV 2 - 1 : STA lx
+    LDA lx+1 : ADC #0
+    LSR A : ROR lx : LSR A : ROR lx : LSR A : ROR lx : LSR A : ROR lx
+    LDA lx : ASL A : ORA #1
+    SEC
+    RTS
+}
+ASSERT SUB = 16
+ENDSECTION
+
+\ ---------------------------------------------------------------------------
+\ The interrupt's part, in LiveData with the lines: the main loop counts the
+\ fields.
+SECTION LiveData
+
+\ The lines of the sensors that fired on the screen ($BC0F), while they
+\ show: their points (as the crosshair's) and when they go (sl_gen, in
+\ Work, moves on as they change: lv_inputs); and in each buffer, those it
+\ has.
+.sl_n       SKIP 1
+.sl_x       SKIP SL_ENTRIES
+.sl_y       SKIP SL_ENTRIES
+.sl_until   SKIP 2
+.sb_n       SKIP 2
+.sb_x       SKIP 2 * SL_ENTRIES
+.sb_y       SKIP 2 * SL_ENTRIES
+
+\ lv_lines_init (lv_start's): no crosshair, laser or sensors' lines in
+\ either buffer, the sensors' test not due, their fields counted from now.
+.lv_lines_init
+    STZ lv_xon : STZ lv_xon+1
+    STZ lv_lon : STZ lv_lon+1 : STZ lz_on
+    STZ sn_due : STZ sn_shot : STZ sn_hold : STZ sn_more
+    LDA lv_now : STA sn_f0 : LDA lv_now+1 : STA sn_f0+1
+    STZ sl_n : STZ sb_n : STZ sb_n+1
+    RTS
+
+\ sn_clock (each loop): the interrupt's sensors ($BB93-$BC94), a field at
+\ a time for the fields counted since the last loop; none once the game is
+\ over. The lines off once their fields are done. A shot asks for the
+\ panel's values again (sn_shot).
+.sn_clock
+{
+    ZA_AUTO1 n
+    LDA sl_n : BEQ unlined
+    LDA lv_now : CMP sl_until : LDA lv_now+1 : SBC sl_until+1 : BMI unlined
+    STZ sl_n
+    INC sl_gen
+.unlined
+    \ (held by tools/livecheck.mjs: only the fields it asks for, sn_more)
+    LDA sn_hold : BEQ counting
+    LDA lv_now : STA sn_f0 : LDA lv_now+1 : STA sn_f0+1
+    LDA sn_more : STA n
+    STZ sn_more
+    BRA go
+.counting
+    LDA lv_now : SEC : SBC sn_f0 : STA n
+    LDA lv_now+1 : SBC sn_f0+1 : BEQ few
+    LDA #&FF : STA n                            ; (a long wait: as many as a byte counts)
+.few
+    LDA lv_now : STA sn_f0 : LDA lv_now+1 : STA sn_f0+1
+.go
+    LDA lv_over : BNE done
+    LDA n : BEQ done
+.field
+    JSR sn_field
+    DEC n : BNE field
+.done
+    RTS
+}
+
+\ sn_field: a field of the interrupt's sensors: each in its list counts
+\ round its interval, and one that's on fires at 0.
+.sn_field
+{
+    ZA_AUTO1 i
+    LDA SN_FIRING_N : BEQ done
+    STA i
+    LDX #0
+.entry
+    LDA SN_FIRING + 2,X : INC A
+    CMP SN_FIRING + 1,X : BNE counted
+    LDA #0
+.counted
+    STA SN_FIRING + 2,X
+    BNE next
+    LDA SN_FIRING + 3,X : BEQ next
+    CMP #1 : BNE fired
+    JSR sn_lines
+.fired
+    PHX
+    JSR sn_fire
+    PLX
+.next
+    TXA : CLC : ADC #SL_ENTRY : TAX
+    DEC i : BNE entry
+.done
+    RTS
+}
+
+\ sn_lines: the lines of the sensor at SN_FIRING + X from now, for
+\ SENSOR_LINES fields (decision 134). Keeps X.
+.sn_lines
+{
+    LDY sl_n : CPY #SL_ENTRIES : BCS full
+    LDA SN_FIRING + 4,X : STA sl_x,Y
+    LDA SN_FIRING + 5,X : STA sl_y,Y
+    INC sl_n
+    INC sl_gen
+    LDA lv_now : CLC : ADC #SENSOR_LINES : STA sl_until
+    LDA lv_now+1 : ADC #0 : STA sl_until+1
+.full
+    RTS
+}
+
+\ sn_fire ($BC6A): sound 2, and a unit of Shield (the panel's with it), or
+\ with none left the game over (1).
+.sn_fire
+{
+    LDA #2 : JSR snd_ask
+    LDA #1 : STA sn_shot
+    LDA Shield : BEQ out
+    DEC A : STA Shield : STA PanelShield
+    RTS
+.out
+    LDA #1 : STA GameOver
+    RTS
+}
+
+\ sl_eor: the lines of each sensor in this buffer's set (sb_*, X its
+\ index: draw_buffer) EORed into it: from each one's point to the view's
+\ top and bottom by its centre ($BC1B: (cx - 3, 0), (cx + 3, 0), (cx + 3,
+\ 2 cy), (cx - 3, 2 cy)), by the laser's line.
+.sl_eor
+{
+    ZA_AUTO1 j, k, sx0, sy0
+    LDA sb_n,X : BEQ done
+    STA j
+    TXA : ASL A : ASL A : ADC sl_buf,X          ; (X 5 X: the buffer's first)
+    STA k
+.sensor
+    LDY k
+    LDA sb_y,Y : PHA
+    LDA sb_x,Y : PLY
+    JSR lz_pixel : STX sx0 : STY sy0
+    LDY #3
+.line
+    PHY
+    LDA sl_ey,Y : BEQ bottom
+    LDA ViewCentre+1 : ASL A
+.bottom
+    PHA
+    LDA ViewCentre : CLC : ADC sl_dx,Y
+    PLY
+    JSR lz_pixel
+    STX lz_x1 : STY lz_y1
+    LDX sx0 : LDY sy0
+    JSR lz_line
+    PLY
+    DEY : BPL line
+    INC k
+    DEC j : BNE sensor
+.done
+    RTS
+.sl_buf     EQUB 0, 1                           ; (4 X + X: 5 X)
+.sl_dx      EQUB LO(-3), 3, 3, LO(-3)
+.sl_ey      EQUB 0, 0, 1, 1
+}
+ASSERT SL_ENTRIES = 5
+ENDSECTION

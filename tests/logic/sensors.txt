@@ -1,0 +1,21 @@
+# The guard sensors: after each redraw, the line of sight of each in range
+# (tools/logic/sensors.py: on the screen, the shot's pick at its point; off
+# it, a walk to it); between passes, the interrupt's shots at the shield
+# ("sensors": frames of it). Area 3's three sensors.
+goto 3 29
+O
+sensors 30
+O
+sensors 30
+O
+sensors 50
+Q x6
+sensors 30
+# Area 28's four, on the screen from entrance 19: in sight by the shot's
+# pick at each one's point, the lines and the shield's loss
+goto 28 19
+P
+L
+sensors 60
+U
+sensors 40

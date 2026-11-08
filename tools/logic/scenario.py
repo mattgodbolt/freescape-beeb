@@ -8,6 +8,8 @@ in-play snapshot (make zx: area 1, entrance 19, on the probe).
                       (never straight after a pass that leaves the input a
                       minute to take, as minute 9's does: the original's
                       input takes that one before the clock can end another)
+    sensors 50        50 frames of the interrupt's sensors between passes
+                      (the original's $BB93: their shots at the shield)
     goto 2 4          FCL GOTO area 2, entrance 4 (the original's $9D1C)
     fcl 15            FCL bytes, hex, run by $B320 (15: SWAPJET)
     shot 85 0A        FCL bytes run as a shot's (ShotFlag set)
@@ -61,6 +63,8 @@ def parse(text, name="scenario"):
                 raise ValueError(f"{where}: a tick takes no keys: {line!r}")
             for _ in range(repeat):
                 steps.append(Step("pass", where, keys=(), tick=True))
+        elif w0 == "sensors":
+            steps.append(Step("sensors", where, n=int(words[1])))
         elif w0 == "goto":
             steps.append(Step("fcl", where, code=[0x12, int(words[1]), int(words[2])], shot=False))
         elif w0 in ("fcl", "shot"):

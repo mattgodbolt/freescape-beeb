@@ -277,7 +277,21 @@ ZA_AUTO1 a1, a2, a3
     LDA (lk) : ORA #&40 : STA (lk)
     AND #&0F : CMP #2 : BNE drawn               ; a sensor leaves the interrupt's list
     LDA SensorList+1 : BEQ drawn
-    LDY #7 : LDA (lk),Y : JSR hook_sensor_off
+    LDY #7 : LDA (lk),Y : PHA
+    \ ($B467) its entry in the interrupt's list, of its count, goes off, and
+    \ the redraw's at the same place
+    LDX #0 : LDY SensorList+1
+.find
+    CMP SensorList + SL_FIRING,X : BEQ found
+    TXA : CLC : ADC #SL_ENTRY : TAX
+    PLA : PHA
+    DEY : BNE find
+    BRA stopped
+.found
+    STZ SensorList + SL_FIRING + 3,X
+    STZ SensorList + SL_FOUND + 3,X
+.stopped
+    PLA : JSR hook_sensor_off
 .drawn
     LDA NDrawn : BEQ done
     LDA FoundId : JSR hook_undraw : BCC done    ; it was in the last draw list

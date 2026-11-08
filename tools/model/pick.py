@@ -89,6 +89,18 @@ def laser_starts(centre_x):
     return [(1, 5), (2 * centre_x, 5), (5, 1), (2 * centre_x - 5, 1)]
 
 
+def sensor_pixels(x, y, centre_x, centre_y):
+    """Every pixel of a sensor's shot's four lines ($BC1B) at the BBC's
+    view: from its point (x, y, as the crosshair's) to (cx - 3, 0),
+    (cx + 3, 0), (cx + 3, 2 cy) and (cx - 3, 2 cy), each halved as the
+    crosshair is; a pixel past the view's bottom (y 0) isn't drawn."""
+    bx, by = cross_pixel(x, y)
+    out = []
+    for ex, ey in ((centre_x - 3, 0), (centre_x + 3, 0), (centre_x + 3, 2 * centre_y), (centre_x - 3, 2 * centre_y)):
+        out += line(bx, by, *cross_pixel(ex & 0xFF, ey & 0xFF))
+    return out
+
+
 def laser_pixels(cross_x, cross_y, centre_x):
     """Every pixel of the laser's four lines at the BBC's view, in drawing
     order (a pixel twice is EORed twice): each from its far end, halved as

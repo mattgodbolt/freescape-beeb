@@ -92,6 +92,26 @@ def view(s, db=None):
     return render.render(d, area, camera(s), followed=False)
 
 
+def frame(s):
+    """The BBC's frame of the state s as it stands now (the redraw after a
+    pass), made when first asked for: (view_of, shot), view_of() the view
+    (or None) and shot(t) the pick at t's crosshair in it, for
+    tools/logic/sensors.py's redraw."""
+    made = []
+
+    def view_of():
+        if not made:
+            made.append(view(s))
+        return made[0]
+
+    def pick_at(t):
+        v = view_of()
+        if v is None:
+            return None
+        return mpick.pick(v.faces, *mpick.cross_pixel(t.CrossX, t.CrossY))
+    return view_of, pick_at
+
+
 def shot(s, drawn=None):
     """$B153 at the BBC's view: the id of the object under the crosshair
     (s's, as the shot is fired) in the view of the state drawn (the pass's

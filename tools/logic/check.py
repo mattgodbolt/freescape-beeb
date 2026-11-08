@@ -34,9 +34,10 @@ from logic import fcl, move, scenario  # noqa: E402
 from logic.hooks import Hooks  # noqa: E402
 from logic.move import Freeze  # noqa: E402
 from logic.oracle import Original, SCRIPT, Waiting  # noqa: E402
-from logic.passes import run_pass  # noqa: E402
+from logic.passes import run_pass, waiting  # noqa: E402
 from logic.state import State, differences  # noqa: E402
 from logic import view as lview  # noqa: E402
+from logic import sensors as lsensors  # noqa: E402
 
 
 class OracleHooks(Hooks):
@@ -133,6 +134,66 @@ def note(before, after, keys):
         SEEN["shooting mode"] += 1
 
 
+SENSORS = collections.Counter()   # the sensors: frames run, shots, redraws' tests compared
+
+
+def sight_check(st, s, projected, redrawn):
+    """The redraw after a pass (tools/logic/sensors.py's redraw, from the
+    BBC's frame of the state after it), against the original's own: its
+    projection's list (projected, as $9841 begins) and its test's (redrawn,
+    after). Each list's count, and each entry's id, interval, counter and
+    state, but its point (each screen's own). Whether a sensor in range is
+    on the screen (state 1 or 2) is the renderer's, which differ by a pixel
+    at the view's edges (decision 132): an entry whose projected states
+    differ so is counted, not compared after its test, and nor is the
+    Collided the test leaves. On a copy: the next pass takes the original's."""
+    if projected is None or not lsensors.any_sensors(s):
+        return
+    t = s.copy()
+    view_of, shot = lview.frame(t)
+    if t.GameFlags & 0x04:
+        lsensors.project(t, view_of)
+    pre = bytes(t.mem[lsensors.FOUND_N:lsensors.FIRING])
+    lsensors.sight(t, shot)
+    if t.AreaChanged:
+        fcl.screen_update(t, Hooks())   # ($9841's next: the counters back to 2)
+    SENSORS["tests"] += 1
+    E, F, N = lsensors.ENTRY, lsensors.FOUND, lsensors.FOUND_N
+    bad = []
+    view = set()                        # entries whose projections differ by the screen
+    if pre[0] != projected[N]:
+        bad.append(f"the count projected: {projected[N]} {pre[0]}")
+    for i in range(min(pre[0], lsensors.ENTRIES)):
+        a = F + E * i
+        for k in range(4):
+            o, p = projected[a + k], pre[a - N + k]
+            if o == p:
+                continue
+            if k == 3 and o and p:
+                view.add(i)
+            else:
+                bad.append(f"${a + k:04X} projected: {o} {p}")
+    o, m = redrawn, t.mem
+    for base in (F, lsensors.FIRING):
+        for i in range(lsensors.ENTRIES):
+            for k in range(4):
+                if k == 3 and i in view:
+                    continue
+                a = base + E * i + k
+                if m[a] != o[a]:
+                    bad.append(f"${a:04X}: {o[a]} {m[a]}")
+    if m[lsensors.FIRING_N] != o[lsensors.FIRING_N]:
+        bad.append(f"the count firing: {o[lsensors.FIRING_N]} {m[lsensors.FIRING_N]}")
+    if view:
+        SENSORS["on the screen in one view only"] += len(view)
+    elif t.Collided != o[0x8A69]:
+        bad.append(f"Collided: {o[0x8A69]} {t.Collided}")
+    for i in range(pre[0]):
+        SENSORS[f"state {projected[F + E * i + 3]}"] += 1
+    if bad:
+        raise Mismatch(f"{st.line}: the redraw's sensors differ (original, transcription): " + ", ".join(bad))
+
+
 def run(steps, snap, verbose=False):
     """Run steps on both sides; returns the passes compared. Raises
     Mismatch at the first difference."""
@@ -151,6 +212,25 @@ def run(steps, snap, verbose=False):
             if got_o != want or got_p != want:
                 raise Mismatch(f"{st.line}: expected {st.name} = {want}: original {fmt(got_o)}, "
                                f"transcription {fmt(got_p)}")
+            continue
+        if st.kind == "sensors":
+            # frames of the interrupt's sensors, between passes: their shots
+            # (tools/logic/sensors.py's tick) from the lists the original's
+            # redraw left, which the state takes first
+            s.sync_from(orig.memory())
+            after = orig.sensors(st.n)
+            hooks = Hooks()
+            waiting(s, hooks)
+            for _ in range(st.n):
+                lsensors.tick(s, hooks)
+            SENSORS["frames"] += st.n
+            SENSORS["shots"] += sum(1 for n, a in hooks.log if n == "sound" and a == (2,))
+            last = after
+            diffs = differences(State(after).snapshot(), s.snapshot())
+            if diffs:
+                lines = [f"{st.line}: {len(diffs)} differ after {st.n} frames of the sensors (original, transcription):"]
+                lines += [f"  {name}: {fmt(a)}  {fmt(b)}" for name, a, b in diffs[:40]]
+                raise Mismatch("\n".join(lines))
             continue
         start = orig.begin(tick=getattr(st, "tick", False))
         s.sync_from(start)
@@ -188,6 +268,8 @@ def run(steps, snap, verbose=False):
                 alive = run_pass(s, st.keys, st.tick, hooks)
             passes += 1
             note(start, after, st.keys)
+            if alive != "over" and not any(n == "redraw" for n, _ in hooks.log):
+                sight_check(st, s, orig.projected, orig.redrawn)
         last = after
         o = State(after)
         if any(name == "redraw" for name, _ in hooks.log):
@@ -319,6 +401,8 @@ def main():
         print("FCL opcodes run: " + ", ".join(f"${op:02X} {n}" for op, n in sorted(fcl.RUN.items())))
     if SHOTS:
         print(f"shots picked from the BBC's view: {SHOTS['hit']} hit, {SHOTS['missed']} missed")
+    if SENSORS:
+        print("the sensors: " + ", ".join(f"{k} {v}" for k, v in sorted(SENSORS.items())))
     if REDRAWN[0]:
         print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
     if FROZE[0]:

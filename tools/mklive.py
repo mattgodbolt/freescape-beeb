@@ -197,6 +197,10 @@ def render_cameras(db, layout_areas, cameras):
             crosshair(rows, *c["cross"])
         if c.get("laser"):
             laser(rows, *c["laser"])
+        for x, y in c.get("slines", ()):
+            for px, py in pick.sensor_pixels(x, y, *c["centre"]):
+                if px < view.VIEW_W and py < view.VIEW_H:
+                    rows[py][px >> 1] ^= mode2_left(7) >> (px & 1)
         out.append([row.hex() for row in rows])
     return out
 
@@ -243,9 +247,10 @@ def trace(snap, out_path, paths):
     sys.path.insert(0, str(ROOT / "tools"))
     import logictrace
     from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen, view as lview
+    from logic import sensors as lsensors
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
-    from logic.passes import run_pass
+    from logic.passes import run_pass, waiting
     from logic.rig import message_text
     from logic.state import VARS, State, database, port_start
     lmove.FIX_CORNER = True     # decision 18: the port's logic
@@ -302,8 +307,15 @@ def trace(snap, out_path, paths):
     mem = port_start(snap_mem)          # decision 48: as the disc boots
     where = logictrace.regions(mem)
 
-    def then(s):
+    def then(s, redraws=False):
+        """What the disc does after a step, before the next pass: after a
+        pass that redraws, the sensors' test ($9841, on the BBC's frame
+        of its end: src/sensors.6502); then the screen's colours ($A77A),
+        once an area has loaded."""
         before = bytes(s.mem)
+        if redraws:
+            view_of, shot = lview.frame(s)
+            lsensors.redraw(s, shot, view_of)
         if s.AreaChanged:
             lfcl.screen_update(s, Hooks())
         return logictrace.changes(before, s.mem, where)
@@ -325,9 +337,19 @@ def trace(snap, out_path, paths):
             i += 1
             before = bytes(s.mem)
             rec = {"line": st.line}
-            seen["walks"], seen["loaded"] = [], False
+            seen["walks"], seen["loaded"], seen["first"] = [], False, False
+            redraws = False
             if st.kind == "frames":
                 rec["frames"] = st.n
+            elif st.kind == "sensors":
+                # frames of the sensors' clock (the disc's main loop counts
+                # them, src/sensors.6502's sn_clock): their shots' sounds
+                rec["sensors"] = st.n
+                hooks = Hooks()
+                waiting(s, hooks)       # (the input, its keys up, waits meanwhile)
+                for _ in range(st.n):
+                    lsensors.tick(s, hooks)
+                rec["sounds"] = [args[0] for name, args in hooks.log if name == "sound"]
             elif st.kind == "poke":
                 rec["poke"] = [st.addr, [v & 0xFF for v in st.values]]
                 for k, v in enumerate(st.values):
@@ -363,11 +385,15 @@ def trace(snap, out_path, paths):
                 # the laser fired: the crosshair its lines go to
                 if hooks.laser_at:
                     rec["laser"] = hooks.laser_at
+                # the redraw after it ($9807), and the sensors' test with it
+                redraws = alive != "over" and bool(s.GameFlags & 0x04 or s.GameFlags2 & 0x08)
             rec["changes"] = logictrace.changes(before, s.mem, where)
-            rec["then"] = then(s)
+            rec["then"] = then(s, redraws)
             out.append(rec)
             if rec.get("result") == 2 or (rec.get("result") == 1 and s.GameOver):
                 break               # the game is over: the original goes to its end
+            if st.kind == "sensors" and s.GameOver:
+                break               # (their shots ended it: the next pass goes to the end)
             if pending(s):
                 # The next pass comes at once, on the keys held then: the
                 # next step's, if it's a pass of keys (the scenario has

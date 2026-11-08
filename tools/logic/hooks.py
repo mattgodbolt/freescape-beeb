@@ -57,8 +57,18 @@ class Hooks:
         return False
 
     def sensor_off(self, s, obj_id):
-        """$B467: hiding a sensor stops it in the interrupt's list."""
+        """$B467: hiding a sensor stops it in the interrupt's list (which
+        tools/logic/sensors.py's off does: this is the note of it)."""
         self._note("sensor_off", obj_id)
+
+    def sensor_lines(self, s, x, y):
+        """$BC0F: the interrupt's four lines (EOR) from a sensor's point (x,
+        y, as the crosshair's) to the view's top and bottom by its centre."""
+        self._note("sensor_lines", x, y)
+
+    def border(self, s, colour):
+        """OUT ($FE): the border's colour (the interrupt's flash of a shot)."""
+        self._note("border", colour)
 
     # Shooting, the rigs and the rest.
     def laser(self, s):

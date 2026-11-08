@@ -90,8 +90,8 @@ def run(steps, start_mem, where):
     out = []
     over = False
     for st in steps:
-        if st.kind == "expect":
-            continue        # (checked against the original by make logic)
+        if st.kind in ("expect", "sensors"):
+            continue        # (checked against the original by make logic; the sensors' shots are the disc's)
         if over:
             break           # the game is over: the original goes to its end
         before = bytes(s.mem)

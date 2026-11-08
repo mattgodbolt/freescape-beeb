@@ -260,6 +260,16 @@ def input_pass(s, held, hooks):
             return True
 
 
+def waiting(s, hooks=None):
+    """The input with no key held and no minute: what its first part clears
+    before it waits ($9990), as between passes when time goes by (the
+    sensors' shots: a scenario's "sensors" step)."""
+    try:
+        input_pass(s, (), hooks or Hooks())
+    except NoInput:
+        pass
+
+
 def run_pass(s, keys=(), tick=False, hooks=None):
     """One pass's logic: the minute (if tick), the input and the events.
     Returns "over" if the input found the game over (the original goes to

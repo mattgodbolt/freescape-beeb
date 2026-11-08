@@ -55,6 +55,13 @@ SECTION LogicWork, org = LOGIC_WORK, guard = LOGIC_WORK_END, filename = "LOGICW"
 .Blocked        EQUB ZXI_Blocked        ; the move was stopped
 .Sound          EQUB ZXI_Sound          ; a sound to play after the screen's copy
 .SensorList     EQUB ZXI_SensorList     ; the sensors the redraw found (the renderer's), and their flash counters
+\ (the original's $8A24 on: the redraw's count, the interrupt's, the
+\ redraw's list and the interrupt's, SL_ENTRIES of SL_ENTRY bytes each:
+\ id, interval, counter, state, x, y; tools/logic/sensors.py)
+SL_ENTRY   = 6
+SL_ENTRIES = 5
+SL_FOUND   = 2
+SL_FIRING  = SL_FOUND + SL_ENTRY * SL_ENTRIES
 .EventsDue      EQUB ZXI_EventsDue      ; non-zero: run the events this pass
 .PanelEnergy    EQUB ZXI_PanelEnergy    ; the energy the panel shows
 .PanelShield    EQUB ZXI_PanelShield    ; the shield the panel shows

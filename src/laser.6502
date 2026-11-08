@@ -214,10 +214,10 @@ ASSERT SUB = 16 AND VIEW_W < 128 AND VIEW_H < 128   ; (centre: 16 A + 8 in 11 bi
 ASSERT OUT_VERTS = 256                          ; (a face's vertices by a byte's index)
 
 \ ---------------------------------------------------------------------------
-\ The lines, in LiveGlue with the crosshair (src/live.6502).
+\ The lines, in LiveData with the crosshair (src/live.6502).
 ZA_AUTO1 lz_x1, lz_y1, lz_t
 ZA_AUTO2 lz_at
-SECTION LiveGlue
+SECTION LiveData
 
 \ lz_eor: the laser's four lines to the crosshair at CrossX = A, CrossY = Y
 \ EORed into the buffer drawn: each from its far end ($AA5E: (1, 5), (2
