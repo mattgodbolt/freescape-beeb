@@ -106,9 +106,15 @@ ENDIF
 .hook_shot
     RTS
 
-\ hook_rig ($BEFA): D drills (A = &28) or C collects (A = &2A) a rig.
-.hook_rig
+\ hook_message ($93C4, $BCA6): the 14 characters at Y X (in LOGIC_BANK,
+\ which is in, or main RAM) shown, highlighted, in the panel's message
+\ line: the rigs' messages. The wait after it is hook_wait's.
+IF DEFINED(LOGIC_HOOK_MESSAGE)
+    hook_message = LOGIC_HOOK_MESSAGE
+ELSE
+.hook_message
     RTS
+ENDIF
 
 \ hook_info ($C3DC): I shows the information screen and waits for a key.
 .hook_info

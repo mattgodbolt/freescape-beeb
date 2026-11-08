@@ -1,0 +1,332 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the drilling rigs (tools/logic/rig.py: the
+\ original's $BEFA, D drills and C collects, with $C259 and $C29A;
+\ docs/research/zx-logic.md, "The rigs")
+\
+\ In LOGIC_CODE_BANK, with the pass. What reads the records or calls the
+\ area's code and the FCL is in LOGIC_BANK (src/logic/rigdb.6502, through
+\ src/logic/call.6502's far_rig_*), with the messages that never change;
+\ the two the figures go into are in LogicWork (RigFigures).
+\ ***************************************************************************
+
+\ MESSAGE a: the message at the original's a shown, for RIG_SHOWN frames.
+MACRO MESSAGE a
+    LDX #LO(msg(a)) : LDY #HI(msg(a)) : JSR rig_message
+ENDMACRO
+
+\ rig ($BEFA): action A, &28 drill or &2A collect, alone in the pass's keys.
+.rig
+{
+    ZA_AUTO1 act
+    STA act
+    LDA KeyCount : CMP #1 : BNE done
+    STA EventsDue
+    LDA AreaId : CMP #&13 : BMI rigged
+    MESSAGE &8C12                               ; AREA NEUTRAL
+    BRA refuse
+.rigged
+    DEC A : STA rig_c : TAX
+    LDY act : CPY #&28 : BNE collecting
+    LDA RigPlaced,X : BEQ vehicle
+    MESSAGE &8C9E                               ; ALREADY PLACED
+    BRA refuse
+.collecting
+    LDA RigPlaced,X : BNE vehicle
+    MESSAGE &8CAC                               ; NO RIG PLACED
+    BRA refuse
+.vehicle
+    LDA InJet : BEQ probe
+    MESSAGE &8C66                               ; NOT IN PROBE
+    BRA refuse
+.probe
+    LDA Energy : CMP #RIG_COST : BPL enough
+    MESSAGE &8C58                               ; ENERGY TOO LOW
+    BRA refuse
+.enough
+    LDA act : CMP #&28 : BNE collect
+    JMP drill
+.done
+    RTS
+}
+
+\ refuse ($C0EB): the message shown (already), and the panel's message
+\ after it.
+.refuse
+    LDA #&20 : TSB GameFlags2
+    RTS
+
+\ collect ($BF56): the rig's score taken back, its energy spent, the rig
+\ gone.
+.collect
+{
+    LDX rig_c
+    LDA RigState,X : STA rig_pct
+    STZ RigState,X
+    JSR yield
+    JSR rig_score
+    LDX #0
+    SEC
+    FOR i = 0..2
+        TXA : SBC rig_v + i : STA rig_v + i     ; (negated)
+    NEXT
+    JSR far_rig_score
+    JSR spend
+    LDX rig_c
+    LDA RigPlaced,X : STZ RigPlaced,X
+    CMP #3 : BNE gone
+    DEC FclVar32
+.gone
+    JSR rig_redraw
+    MESSAGE &8C82                               ; RIG COLLECTED
+    BRA rig_end
+}
+
+.spend
+    LDA Energy : SEC : SBC #RIG_COST : STA Energy
+    RTS
+
+\ rig_message ($C29A): the message at Y X shown, highlighted, then a wait.
+.rig_message
+    JSR far_rig_message
+    LDA #RIG_SHOWN : JMP wait
+
+\ rig_redraw ($C259, $C266): the rig's parts placed; PROCESSING shown and
+\ the view redrawn there and then, sound 5 after its copy, which wipes; the
+\ flags as they were kept for rig_end; a wait from before the redraw.
+ZA_AUTO1 rig_f, rig_f2                          ; the redraw flags before the redraw
+.rig_redraw
+{
+    JSR far_rig_parts
+    LDA GameFlags : STA rig_f
+    LDA GameFlags2 : STA rig_f2
+    LDA #4 : STA GameFlags : STA GameFlags2
+    LDX #LO(msg(&8C90)) : LDY #HI(msg(&8C90)) : JSR far_rig_message     ; PROCESSING
+    LDA #5 : STA Sound
+    LDA Wipe : PHA
+    LDA #1 : STA Wipe
+    JSR hook_redraw
+    PLA : STA Wipe
+    LDA #RIG_SHOWN : JMP wait
+}
+
+\ rig_end ($C245): the flags as they were, and the panel's message.
+.rig_end
+    LDA rig_f : STA GameFlags
+    LDA rig_f2 : ORA #&20 : STA GameFlags2
+    RTS
+
+\ yield: rig_yld = the area's yield, GasYields (an original's address in
+\ the mirror) + rig_c. (Before any rig found gas the pointer is 0, and the
+\ byte read means nothing: a rig that found none scores none.)
+.yield
+{
+    ZA_AUTO2 p
+    LDA GasYields : CLC : ADC rig_c : STA p
+    LDA GasYields+1 : ADC #0 : STA p+1
+    LDA p : CLC : ADC #LO(zxv - ZXV_ORG) : STA p
+    LDA p+1 : ADC #HI(zxv - ZXV_ORG) : STA p+1
+    LDA (p) : STA rig_yld
+    RTS
+}
+
+\ rig_score: rig_v = rig_pct * rig_yld * 10, the original's $928C then
+\ $910E (signed, but both factors are below &80: tools/mklogicdata.py
+\ checks the yields).
+.rig_score
+{
+    ZA_AUTO1 m
+    LDA rig_pct : STA m
+    STZ rig_v : STZ rig_v+1 : STZ rig_v+2
+    LDX #8
+.bit
+    JSR double
+    ASL m : BCC next
+    LDA rig_v : CLC : ADC rig_yld : STA rig_v
+    BCC next
+    INC rig_v+1
+.next
+    DEX : BNE bit
+    \ times 10: (4 v + v) * 2
+    LDA rig_v : PHA
+    LDA rig_v+1 : PHA
+    JSR double : JSR double
+    PLA : TAX : PLA
+    CLC : ADC rig_v : STA rig_v
+    TXA : ADC rig_v+1 : STA rig_v+1
+    BCC double
+    INC rig_v+2
+.double
+    ASL rig_v : ROL rig_v+1 : ROL rig_v+2
+    RTS
+}
+
+\ rig_cell: A = (Y X >> 6) AND 255, a coordinate's cell.
+.rig_cell
+{
+    ZA_AUTO1 t
+    STX t : TYA
+    ASL t : ROL A
+    ASL t : ROL A
+    RTS
+}
+
+\ drill ($BF9E): the rig in front of the probe, if it fits, and the gas it
+\ finds.
+.drill
+{
+    LDX PlayerX : LDY PlayerX+1 : JSR rig_cell : STA rig_b
+    LDX PlayerZ : LDY PlayerZ+1 : JSR rig_cell : STA rig_cz
+    \ the corner, by the yaw: the first sector the yaw is below (by the sign
+    \ of the byte's difference)
+    LDX #0
+    LDA Yaw
+.sector
+    CMP sectors,X : BMI found
+    INX : CPX #8 : BNE sector
+.found
+    LDA rig_b : CLC : ADC dbs,X : STA rig_b
+    LDA rig_cz : CLC : ADC dzs,X : STA rig_cz
+    \ the feet's cell
+    LDX PlayerY : LDY PlayerY+1 : JSR rig_cell
+    SEC : SBC BodyHeight : INC A                ; (- (BodyHeight - 1))
+    STA rig_h
+    JSR far_rig_suitable : BCS fits
+    MESSAGE &8C2E                               ; POS UNSUITABLE
+    JMP refuse
+.sectors    EQUB &05, &0E, &17, &20, &29, &32, &3B, &44
+.dbs        EQUB &FA, 0, 0, 0, &FA, &F4, &F4, &F4, &FA     ; -6 or -12 across x ...
+.dzs        EQUB 0, 0, &FA, &F4, &F4, &F4, &FA, 0, 0       ; ... and z
+.fits
+    JSR spend
+    LDA rig_c : ASL A : ADC rig_c : TAX         ; 3 cells an area
+    LDA rig_b : STA RigPositions,X
+    LDA rig_h : STA RigPositions+1,X
+    LDA rig_cz : STA RigPositions+2,X
+    JSR gas : BCS some
+    \ dry ($C21D): no gas there: the rig stays, and finds none
+    LDX rig_c
+    STZ RigState,X
+    STZ RigScratch
+    LDA #1 : STA RigPlaced,X
+    JSR rig_redraw
+    MESSAGE &8C20                               ; RIG POSITIONED
+    MESSAGE &8C74                               ; NO GAS FOUND
+    JMP rig_end
+.some
+    STA rig_pct : STA RigScratch
+    LDA GasChosen : BNE chosen
+    INC GasChosen
+    LDA SecondFrames : AND #&0F
+    CLC : ADC #LO(&88EB) : STA GasYields
+    LDA #HI(&88EB) : ADC #0 : STA GasYields+1
+.chosen
+    LDX rig_c
+    LDA rig_pct : STA RigState,X
+    LDY #2
+    CMP #&32 : BMI counted
+    INY
+    INC FclVar32
+    LDA FclVar32 : CMP #&12 : BNE counted
+    LDA #5 : STA GameOver
+.counted
+    TYA : STA RigPlaced,X
+    JSR yield
+    LDA rig_yld : STA RigScratch + 1
+    JSR rig_score
+    JSR far_rig_score
+    \ the figures: the yield's two digits (a leading 0 a space), the
+    \ percentage's three (two leading 0s spaces)
+    LDA rig_yld : JSR rig_digits
+    STX RigFigures + 2 : STA RigFigures + 3
+    LDA #'0' : CMP RigFigures + 2 : BNE yield_done
+    LDA #' ' : STA RigFigures + 2
+.yield_done
+    LDA rig_pct : JSR rig_digits
+    STY RigFigures + 15 : STX RigFigures + 16 : STA RigFigures + 17
+    LDX #0
+.space
+    LDA RigFigures + 15,X : CMP #'0' : BNE spaced
+    LDA #' ' : STA RigFigures + 15,X
+    INX : CPX #2 : BNE space
+.spaced
+    JSR rig_redraw
+    MESSAGE &8C20                               ; RIG POSITIONED
+    MESSAGE &8C3C                               ; "  nn000 CFT   "
+    MESSAGE &8C4A                               ; " nnn% SUCCESS "
+    JMP rig_end
+}
+
+\ gas ($C10D on): the rig's centre's distance d from the area's gas, |dx| +
+\ |dz| by the signs of bytes, then 100 - (d * 100 as the signed $928C) /
+\ the gas's reach ($91F1 on a positive 24-bit dividend). C set and A the
+\ percentage if that's above 0 as a signed word, else C clear.
+.gas
+{
+    ZA_AUTO1 d
+    ZA_AUTO2 v, q
+    LDA AreaGas : SEC : SBC rig_b : SEC : SBC #6 : JSR magnitude : STA d
+    LDA AreaGas+1 : SEC : SBC rig_cz : SEC : SBC #6 : JSR magnitude
+    CLC : ADC d : STA d
+    \ v = d * 100 (= 64 d + 32 d + 4 d), less 25600 for a d of &80 on
+    STZ v+1
+    ASL A : ROL v+1 : ASL A : ROL v+1           ; 4 d
+    LDX v+1 : STX q+1 : STA q
+    ASL A : ROL v+1 : ASL A : ROL v+1 : ASL A : ROL v+1    ; 32 d
+    PHA : CLC : ADC q : STA q
+    LDA v+1 : ADC q+1 : STA q+1
+    PLA : ASL A : ROL v+1                       ; 64 d
+    CLC : ADC q : STA v
+    LDA v+1 : ADC q+1 : STA v+1
+    BIT d : BPL positive
+    LDA v+1 : SEC : SBC #100 : STA v+1
+.positive
+    \ q = v DIV the reach (unsigned, 16 by 8)
+    STZ q : STZ q+1
+    LDA #0
+    LDX #16
+.bit
+    ASL v : ROL v+1 : ROL A
+    BCS take
+    CMP AreaGas+2 : BCC kept
+.take
+    SBC AreaGas+2
+    SEC
+.kept
+    ROL q : ROL q+1
+    DEX : BNE bit
+    \ 100 - q, a signed word: above 0 is the percentage
+    LDA #100 : SEC : SBC q : TAX
+    LDA #0 : SBC q+1 : BMI none
+    BNE some                                    ; (its low byte, as the original takes it)
+    TXA : BEQ none
+.some
+    TXA
+    SEC
+    RTS
+.none
+    CLC
+    RTS
+.magnitude
+    BPL plain
+    EOR #&FF : INC A
+.plain
+    RTS
+}
+
+\ rig_digits: A's last three decimal digits, as ASCII (the original's
+\ $9390): Y the hundreds, X the tens, A the units.
+.rig_digits
+{
+    LDY #'0' : LDX #'0'
+.hundreds
+    CMP #100 : BCC tens
+    SBC #100 : INY
+    BRA hundreds
+.tens
+    CMP #10 : BCC units
+    SBC #10 : INX
+    BRA tens
+.units
+    ORA #'0'
+    RTS
+}

@@ -44,6 +44,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import freescape  # noqa: E402
 from logic.oracle import Original  # noqa: E402
+from logic import rig  # noqa: E402
 from logic.passes import _action_of  # noqa: E402
 from logic.state import VARS, DATABASE, PASS_FIELDS, REPEAT_FIELDS, State, database, port_start  # noqa: E402
 
@@ -83,6 +84,15 @@ def word(m, a):
 
 def size_of(size):
     return size if isinstance(size, int) else size[1]
+
+
+def area_record(m, area_id):
+    base, table = word(m, 0x8912), word(m, 0x8914)
+    for i in range(m[DATABASE]):
+        a = base + word(m, table + 2 * i)
+        if m[a + 2] == area_id:
+            return a
+    raise KeyError(area_id)
 
 
 def areas(m):
@@ -131,6 +141,13 @@ def main():
     # one for ids below &13, as the original's JP P on the id less &13 picks
     # them: true of every id from 1 to &7F.
     assert all(0 < a < 0x80 for a, _ in areas(m)), "an area id outside 1-127"
+    # src/logic/rig.6502 multiplies a percentage by a yield unsigned, as the
+    # original's signed $928C does for yields below &80; and divides by the
+    # gas's reach, which it takes to be non-zero in every area with rigs.
+    assert max(m[rig.GAS_TABLE:rig.GAS_TABLE + 15 + 18]) < 0x80, "a gas yield of &80 or more"
+    for a, _ in areas(m):
+        if a < 0x13:
+            assert m[area_record(m, a) + 12], f"area {a}'s gas has no reach"
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "db.bin"), "wb") as f:
         f.write(db)
@@ -162,6 +179,13 @@ def main():
         blist("ZX_SINCOS", m[SINCOS:SINCOS + 144]),
         blist("ZX_KEY_TABLE", m[KEY_TABLE:KEY_TABLE + 3 * n3 + 2 * n2]),
         blist("ZX_KEY_CODES", m[KEY_CODES:KEY_CODES + 40]),
+        "\\ the rigs' messages, 14 characters each, but the two its figures go",
+        "\\ into (RigFigures, a variable): those before them, and those after",
+        f"ZX_RIG_MESSAGES = &{rig.AREA_NEUTRAL:04X}",
+        f"ZX_RIG_FIGURES = &{rig.CFT:04X}",
+        f"ZX_RIG_MESSAGES_B = &{rig.ENERGY_TOO_LOW:04X}",
+        blist("ZX_RIG_MSG_A", m[rig.AREA_NEUTRAL:rig.CFT]),
+        blist("ZX_RIG_MSG_B", m[rig.ENERGY_TOO_LOW:rig.NO_RIG_PLACED + rig.MESSAGE_LEN]),
         "",
         "\\ each key code's action from the key table, as $99EF finds it, and in",
         "\\ shooting mode",

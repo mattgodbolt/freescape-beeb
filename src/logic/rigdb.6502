@@ -1,0 +1,102 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the drilling rigs' part in LOGIC_BANK
+\ (src/logic/rig.6502 has the rest, and says what they do): what reads the
+\ records or calls the area's code and the FCL, the gas's distance, and
+\ the messages that never change. LOGIC_CODE_BANK's part calls these
+\ through main RAM (src/logic/call.6502's far_rig_*).
+\ ***************************************************************************
+
+\ The rig's state across its routines, in both banks.
+ZA_AUTO1 rig_c, rig_pct, rig_yld, rig_b, rig_h, rig_cz
+rig_v = RigScratch + 3                          ; the score's change: its instruction's operands
+
+RIG_SHOWN = 50              ; frames a message shows ($C29A), and the redraw's
+RIG_COST = 5                ; energy, to drill or collect
+RIG_W = 12                  ; the rig's cells across x and z ...
+RIG_H = &16                 ; ... and its height less one, for the clear test
+
+\ msg(a): where the original's message at a is: the two the figures go
+\ into in LogicWork (RigFigures), the rest here.
+FUNCTION msg(a) = WHERE(a < ZX_RIG_FIGURES, rig_msg_a + a - ZX_RIG_MESSAGES, WHERE(a < ZX_RIG_MESSAGES_B, RigFigures + a - ZX_RIG_FIGURES, rig_msg_b + a - ZX_RIG_MESSAGES_B))
+
+
+\ suitable ($C009-$C0E9): the rig at rig_b, rig_h, rig_cz inside the area's
+\ extent, standing on the floor or on the top of a shown cuboid that holds
+\ it, and no shown object in its box. C set if so.
+.suitable
+{
+    ZA_AUTO2 p
+    ZA_AUTO1 n, t
+    LDA AreaExtent+1 : DEC A : CMP rig_b : BPL no
+    LDA AreaExtent+5 : DEC A : CMP rig_cz : BPL no
+    LDA AreaExtent : SEC : SBC #RIG_W : CMP rig_b : BMI no
+    LDA AreaExtent+4 : SEC : SBC #RIG_W : CMP rig_cz : BMI no
+    LDA rig_h : BEQ clear
+    JSR first : BEQ no
+.platform
+    LDA (p) : AND #&4F : CMP #1 : BNE next_p    ; a shown cuboid
+    LDY #2 : LDA (p),Y : LDY #5 : CLC : ADC (p),Y : CMP rig_h : BNE next_p
+    LDY #1 : LDX rig_b : JSR holds : BCC next_p
+    LDY #3 : LDX rig_cz : JSR holds : BCS clear
+.next_p
+    JSR next : BNE platform
+.no
+    CLC
+    RTS
+.clear
+    JSR first : BEQ yes
+.object
+    LDA (p) : AND #&40 : BNE next_o
+    LDY #1 : LDX rig_b : JSR ends_before : BMI next_o
+    LDY #2 : LDX rig_h : JSR ends_before : BMI next_o
+    LDY #3 : LDX rig_cz : JSR ends_before : BMI next_o
+    LDA rig_b : CLC : ADC #RIG_W - 1 : LDY #1 : CMP (p),Y : BMI next_o
+    LDA rig_h : CLC : ADC #RIG_H : LDY #2 : CMP (p),Y : BMI next_o
+    LDA rig_cz : CLC : ADC #RIG_W - 1 : LDY #3 : CMP (p),Y : BPL no
+.next_o
+    JSR next : BNE object
+.yes
+    SEC
+    RTS
+    \ first: p the area's first record, n its objects; Z set if none
+.first
+    LDA AreaObjPtr : STA p
+    LDA AreaObjPtr+1 : STA p+1
+    LDA AreaObjects : STA n
+    RTS
+    \ next: p the next record; Z set after the last
+.next
+    LDY #8 : LDA (p),Y
+    CLC : ADC p : STA p
+    BCC same
+    INC p+1
+.same
+    DEC n
+    RTS
+    \ holds: the object's axis at Y (its cell; Y + 3 its size) holds the
+    \ rig's cells from X, by the original's signs: o - 6 < X and
+    \ o - 6 + size - 1 >= X. C set if so.
+.holds
+    STX t
+    LDA (p),Y : SEC : SBC #6 : CMP t : BPL out
+    INY : INY : INY
+    CLC : ADC (p),Y : DEC A : CMP t : BMI out
+    SEC
+    RTS
+.out
+    CLC
+    RTS
+    \ ends_before: N set if the object's axis at Y ends (cell + size - 1)
+    \ before X, by the sign
+.ends_before
+    STX t
+    LDA (p),Y : INY : INY : INY
+    CLC : ADC (p),Y : DEC A : CMP t
+    RTS
+}
+
+    \ the messages that never change
+.rig_msg_a  EQUB ZX_RIG_MSG_A
+.rig_msg_b  EQUB ZX_RIG_MSG_B
+ASSERT LEN(ZX_RIG_MSG_A) = ZX_RIG_FIGURES - ZX_RIG_MESSAGES
+ASSERT ZX_RIG_FIGURES = &8C3C AND ZX_RIG_MESSAGES_B = &8C3C + 28

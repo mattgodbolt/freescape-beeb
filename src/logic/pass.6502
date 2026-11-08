@@ -85,14 +85,14 @@
     JSR crosshair_action
     BRA next
 .not_cross
-    CMP #&28 : BEQ rig
-    CMP #&2A : BEQ rig
+    CMP #&28 : BEQ a_rig
+    CMP #&2A : BEQ a_rig
     CMP #&29 : BNE next
     JSR hook_info
     LDA #1
     RTS
-.rig
-    JSR hook_rig
+.a_rig
+    JSR rig
     LDA #1
     RTS
 .next

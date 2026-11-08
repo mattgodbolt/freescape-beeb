@@ -58,6 +58,39 @@ ENDMACRO
     LOGIC_PAGE A, LOGIC_CODE_BANK
     RTS
 
+\ The rigs' parts in LOGIC_BANK, from theirs in LOGIC_CODE_BANK
+\ (src/logic/rig.6502): far_rig_parts ($C259's $CD3B), the rig's parts
+\ placed, and the index after them (the 6502's own: the original scans the
+\ records); far_rig_score, the score += rig_v by the FCL's ADDSCORE, its
+\ instruction where the original makes it ($BEF6: RigScratch + 2 on) and
+\ run; the place suitable (src/logic/rigdb.6502, keeping C); a message
+\ shown (hook_message, with the messages' bank in).
+.far_rig_parts
+    LOGIC_PAGE A, LOGIC_BANK
+    JSR place_rigs
+    JSR index_objects
+    BRA rig_back
+.far_rig_score
+    LOGIC_PAGE A, LOGIC_BANK
+    LDA #LO(RigScratch + 2) : STA run.ip
+    LDA #HI(RigScratch + 2) : STA run.ip+1
+    LDA #4 : STA run.n
+    JSR run
+    BRA rig_back
+ASSERT ZXI_RigScratch[2] = 1                    ; (the instruction's ADDSCORE, which the original never writes)
+.far_rig_message
+    LOGIC_PAGE A, LOGIC_BANK
+    JSR hook_message
+    BRA rig_back
+.far_rig_suitable
+    LOGIC_PAGE Y, LOGIC_BANK
+    JSR suitable
+    LOGIC_PAGE Y, LOGIC_CODE_BANK
+    RTS
+.rig_back
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+    RTS
+
 \ far_answer: answer (LOGIC_BANK, which has the records) for touch
 \ (LOGIC_CODE_BANK), keeping A and C. Clobbers Y.
 .far_answer

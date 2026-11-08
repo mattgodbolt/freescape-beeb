@@ -81,6 +81,8 @@ SECTION LogicWork, org = LOGIC_WORK, guard = LOGIC_WORK_END, filename = "LOGICW"
 .MoveScratch    EQUB ZXI_MoveScratch    ; the move's target cells, crossing point and deltas
 .HitRemembered  EQUB ZXI_HitRemembered  ; touch's last solid hit
 .FclOp          EQUB ZXI_FclOp          ; the FCL instruction being run
+.RigFigures     EQUB ZXI_RigFigures     ; the rig's two messages its figures go into ("  00000 CFT   ", " 000% SUCCESS ")
+.RigScratch     EQUB ZXI_RigScratch     ; the rig's percentage and yield, then its score's FCL instruction
     \ The 6502's own.
 .logic_paged    EQUB 0                  ; the bank src/logic/call.6502 last paged in
     \ The index of the area's objects and the globals, in the original's
@@ -129,8 +131,10 @@ ClimbLimitScaled = zx(&8778)    ; ClimbLimit times AreaScale
 AreaScale       = zx(&8779)     ; the area's scale
 InJet           = zx(&877A)     ; non-zero in the jet
 RigPlaced       = zx(&877B)     ; a rig in each of areas 1-18 (0: none)
-RigState        = zx(&878D)     ; the rigs' second byte
-AreaGas         = zx(&87A0)     ; the area's header bytes 10-12
+RigState        = zx(&878D)     ; each rig's percentage of its area's gas
+GasChosen       = zx(&879F)     ; non-zero once GasYields is chosen
+AreaGas         = zx(&87A0)     ; the area's header bytes 10-12: the gas's cell x, z and reach
+GasYields       = zx(&87A3)     ; the yields, one an area: the original's address of one of GasTable's rotations
 Globals         = zx(&87A5)     ; the eight global objects' records
 RigPositions    = zx(&882C)     ; where each area's rig stands, 3 cells an area
     \ the area
@@ -157,6 +161,7 @@ AreaFlags       = zx(&889F)     ; the area's header byte 0
 CrossX          = zx(&88A0)     ; the crosshair, screen x
 CrossY          = zx(&88A1)     ; ... and y (up)
 CrossOn         = zx(&88A2)     ; non-zero: it's shown
+SecondFrames    = zx(&88A3)     ; the original's interrupt's frames into the second (nothing counts them here)
 ShootMode       = zx(&88AC)     ; non-zero: the movement keys move the crosshair
 CrossWanted     = zx(&88AD)     ; the crosshair outside shooting mode (key B)
 MinuteSeen      = zx(&88AE)     ; MinuteCount as the input last saw it
@@ -171,6 +176,7 @@ TurnTable       = zx(&88C9)     ; a count, then the turns
 Margin          = zx(&88D0)     ; how near a face the camera may stand
 ViewCentre      = zx(&88D9)     ; the crosshair's centre; its limits are twice it
 AreaExtent      = zx(&88DF)     ; x max, x min, y max, y min, z max, z min, in cells
+GasTable        = zx(&88EB)     ; the areas' gas yields, eighteen, in sixteen rotations
 NGlobals        = zx(&890F)     ; the global objects
 AreaChanged     = zx(&8910)     ; set by the area's load, cleared by the screen's colours
 EntranceId      = zx(&8911)     ; the entrance the area's load puts the camera at

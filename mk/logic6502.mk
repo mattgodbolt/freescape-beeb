@@ -34,7 +34,7 @@ L6SEED  ?= 100000
 ALL    += $(L6_BIN)
 CHECKS += logic6502
 
-$(L6_DATA) &: tools/mklogicdata.py tools/freescape.py tools/logic/state.py $(ZXSNAP) $(L6_TAPE)
+$(L6_DATA) &: tools/mklogicdata.py tools/freescape.py tools/logic/state.py tools/logic/rig.py $(ZXSNAP) $(L6_TAPE)
 	@mkdir -p $(L6_DIR)
 	$(PYTHON) -I tools/mklogicdata.py $(ZXSNAP) $(L6_TAPE) $(L6_DIR)
 
