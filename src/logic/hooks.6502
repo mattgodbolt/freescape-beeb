@@ -98,13 +98,22 @@ ENDIF
 
 \ hook_laser ($AA50-$AA8C): the laser's lines from the view's corners (EOR:
 \ called twice, to draw and to erase).
+IF DEFINED(LOGIC_HOOK_LASER)
+    hook_laser = LOGIC_HOOK_LASER
+ELSE
 .hook_laser
     RTS
+ENDIF
 
 \ hook_shot ($B153): the object under the crosshair into Collided, from
-\ the renderer's projected faces. Nothing is hit yet.
+\ the renderer's projected faces (unchanged if none is under it). Called
+\ with LOGIC_CODE_BANK paged: the live disc's is there (src/laser.6502).
+IF DEFINED(LOGIC_HOOK_SHOT)
+    hook_shot = LOGIC_HOOK_SHOT
+ELSE
 .hook_shot
     RTS
+ENDIF
 
 \ hook_message ($93C4, $BCA6): the 14 characters at Y X (in LOGIC_BANK,
 \ which is in, or main RAM) shown, highlighted, in the panel's message

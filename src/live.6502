@@ -220,6 +220,8 @@ IF LIVE_LOGIC
     LOGIC_HOOK_SOUND  = snd_ask
     LOGIC_HOOK_REDRAW = lv_hook_redraw
     LOGIC_HOOK_MESSAGE = lv_hook_message
+    LOGIC_HOOK_LASER  = lv_hook_laser
+    LOGIC_HOOK_SHOT   = lv_pick         ; (src/laser.6502: in BANK_DATA, which the pass has paged)
 ENDIF
 \ The vertical sync's interrupt plays the sounds (src/sound.6502).
 IRQ_TICK = snd_tick
@@ -275,6 +277,9 @@ SECTION LiveGlue, org = logic_db_code_end, guard = LOGIC_DB, filename = "LGLUE",
 ENDSECTION
 INCLUDE "../build/live/data.6502"
 INCLUDE "../build/sound/sound.6502"
+\ The laser's lines show for sound 1's fields (src/laser.6502, decision 130).
+LASER_FIELDS = SND_TICKS[1]
+ASSERT LASER_FIELDS > 0 AND LASER_FIELDS < 128
 
 \ Main RAM below &3000. First the rasteriser's state, which it reads and
 \ writes whatever ACCCON's X (the buffer it draws); LIVE straight after.
@@ -468,6 +473,11 @@ IF LIVE_LOGIC
     LDA lv_request : BEQ passing
     JSR lv_requested
 .passing
+    \ the laser's lines off once their fields are done
+    LDA lz_on : BEQ unlit
+    LDA lv_now : CMP lz_until : LDA lv_now+1 : SBC lz_until+1 : BMI unlit
+    STZ lz_on
+.unlit
     LDA lv_msg_on : BEQ no_messages
     JSR lv_messages
 .no_messages
@@ -681,6 +691,17 @@ SECTION Work
 .lv_xon         SKIP 2
 .lv_xx          SKIP 2
 .lv_xy          SKIP 2
+    \ the laser (src/laser.6502): fired in the pass (lv_hook_laser), and
+    \ the crosshair it's fired at; shown, and fields when it goes off; and
+    \ in each buffer, shown, x, y
+.lv_lzn         SKIP 1
+.lz_x           SKIP 1
+.lz_y           SKIP 1
+.lz_on          SKIP 1
+.lz_until       SKIP 2
+.lv_lon         SKIP 2
+.lv_lx          SKIP 2
+.lv_ly          SKIP 2
 ENDSECTION
 ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 ASSERT lv_y = lv_x + 2 AND lv_z = lv_x + 4 AND lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2
@@ -694,6 +715,7 @@ SECTION LiveBoot
     STZ lv_repeat : STZ lv_repeat+1
     STZ lv_request
     STZ lv_xon : STZ lv_xon+1
+    STZ lv_lon : STZ lv_lon+1 : STZ lz_on
     LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
     LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
     JMP lv_requested
@@ -760,6 +782,15 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA lv_over : BEQ alive
     RTS
 .alive
+    \ The shot's pick is from the frame last drawn (src/laser.6502), which
+    \ must be the logic's camera, as the original's is its last redraw: so a
+    \ pass that may fire waits while the last pass's frames show, until the
+    \ frame of its end is drawn (the loop after: lv_camera ends them).
+    LDA an_on : BEQ ready
+    LDA keys + K_0 DIV 8 : ORA keys_made + K_0 DIV 8
+    AND #1 << (K_0 AND 7) : BEQ ready
+    RTS
+.ready
     \ (keys_made read, not taken: a key the vertical sync reads after this
     \ waits for the next loop. A minute's end brings its pass whatever is
     \ held, as the original's input takes it without waiting for a key.)
@@ -794,7 +825,7 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA Pitch : JSR mod72 : STA an_a0+1
     LDA Roll : JSR mod72 : STA an_a0+2
     STZ lv_walks : STZ lv_loaded : STZ lv_wait
-    STZ lv_rigged : STZ lv_msg_n
+    STZ lv_rigged : STZ lv_msg_n : STZ lv_lzn
     LDA #ACCCON_X : TSB acccon                  ; (LogicFaces: shadow RAM's)
     JSR logic_go_pass
     TAX
@@ -809,6 +840,13 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     PAGE_IN BANK_DATA
     JSR live_lines                              ; ("game over")
 .ran
+    \ the laser fired: its lines from now, for LASER_FIELDS (the pass's
+    \ waits hold the next pass that long: lv_hook_laser)
+    LDA lv_lzn : BEQ unfired
+    LDA #1 : STA lz_on
+    LDA lv_now : CLC : ADC #LASER_FIELDS : STA lz_until
+    LDA lv_now+1 : ADC #0 : STA lz_until+1
+.unfired
     \ The next pass after the waits the pass asked for, and on a reading of
     \ the keys made after this pass ends (the vertical sync's, a field
     \ apart): a pass that shows nothing needn't wait for a frame (live.md,
@@ -881,6 +919,22 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     RTS
 }
 ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
+
+\ lv_hook_laser (hook_laser, $AA50): the original draws the lines, plays
+\ sound 1 and takes them off, the game held meanwhile. The first call of a
+\ pass keeps the crosshair it's fired at, and holds the next pass for the
+\ lines' fields (as hook_wait); the disc shows them from the pass's end
+\ (lv_pass) in the frames of those fields.
+.lv_hook_laser
+{
+    LDA lv_lzn : BNE drawn
+    INC lv_lzn
+    LDA CrossX : STA lz_x
+    LDA CrossY : STA lz_y
+    LDA #LASER_FIELDS : JMP lv_hook_wait
+.drawn
+    RTS
+}
 
 \ lv_hook_loaded (hook_loaded): an area is loading.
 .lv_hook_loaded
@@ -1210,7 +1264,8 @@ VW_CAM   = 0                   ; vw_rec: lv_cam's bytes ...
 VW_AREA  = LV_CAM_BYTES         ; ... lv_entered ...
 IF LIVE_LOGIC
     VW_CROSS = VW_AREA + 1      ; ... CrossOn (0 or 1), CrossX, CrossY (0 when off) ...
-    VW_HID   = VW_CROSS + 3     ; ... and each index's flags AND IX_HIDDEN
+    VW_LASER = VW_CROSS + 3     ; ... the laser: lz_on, lz_x, lz_y (0 when off) ...
+    VW_HID   = VW_LASER + 3     ; ... and each index's flags AND IX_HIDDEN
     VW_BYTES = VW_HID + IX_MAX
 ELSE
     VW_BYTES = VW_AREA + 1
@@ -1226,6 +1281,12 @@ ASSERT VW_CAM = 0 AND IX_MAX <= 128
     LDA lv_cam,X : CMP vw_rec,X : BNE camera_new
 .camera_next
     DEX : BPL camera
+    BRA area
+.camera_new
+    STA vw_rec,X
+    LDA #&FF : STA vw_new
+    BRA camera_next
+.area
     LDX #VW_AREA : LDA lv_entered : JSR vw_byte
 IF LIVE_LOGIC
     \ (ix_flags change only by logic_go_shown, which sets vw_flags)
@@ -1248,18 +1309,25 @@ IF LIVE_LOGIC
     LDA CrossOn : BEQ off
     LDA #1 : JSR vw_byte
     INX : LDA CrossX : JSR vw_byte
-    INX : LDA CrossY : JMP vw_byte
+    INX : LDA CrossY : JSR vw_byte
+    BRA laser
 .off
+    JSR vw_byte                                 ; (A is 0)
+    INX : LDA #0 : JSR vw_byte
+    INX : LDA #0 : JSR vw_byte
+.laser
+    INX
+    LDA lz_on : BEQ dark
+    JSR vw_byte
+    INX : LDA lz_x : JSR vw_byte
+    INX : LDA lz_y : JMP vw_byte
+.dark
     JSR vw_byte                                 ; (A is 0)
     INX : LDA #0 : JSR vw_byte
     INX : LDA #0 : JMP vw_byte
 ELSE
     RTS
 ENDIF
-.camera_new
-    STA vw_rec,X
-    LDA #&FF : STA vw_new
-    BRA camera_next
 \ vw_byte: A, the input at vw_rec + X, against the record: if it differs,
 \ the record takes it and vw_new is set. Keeps X and Y.
 .vw_byte
@@ -1717,6 +1785,13 @@ ASSERT lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2 AND STEPS_TURN = 72
 .lv_cross_off
 {
     LDX draw_buffer
+    LDA lv_lon,X : BEQ no_laser                 ; (the laser's lines likewise)
+    STZ lv_lon,X
+    LDY lv_ly,X
+    LDA lv_lx,X
+    JSR lz_eor
+    LDX draw_buffer
+.no_laser
     LDA lv_xon,X : BEQ none
     STZ lv_xon,X
     LDY lv_xy,X
@@ -1728,6 +1803,13 @@ ASSERT lv_pitch = lv_yaw + 1 AND lv_roll = lv_yaw + 2 AND STEPS_TURN = 72
 .lv_cross_on
 {
     LDX draw_buffer
+    LDA lz_on : STA lv_lon,X : BEQ no_laser     ; (the laser's lines, while they show)
+    LDA lz_x : STA lv_lx,X
+    LDY lz_y : TYA : STA lv_ly,X
+    LDA lz_x
+    JSR lz_eor
+    LDX draw_buffer
+.no_laser
     LDA CrossOn : STA lv_xon,X : BEQ none
     LDA CrossX : STA lv_xx,X
     LDY CrossY : TYA : STA lv_xy,X
@@ -2058,6 +2140,11 @@ ENDSECTION
 
 .live_end
 ENDSECTION
+
+\ The laser: the shot's pick (in LiveData) and its lines (in LiveGlue).
+IF LIVE_LOGIC
+INCLUDE "laser.6502"
+ENDIF
 
 \ Where each section ends, for the next's org and the clearing.
 SECTION ObjCode

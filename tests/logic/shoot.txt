@@ -1,0 +1,71 @@
+# The laser (0, in or out of shooting mode, with the crosshair shown): the
+# object under the crosshair is Collided, and its shot instructions run
+# (FCL bit 7). From the start's view, area 1 entrance 19 (tools/logic/view.py
+# picks from the BBC's view of the same camera, and the original's own pick
+# must agree: decision 131). The crosshair is put where the target is.
+# The game starts with the crosshair shown, at the view's centre: on
+# object 14 (whose shot hides it and scores 250) from here.
+SPACE
+# the sky: nothing hit
+poke 88A0 96 5A
+0
+expect Collided 0
+# object 14, a cuboid whose shot hides it and scores 250
+poke 88A0 32 37
+0
+expect Collided 14
+expect Score 250
+# ... and behind it, now it's gone, the sky
+0
+expect Collided 0
+expect Score 250
+# the floor, which has no shot instructions
+poke 88A0 68 14
+0
+expect Collided 1
+# object 11, a pyramid, whose shot hides it and its doorway (20)
+poke 88A0 92 3E
+0
+expect Collided 11
+# the tall cuboid (15), whose shot only sounds
+poke 88A0 53 5F
+0
+expect Collided 15
+# moved and fired in one pass: the crosshair moves first (the keyboard's
+# order), and the shot is at it
+W 0
+expect Collided 15
+SPACE
+# out of shooting mode, with the crosshair shown (B): at its centre, the
+# floor's edge
+B
+0
+B
+0
+expect Collided 0
+# A cuboid high over area 1 (28), whose shot destroys it: energy, shield
+# and score. (The original picks from its last redraw, so a look up and
+# back down redraws after the camera's put there.)
+goto 1 22
+angles 69 36 0
+P
+L
+SPACE
+poke 88A0 47 3E
+0
+expect Collided 28
+SPACE
+# A sensor (a pixel), area 28's 17, seen from entrance 19, where the
+# original's pixel is one of the two the BBC's pixel covers (it isn't
+# from every view: the projections differ by up to a pixel), and the
+# column beside it, the wall behind
+goto 28 19
+P
+L
+SPACE
+poke 88A0 73 32
+0
+expect Collided 17
+poke 88A0 75 32
+0
+expect Collided 12

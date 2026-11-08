@@ -257,14 +257,19 @@ const LV_ENTERED = syms.lv_entered;
 const genNow = () => (LV_ENTERED === undefined ? 0 : ram[LV_ENTERED]);
 const IX_FLAGS = FREE ? 0 : sym("ix_flags"), IX_MAX = FREE ? 0 : sym("IX_MAX");
 const CROSS_ON = FREE ? 0 : sym("CrossOn"), CROSS_X = FREE ? 0 : sym("CrossX"), CROSS_Y = FREE ? 0 : sym("CrossY");
+// the laser's lines (src/laser.6502): shown, at the crosshair as fired, and
+// the view's centre the far ends are from
+const LZ_ON = FREE ? 0 : sym("lz_on"), LZ_X = FREE ? 0 : sym("lz_x"), LZ_Y = FREE ? 0 : sym("lz_y");
+const VIEW_CENTRE = FREE ? 0 : sym("ViewCentre");
 const hiddenOf = (flags) => flags.map((v) => v & 0x60).join(",");
 const inputsOf = (f) => `area ${f.area} (entered ${f.gen}), camera ${f.camera}` +
-    (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}`);
+    (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}, laser ${f.laser ?? "off"}`);
 function inputsNow() {
     const f = { area: ram[LV_AREA], gen: genNow(), camera: camera() };
     if (!FREE) {
         f.hiddenAll = hiddenOf([...ram.subarray(IX_FLAGS, IX_FLAGS + IX_MAX)]);
         f.cross = ram[CROSS_ON] ? [ram[CROSS_X], ram[CROSS_Y]] : null;
+        f.laser = ram[LZ_ON] ? [ram[LZ_X], ram[LZ_Y], ram[VIEW_CENTRE]] : null;
     }
     return inputsOf(f);
 }
@@ -356,6 +361,8 @@ cpu.debugInstruction.add((addr, opcode) => {
         onLoop();
     } else if (!FREE && addr === LIVE_PASSED) {
         onPassed(cpu.a);
+    } else if (!FREE && addr === LV_LASERED) {
+        if (onLasered) onLasered();
     } else if (!FREE && addr === LV_TAKING) {
         lastTaking = now();
         passAsks = sounds.log().asks.length;
@@ -452,6 +459,9 @@ cpu.debugInstruction.add((addr, opcode) => {
             // the crosshair this buffer has (lv_cross_on)
             const b = ram[sym("draw_buffer")];
             current.cross = ram[LV_XON + b] ? [ram[LV_XX + b], ram[LV_XY + b]] : null;
+            // ... and the laser's lines it has
+            current.laser = ram[LV_LON + b] ? [ram[LV_LX + b], ram[LV_LY + b], ram[VIEW_CENTRE]] : null;
+            if (current.laser) laserFrames++;
         }
         current.inputs = inputsOf(current);
         // nothing is drawn again that's drawn already (the idle loop)
@@ -738,6 +748,10 @@ const LV_TAKING = FREE ? -1 : sym("lv_pass.timed"); // (where a pass takes the k
 let lastTaking = null;
 let passAsks = 0, passSoundsOk = 0, soundsAsked = 0; // (the sounds asked for since the pass began)
 const LV_XON = FREE ? 0 : sym("lv_xon"), LV_XX = FREE ? 0 : sym("lv_xx"), LV_XY = FREE ? 0 : sym("lv_xy");
+const LV_LON = FREE ? 0 : sym("lv_lon"), LV_LX = FREE ? 0 : sym("lv_lx"), LV_LY = FREE ? 0 : sym("lv_ly");
+let laserFrames = 0, lasersOk = 0, lasersShown = 0;
+const LV_LASERED = FREE ? -1 : sym("lv_pass.unfired"); // (lv_pass has set the laser's lines up)
+let onLasered = null;
 let summary = "";
 let pace = null; // (the logic's disc: the taps and the held keys' passes, reported below)
 if (!FREE) await logicScript();
@@ -916,6 +930,7 @@ async function logicScript() {
     const passLog = []; // each pass that ran: what its frames are to show
     let overs = 0;
     const REPEAT_FIELDS = sym("REPEAT_FIELDS");
+    const LASER_FIELDS = sym("LASER_FIELDS");
     let tapUntil = null, taps = 0;
     // the pace: the fields counted (lv_now) at the last pass that took a key
     // gone down, and the fields from each pass to a pass after it on the
@@ -1014,6 +1029,19 @@ async function logicScript() {
         passLog.push({ where, P0, P1: expCamera(), walks, loaded: rec.loaded, area0, n: passLog.length, flags0, globals0,
             margin: exp[0x88d0], run: script, t: tPass, made, messages: rec.messages ?? [] });
         passMessages = rec.messages ?? [];
+        // the laser: checked once lv_pass has set its lines up (onLasered)
+        onLasered = () => {
+            onLasered = null;
+            // fired where the transcription fired it, its lines shown from
+            // the pass for LASER_FIELDS (src/live.6502's lv_pass)
+            if (rec.laser) {
+                const until = (V16("lz_until") - tPass) & 0xffff;
+                if (!V("lv_lzn") || !V("lz_on") || V("lz_x") !== rec.laser[0] || V("lz_y") !== rec.laser[1] || until !== LASER_FIELDS)
+                    fail(`${where}: the laser at ${V("lz_x")},${V("lz_y")} (fired ${V("lv_lzn")}, shown ${V("lz_on")}, for ${until} fields), ` +
+                        `the transcription's at ${rec.laser}, for ${LASER_FIELDS}`);
+                else lasersOk++;
+            } else if (V("lv_lzn")) fail(`${where}: the laser fired, the transcription's didn't`);
+        };
         for (const [ad, v] of rec.then) exp[ad] = v;
     };
     // Each frame: the animation's state as lv_camera left it, the logic's
@@ -1367,7 +1395,7 @@ async function freeScript() {
 // --- Every frame shown against the model.
 const requests = [];
 const keyOf = (f) => `${f.area}:${f.camera.join(",")}:${f.hidden ? f.hidden.map(Number).join("") : ""}:${f.cross ?? ""}:` +
-    `${f.globals ? f.globals.join(";") : ""}`;
+    `${f.globals ? f.globals.join(";") : ""}:${f.laser ?? ""}`;
 const index = new Map();
 for (const { frame } of shown) {
     if (frame.camera.slice(3).some((a) => a >= 72) || frame.camera.slice(0, 3).some((v) => v >= 0x8000)) {
@@ -1381,6 +1409,7 @@ for (const { frame } of shown) {
         if (frame.hidden) r.hidden = frame.hidden;
         if (frame.globals) r.globals = frame.globals;
         if (frame.cross) r.cross = frame.cross;
+        if (frame.laser) r.laser = frame.laser;
         requests.push(r);
     }
 }
@@ -1393,6 +1422,14 @@ const py = spawnSync(path.join(root, ".venv/bin/python"), ["-I", path.join(root,
 if (py.status !== 0) throw new Error(`the model's render failed: ${py.stderr}`);
 const views = JSON.parse(py.stdout);
 let compared = 0, wrong = 0;
+{
+    // each shot's lines came to the screen (a flip showed them)
+    let last = null;
+    for (const { frame } of shown) {
+        if (frame.laser && String(frame.laser) !== String(last)) lasersShown++;
+        last = frame.laser ?? null;
+    }
+}
 for (const { frame, rows } of shown) {
     const want = views[index.get(keyOf(frame))];
     compared++;
@@ -1527,7 +1564,8 @@ const row = (label, fs) => {
 console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
     `${compared - wrong} the model's view byte for byte (${requests.length} views); ` +
     `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ` +
-    `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times`);
+    `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times` +
+    (FREE ? "" : `; ${lasersOk} shots' lasers fired as the transcription's, ${lasersShown} shown, ${laserFrames} frames with the lines`));
 if (pace) {
     const rate = ([d, f], unit) => (f ? `${((2e6 / FIELD_CYCLES) * d / f).toFixed(1)} ${unit} a second over ${f} fields` : "-");
     console.log(`${NAME}: the pace: ${pace.taps} taps held ${sym("REPEAT_FIELDS") - 2} fields, each one pass; ` +

@@ -44,7 +44,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.model import camera as cam, parts, render, view, writer  # noqa: E402
+from tools.model import camera as cam, parts, pick, render, view, writer  # noqa: E402
 
 LIVE_STEP = 32                      # world units a frame's step: half a cell
 AREA_IDS = 128                      # the logic's area ids are below this (tools/mklogicdata.py's check)
@@ -157,13 +157,24 @@ def crosshair(rows, cross_x, cross_y):
             rows[py][px >> 1] ^= mode2_left(7) >> (px & 1)
 
 
+def laser(rows, cross_x, cross_y, centre_x):
+    """The laser's lines as src/live.6502 draws them (lv_laser_eor): the
+    original's four ($AA50), each from a bottom corner of the view to the
+    crosshair, at the BBC's half width (tools/model/pick.py), each pixel
+    EORed with colour 7 as the crosshair's are."""
+    for px, py in pick.laser_pixels(cross_x, cross_y, centre_x):
+        if px < view.VIEW_W and py < view.VIEW_H:
+            rows[py][px >> 1] ^= mode2_left(7) >> (px & 1)
+
+
 def render_cameras(db, layout_areas, cameras):
     """Each request's view: {"area": its directory index, "camera": [x, y,
     z, yaw, pitch, roll]}, and with the logic "hidden" (each object's, in
     the logic's index order: the area's records, then the globals),
     "globals" (each global's cell, [x, y, z], as the logic's records have
-    it: the rig's parts move) and "cross" ([CrossX, CrossY] if it's
-    shown)."""
+    it: the rig's parts move), "cross" ([CrossX, CrossY] if it's
+    shown) and "laser" ([CrossX, CrossY, the view's centre x] as it was
+    fired, while its lines show)."""
     by_id = {a["id"]: a for a in db["areas"]}
     out = []
     for c in cameras:
@@ -184,6 +195,8 @@ def render_cameras(db, layout_areas, cameras):
         rows = [bytearray(row) for row in writer.view_bytes(v.lines)]
         if c.get("cross"):
             crosshair(rows, *c["cross"])
+        if c.get("laser"):
+            laser(rows, *c["laser"])
         out.append([row.hex() for row in rows])
     return out
 
@@ -229,7 +242,7 @@ def trace(snap, out_path, paths):
     in ends its run: the disc would hang too."""
     sys.path.insert(0, str(ROOT / "tools"))
     import logictrace
-    from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen
+    from logic import area as larea, fcl as lfcl, move as lmove, scenario as lscen, view as lview
     from logic.hooks import Hooks
     from logic.oracle import Original, SCRIPT
     from logic.passes import run_pass
@@ -253,6 +266,21 @@ def trace(snap, out_path, paths):
         def message(self, s, addr):
             super().message(s, addr)
             self.messages.append(message_text(s.mem, addr))
+
+        def laser(self, s):
+            """The laser's lines, from the crosshair as it's fired
+            (lv_hook_laser keeps it as the first of the two calls)."""
+            super().laser(s)
+            if self.laser_at is None:
+                self.laser_at = [s.CrossX, s.CrossY]
+
+        def shot(self, s):
+            """$B153: the object under the crosshair in the frame the disc
+            last drew, the state's as the pass began (decision 131)."""
+            super().shot(s)
+            hit = lview.shot(s, self.start)
+            if hit is not None:
+                s.Collided = hit
     real_move, real_keep, real_load = lmove.move, lmove.keep_clear, larea.load_area
 
     def move(s):
@@ -315,6 +343,8 @@ def trace(snap, out_path, paths):
                 rec["tick"] = bool(st.tick)
                 hooks = LiveHooks()
                 hooks.messages = []
+                hooks.laser_at = None
+                hooks.start = s.copy()
                 try:
                     alive = run_pass(s, st.keys, st.tick, hooks)
                 except lmove.Freeze:
@@ -330,6 +360,9 @@ def trace(snap, out_path, paths):
                 # the messages it showed (the rigs'), as their text then
                 if hooks.messages:
                     rec["messages"] = hooks.messages
+                # the laser fired: the crosshair its lines go to
+                if hooks.laser_at:
+                    rec["laser"] = hooks.laser_at
             rec["changes"] = logictrace.changes(before, s.mem, where)
             rec["then"] = then(s)
             out.append(rec)

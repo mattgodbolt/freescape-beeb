@@ -316,7 +316,10 @@ def build(snap, outdir, edges=None):
                    "sounds": {str(k): v for k, v in sounds.items()}}, f)
     with open(os.path.join(outdir, "sound.6502"), "w") as f:
         f.write(HEADER + "\n")
-        f.write(f"SND_SOUNDS = {drv.SOUNDS}\nSND_BYTES = {len(blob)}\n\n")
+        f.write(f"SND_SOUNDS = {drv.SOUNDS}\nSND_BYTES = {len(blob)}\n")
+        # each sound's fields (its ticks), by number from 0 (none): what the
+        # laser's lines show for (src/live.6502)
+        f.write("SND_TICKS = {0, " + ", ".join(str(len(sounds[n]["ticks"])) for n in range(1, drv.SOUNDS + 1)) + "}\n\n")
         f.write("SECTION SoundData\n")
         f.write("\\ each sound's script, 1 to SND_SOUNDS: low bytes, then high\n.snd_index_lo\n")
         f.write("    EQUB " + ", ".join(f"LO(snd_scripts + {index[n]})" for n in range(1, drv.SOUNDS + 1)) + "\n")

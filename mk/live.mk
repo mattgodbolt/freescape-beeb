@@ -45,7 +45,8 @@ LIVE_SOURCES = src/live.6502 src/panel.6502 src/defs.6502 src/zp.6502 src/macros
 LIVE_SHOTS  ?= 0 18 26 40 57
 # (every scenario of tests/logic/ but keys, whose E the disc doesn't read)
 LIVE_SCENARIOS ?= walls climb fall fall-high doors edge rise fcl jet ticks minutes steps turns corner crosshair \
-                  fuzz-23 fuzz-28 fuzz-30 fuzz-34 fuzz-47 fuzz-109 fuzz-1239 fuzz-1244 pace rigs rig-sensor rig-win
+                  fuzz-23 fuzz-28 fuzz-30 fuzz-34 fuzz-47 fuzz-109 fuzz-1239 fuzz-1244 pace rigs rig-sensor rig-win \
+                  shoot
 # mk/maths.mk, mk/objects.mk and mk/logic6502.mk name these too, but are
 # read after this file.
 MATHS_GEN   ?= build/maths/consts.6502 build/maths/tables.6502
@@ -89,7 +90,7 @@ $(LIVE_FREE) $(LIVE_FREE:.ssd=-loader.json) &: $(LOADER_SOURCES) $(LIVE_FREE_DIR
 
 # The scenarios' passes, as the transcription takes them, with the
 # segments its moves walked (tools/mklive.py --trace).
-$(LIVE_TRACE): tools/mklive.py tools/logictrace.py $(wildcard tools/logic/*.py) $(ZXSNAP) \
+$(LIVE_TRACE): tools/mklive.py tools/logictrace.py $(wildcard tools/logic/*.py) $(ZXSNAP) $(DATA_JSON) $(MODEL_PY) \
                $(foreach s,$(LIVE_SCENARIOS),tests/logic/$(s).txt)
 	@mkdir -p $(LIVE_DIR)
 	$(PYTHON) -I tools/mklive.py --trace $(ZXSNAP) $@ $(foreach s,$(LIVE_SCENARIOS),tests/logic/$(s).txt)

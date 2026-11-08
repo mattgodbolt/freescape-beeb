@@ -1,0 +1,333 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - Driller's laser on the live disc: the
+\ shot's pick ($B153) and the laser's lines ($AA50-$AA8C), at the BBC's view
+\ (docs/research/laser.md; tools/model/pick.py is the model of both)
+\
+\ The pick: the original walks its last redraw's draw list from the nearest
+\ object back, and hits the first with a face round the crosshair. The disc
+\ walks the draw list the front end left (src/order.6502's dl_*, nearest
+\ first as emit_faces takes it, each object's faces tf_* and their polygons
+\ in out_v*), all of which stay as they are until the next objects_frame,
+\ and hits the first face whose polygon holds the crosshair pixel's centre,
+\ its edges counting (decision 131). Nothing is stored a face to do it: the
+\ draw list says which slot each face is, ob_ix the slot's place in the
+\ logic's index, ix_id its id.
+\
+\ The lines: the original's four, each from a corner of the view's bottom
+\ to the crosshair, by its line ($A803), EORed with colour 7 into the buffer
+\ drawn, as the crosshair is (decision 130). They show for sound 1's
+\ fields from the pass that fired (lv_hook_laser), in frames of their own
+\ when nothing else changes (live_cross_only).
+\ ***************************************************************************
+
+\ the pick's: the pixel's centre in view coordinates; a product's factors,
+\ the product, and the edge's first
+ZA_AUTO2 pk_qx, pk_qy
+ZA_AUTO1 pk_qn
+ZA_AUTO2 pk_ma, pk_mb
+ZA_AUTO 3, pk_mp
+ZA_AUTO 3, pk_pp
+
+\ ---------------------------------------------------------------------------
+\ The pick, in LiveData (BANK_DATA, the logic's LOGIC_CODE_BANK, which the
+\ pass has paged when it calls hook_shot).
+SECTION LiveData
+
+\ lv_pick (hook_shot, $B153): Collided = the id of the object whose face,
+\ nearest first, is the first to hold the crosshair's pixel; unchanged if
+\ none does. ACCCON's X is put back as found.
+.lv_pick
+{
+    ZA_AUTO1 k, d, f, end
+    \ the crosshair's pixel (decision 38), inside the view
+    LDA CrossX : DEC A : LSR A
+    CMP #VIEW_W : BCS none
+    JSR centre : STA pk_qx : STX pk_qx+1
+    LDA #VIEW_H : SEC : SBC CrossY
+    CMP #VIEW_H : BCS none
+    JSR centre : STA pk_qy : STX pk_qy+1
+    \ the draw list, nearest first (emit_faces' order)
+    LDA dl_n : BEQ none
+    STA k
+.object
+    DEC k
+    LDY k : LDA dl_ord,Y : STA d
+    TAY
+    LDA dl_f0,Y : STA f
+    CLC : ADC dl_nf,Y : STA end
+.face
+    LDA f : CMP end : BEQ next
+    TAY
+    LDA tf_fv,Y : LDX tf_fn,Y
+    JSR pk_covers
+    BCS hit
+    INC f
+    BRA face
+.next
+    LDA k : BNE object
+.none
+    RTS
+.hit
+    LDY d : LDX dl_obj,Y
+    \ (the working copy is main RAM's &3000 on: X clear to read it, and put
+    \ back as found)
+    LDA acccon : AND #ACCCON_X : PHA
+    LDA #ACCCON_X : TRB acccon
+    LDY ob_ix,X
+    PLA : TSB acccon
+    LDA ix_id,Y : STA Collided
+    RTS
+\ centre: A, a pixel's place, to its centre in sixteenths: A X = 16 A + 8.
+.centre
+    LDX #0 : STX pk_qn
+    ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn
+    ORA #SUB DIV 2
+    LDX pk_qn
+    RTS
+}
+
+\ pk_covers: whether the face of X vertices from out_v* index A holds
+\ (pk_qx, pk_qy), its edges counting: C set if so. Its vertices must
+\ bracket the point on both axes; then the sign of each edge's cross product
+\ with the point, (b - a) x (q - a), none on either side of the others'.
+.pk_covers
+{
+    ZA_AUTO1 v0, n, i, seen, sides, va
+    STA v0 : STX n
+    \ the bracket: bit 0 a vertex x <= qx, 1 x >= qx, 2 y <= qy, 3 y >= qy
+    STZ seen
+    LDY v0
+.bracket
+    LDA out_vxl,Y : CMP pk_qx : LDA out_vxh,Y : SBC pk_qx+1
+    BVC xv : EOR #&80
+.xv BMI x_lt
+    LDA out_vxl,Y : CMP pk_qx : BNE x_gt
+    LDA out_vxh,Y : CMP pk_qx+1 : BNE x_gt
+    LDA #3 : BRA x_set                          ; equal: both
+.x_gt
+    LDA #2 : BRA x_set
+.x_lt
+    LDA #1
+.x_set
+    TSB seen
+    LDA out_vyl,Y : CMP pk_qy : LDA out_vyh,Y : SBC pk_qy+1
+    BVC yv : EOR #&80
+.yv BMI y_lt
+    LDA out_vyl,Y : CMP pk_qy : BNE y_gt
+    LDA out_vyh,Y : CMP pk_qy+1 : BNE y_gt
+    LDA #12 : BRA y_set
+.y_gt
+    LDA #8 : BRA y_set
+.y_lt
+    LDA #4
+.y_set
+    TSB seen
+    INY
+    TYA : SEC : SBC v0 : CMP n : BCC bracket
+    LDA seen : CMP #15 : BEQ boxed
+    CLC
+    RTS
+.boxed
+    \ the edges: each a to b, the last back to the first
+    STZ sides                                   ; bit 7 a positive one, bit 6 a negative
+    STZ i
+.edge
+    LDA i : CLC : ADC v0 : STA va
+    LDY i : INY : CPY n : BCC b_next
+    LDY #0
+.b_next
+    TYA : CLC : ADC v0 : TAY                    ; b
+    LDX va
+    \ p = (bx - ax)(qy - ay)
+    LDA out_vxl,Y : SEC : SBC out_vxl,X : STA pk_ma
+    LDA out_vxh,Y : SBC out_vxh,X : STA pk_ma+1
+    LDA pk_qy : SEC : SBC out_vyl,X : STA pk_mb
+    LDA pk_qy+1 : SBC out_vyh,X : STA pk_mb+1
+    JSR pk_smul                                 ; (keeps Y)
+    LDA pk_mp : STA pk_pp : LDA pk_mp+1 : STA pk_pp+1 : LDA pk_mp+2 : STA pk_pp+2
+    \ q = (by - ay)(qx - ax)
+    LDX va
+    LDA out_vyl,Y : SEC : SBC out_vyl,X : STA pk_ma
+    LDA out_vyh,Y : SBC out_vyh,X : STA pk_ma+1
+    LDA pk_qx : SEC : SBC out_vxl,X : STA pk_mb
+    LDA pk_qx+1 : SBC out_vxh,X : STA pk_mb+1
+    JSR pk_smul
+    \ p - q: its sign, or none if 0
+    LDA pk_pp : SEC : SBC pk_mp : STA pk_mp
+    LDA pk_pp+1 : SBC pk_mp+1 : STA pk_mp+1
+    LDA pk_pp+2 : SBC pk_mp+2
+    BMI negative
+    ORA pk_mp : ORA pk_mp+1 : BEQ on_it
+    LDA #&80 : BRA side
+.negative
+    LDA #&40
+.side
+    TSB sides
+    LDA sides : CMP #&C0 : BEQ outside          ; on both sides of its edges
+.on_it
+    INC i
+    LDA i : CMP n : BCS all
+    JMP edge
+.all
+    SEC
+    RTS
+.outside
+    CLC
+    RTS
+}
+
+\ pk_smul: pk_mp = pk_ma pk_mb, signed 16-bit by signed 16-bit, to 24 bits
+\ (both under 2^12 in size here: view coordinates and their differences),
+\ by shifts and adds of the magnitudes, then the sign. Keeps Y.
+.pk_smul
+{
+    ZA_AUTO1 sign
+    LDA pk_ma+1 : EOR pk_mb+1 : STA sign
+    LDA pk_ma+1 : BPL a_pos
+    LDA #0 : SEC : SBC pk_ma : STA pk_ma
+    LDA #0 : SBC pk_ma+1 : STA pk_ma+1
+.a_pos
+    LDA pk_mb+1 : BPL b_pos
+    LDA #0 : SEC : SBC pk_mb : STA pk_mb
+    LDA #0 : SBC pk_mb+1 : STA pk_mb+1
+.b_pos
+    STZ pk_mp : STZ pk_mp+1 : STZ pk_mp+2
+    LDX #0                                      ; (pk_ma's top byte, shifted in)
+.bit
+    LSR pk_mb+1 : ROR pk_mb : BCC skip
+    LDA pk_mp : CLC : ADC pk_ma : STA pk_mp
+    LDA pk_mp+1 : ADC pk_ma+1 : STA pk_mp+1
+    TXA : ADC pk_mp+2 : STA pk_mp+2
+.skip
+    ASL pk_ma : ROL pk_ma+1
+    TXA : ROL A : TAX
+    LDA pk_mb : ORA pk_mb+1 : BNE bit
+    LDA sign : BPL done
+    LDA #0 : SEC : SBC pk_mp : STA pk_mp
+    LDA #0 : SBC pk_mp+1 : STA pk_mp+1
+    LDA #0 : SBC pk_mp+2 : STA pk_mp+2
+.done
+    RTS
+}
+ENDSECTION
+ASSERT SUB = 16 AND VIEW_W < 128 AND VIEW_H < 128   ; (centre: 16 A + 8 in 11 bits)
+ASSERT OUT_VERTS = 256                          ; (a face's vertices by a byte's index)
+
+\ ---------------------------------------------------------------------------
+\ The lines, in LiveGlue with the crosshair (src/live.6502).
+ZA_AUTO1 lz_x1, lz_y1, lz_t
+ZA_AUTO2 lz_at
+SECTION LiveGlue
+
+\ lz_eor: the laser's four lines to the crosshair at CrossX = A, CrossY = Y
+\ EORed into the buffer drawn: each from its far end ($AA5E: (1, 5), (2
+\ cx, 5), (5, 1), (2 cx - 5, 1), up from the view's bottom), its x halved
+\ as the crosshair's is, by the original's line ($A803).
+.lz_eor
+{
+    ZA_AUTO1 ex, ey, which
+    JSR lz_pixel : STX ex : STY ey
+    LDA #3 : STA which
+.line
+    LDX which
+    LDA lz_sx,X : LDY lz_sy,X
+    CPX #1 : BNE fixed_x                        ; (2 cx and 2 cx - 5: the view's centre's)
+    LDA ViewCentre : ASL A
+.fixed_x
+    CPX #3 : BNE got_x
+    LDA ViewCentre : ASL A : SEC : SBC #5
+.got_x
+    JSR lz_pixel
+    LDA ex : STA lz_x1 : LDA ey : STA lz_y1
+    JSR lz_line
+    DEC which : BPL line
+    RTS
+.lz_sx  EQUB 1, 0, 5, 0
+.lz_sy  EQUB 5, 5, 1, 1
+}
+
+\ lz_pixel: the original's point (A, Y), x from 1 and y up from the view's
+\ bottom, as the view's pixel (X, Y) at half the width (decision 38's).
+.lz_pixel
+    DEC A : LSR A : TAX
+    STY lz_t : LDA #VIEW_H : SEC : SBC lz_t : TAY
+    RTS
+
+\ lz_line ($A803): from pixel (X, Y) to (lz_x1, lz_y1), each pixel EORed:
+\ along the longer axis a pixel a step, the shorter's step when the error,
+\ from half the longer, comes to the longer (the longer is y on a tie).
+.lz_line
+{
+    ZA_AUTO1 lx, ly, ax, ay, sx, sy, major, minor, e, n
+    STX lx : STY ly
+    STZ ax : STZ ay : STZ sx : STZ sy
+    \ |dx| and its step
+    LDA lz_x1 : SEC : SBC lx : BEQ dx_done
+    LDX #1 : BCS dx_pos
+    EOR #&FF : INC A : LDX #&FF
+.dx_pos
+    STX sx
+.dx_done
+    STA minor
+    LDA lz_y1 : SEC : SBC ly : BEQ dy_done
+    LDX #1 : BCS dy_pos
+    EOR #&FF : INC A : LDX #&FF
+.dy_pos
+    STX sy
+.dy_done
+    \ (minor |dx|, A |dy|)
+    CMP minor : BCC x_major
+    STA major                                   ; y the longer: y always, x sometimes
+    LDA sy : STA ay : STZ sy
+    BRA steps
+.x_major
+    LDX minor : STX major : STA minor           ; x the longer: x always, y sometimes
+    LDA sx : STA ax : STZ sx
+.steps
+    LDA major : LSR A : STA e
+    LDA major : STA n
+.pixel
+    LDA lx : LDY ly : JSR lz_plot
+    LDA lx : CLC : ADC ax : STA lx
+    LDA ly : CLC : ADC ay : STA ly
+    LDA e : CLC : ADC minor
+    CMP major : BCC kept
+    SBC major
+    TAX
+    LDA lx : CLC : ADC sx : STA lx
+    LDA ly : CLC : ADC sy : STA ly
+    TXA
+.kept
+    STA e
+    DEC n : BPL pixel                           ; (major + 1 pixels)
+    RTS
+}
+ASSERT VIEW_W + VIEW_H < 256 AND VIEW_H < 128   ; (the error and the count in a byte)
+
+\ lz_plot: pixel (A, Y) of the buffer drawn, if inside the view, EORed with
+\ colour 7.
+.lz_plot
+{
+    CMP #VIEW_W : BCS out
+    CPY #VIEW_H : BCS out
+    STZ lz_at+1
+    LSR A : PHP                                 ; (C: the right pixel)
+    ASL A : ASL A : ASL A : ROL lz_at+1         ; 8 (x DIV 2)
+    STA lz_at
+    TYA : LSR A : LSR A : AND #&FE              ; (y DIV 8) SCREEN_ROW, a high byte
+    CLC : ADC lz_at+1 : ADC #HI(VIEW_ADDR) : STA lz_at+1
+    TYA : AND #7 : ORA lz_at                    ; (lz_at's low three bits are 0)
+    CLC : ADC #LO(VIEW_ADDR) : STA lz_at
+    BCC carried
+    INC lz_at+1
+.carried
+    PLP
+    LDA #CROSS_LEFT : BCC left
+    LDA #CROSS_RIGHT
+.left
+    EOR (lz_at) : STA (lz_at)
+.out
+    RTS
+}
+ASSERT SCREEN_ROW = 512
+ENDSECTION

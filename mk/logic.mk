@@ -18,7 +18,8 @@ ZXSNAP ?= build/zx/driller.z80
 LOGICFUZZ ?= 1000
 LOGICSEED ?= 100000
 LOGIC_REPORT = build/logic/report.txt
-LOGIC_DEPS = $(ZXSNAP) tools/zx.py $(wildcard tools/logic/*.py) $(wildcard tests/logic/*.txt)
+LOGIC_DEPS = $(ZXSNAP) tools/zx.py $(wildcard tools/logic/*.py) $(wildcard tests/logic/*.txt) \
+             $(DATA_JSON) $(wildcard tools/model/*.py)
 
 .PHONY: logic logicfuzz
 ALL    += $(LOGIC_REPORT)

@@ -36,20 +36,33 @@ from logic.move import Freeze  # noqa: E402
 from logic.oracle import Original, SCRIPT, Waiting  # noqa: E402
 from logic.passes import run_pass  # noqa: E402
 from logic.state import State, differences  # noqa: E402
+from logic import view as lview  # noqa: E402
 
 
 class OracleHooks(Hooks):
     """The hooks, answering from the original's renderer: which objects
-    the last redraw drew."""
+    the last redraw drew; and the shot's pick from the BBC's view of the
+    state the pass began with (tools/logic/view.py, decision 131), which the
+    original's own pick must agree with."""
 
-    def __init__(self, drawn, after=None):
+    def __init__(self, drawn, after=None, start=None):
         super().__init__()
         self.drawn = drawn
         self.after = after
+        self.start = start
 
     def undraw(self, s, obj_id):
         super().undraw(s, obj_id)
         return obj_id in self.drawn
+
+    def shot(self, s):
+        super().shot(s)
+        hit = lview.shot(s, self.start)
+        if hit is not None:
+            s.Collided = hit
+            SHOTS["hit"] += 1
+        else:
+            SHOTS["missed"] += 1
 
     def redraw(self, s):
         """A rig's redraw inside its pass runs the sensors' line of sight
@@ -88,6 +101,7 @@ class Mismatch(Exception):
 REDRAWN = [0]   # passes in which the FCL's REDRAW ran the renderer
 FROZE = [0]     # scenarios that end where the original hangs
 SEEN = collections.Counter()   # what the original did in the passes compared
+SHOTS = collections.Counter()  # the shots' picks: hit or missed
 
 
 def note(before, after, keys):
@@ -147,7 +161,7 @@ def run(steps, snap, verbose=False):
             last = orig.memory()
             continue
         orig_drawn = orig.drawn()
-        hooks = OracleHooks(orig_drawn)
+        hooks = OracleHooks(orig_drawn, start=s.copy())
         if st.kind == "fcl":
             after = orig.fcl(st.code, shot=st.shot)
             s.mem[SCRIPT:SCRIPT + len(st.code)] = bytes(st.code)
@@ -170,7 +184,7 @@ def run(steps, snap, verbose=False):
             if any(n == "message" for n, _ in hooks.log) and any(n == "redraw" for n, _ in hooks.log):
                 # a rig's redraw: the pass again, with the original's Collided
                 s = s0
-                hooks = OracleHooks(orig_drawn, after)
+                hooks = OracleHooks(orig_drawn, after, start=s0.copy())
                 alive = run_pass(s, st.keys, st.tick, hooks)
             passes += 1
             note(start, after, st.keys)
@@ -303,6 +317,8 @@ def main():
         print("the original, in those passes: " + ", ".join(f"{k} {v}" for k, v in sorted(SEEN.items())))
     if fcl.RUN:
         print("FCL opcodes run: " + ", ".join(f"${op:02X} {n}" for op, n in sorted(fcl.RUN.items())))
+    if SHOTS:
+        print(f"shots picked from the BBC's view: {SHOTS['hit']} hit, {SHOTS['missed']} missed")
     if REDRAWN[0]:
         print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
     if FROZE[0]:
