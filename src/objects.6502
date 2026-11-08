@@ -221,34 +221,45 @@ SECTION ObjAndy
 \ sensor is a candidate in few views.)
 .sensor_watching
 {
-    ZA_AUTO1 sides
+    ZA_AUTO1 sides, axis, c2, bit
     ZA_AUTO 3, sum
     ZA_AUTO2 d
     STZ sides
     STZ sum : STZ sum+1 : STZ sum+2
-    FOR k = 0..2
-        LDA cell_f + k : CMP ob_lx + k * N_OBJ,X : BCS not_below
-        LDA #1 << (2 * k) : TSB sides
-    .not_below
-        LDA ob_lx + k * N_OBJ,X : CMP cell_e + k : BCS not_above
-        LDA #2 << (2 * k) : TSB sides
-    .not_above
-        \ d = 64 L - c, and its size added to sum
-        LDA ob_lx + k * N_OBJ,X : LSR A : LSR A : STA d+1
-        LDA ob_lx + k * N_OBJ,X : LSR A : ROR A : ROR A : AND #&C0
-        SEC : SBC cam_x + 2 * k : STA d
-        LDA d+1 : SBC cam_x + 2 * k + 1 : BPL positive
-        STA d+1
-        LDA #0 : SEC : SBC d : STA d
-        LDA #0 : SBC d+1
-    .positive
-        STA d+1
-        LDA sum : CLC : ADC d : STA sum
-        LDA sum+1 : ADC d+1 : STA sum+1
-        BCC no_carry
-        INC sum+2
-    .no_carry
-    NEXT
+    STZ axis : STZ c2
+    LDA #1 : STA bit
+    \ (X steps N_OBJ an axis: the corner's byte on it, restored below)
+.next_axis
+    LDY axis
+    LDA cell_f,Y : CMP ob_lx,X : BCS not_below
+    LDA bit : TSB sides
+.not_below
+    LDA ob_lx,X : CMP cell_e,Y : BCS not_above
+    LDA bit : ASL A : TSB sides
+.not_above
+    \ d = 64 L - c, and its size added to sum
+    LDA ob_lx,X : LSR A : LSR A : STA d+1
+    LDA ob_lx,X : LSR A : ROR A : ROR A : AND #&C0
+    LDY c2
+    SEC : SBC cam_x,Y : STA d
+    LDA d+1 : SBC cam_x+1,Y : BPL positive
+    STA d+1
+    LDA #0 : SEC : SBC d : STA d
+    LDA #0 : SBC d+1
+.positive
+    STA d+1
+    LDA sum : CLC : ADC d : STA sum
+    LDA sum+1 : ADC d+1 : STA sum+1
+    BCC no_carry
+    INC sum+2
+.no_carry
+    TXA : CLC : ADC #N_OBJ : TAX
+    ASL bit : ASL bit
+    INC c2 : INC c2
+    INC axis : LDA axis : CMP #3 : BEQ axes
+    JMP next_axis
+.axes
+    TXA : SEC : SBC #3 * N_OBJ : TAX
     LDY ob_aux,X
     LDA sides : AND sn_axes,Y : BEQ no
     LDA sum+2 : BNE no
@@ -261,6 +272,7 @@ SECTION ObjAndy
     CLC
     RTS
 }
+ASSERT 3 * N_OBJ <= 256
 
 ENDSECTION
 SECTION ObjCode
