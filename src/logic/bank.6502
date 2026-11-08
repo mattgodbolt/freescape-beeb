@@ -49,7 +49,8 @@ INCLUDE "touch.6502"
 INCLUDE "arith.6502"
 INCLUDE "rig.6502"
     \ the original's tables (tools/mklogicdata.py)
-.SinCos     EQUB ZX_SINCOS                      ; 72 (sin, cos) pairs, signed, 1.0 = 64
+.SineTable  EQUB ZX_SINE                        ; the sines of the first half of the 72 angles, signed, 1.0 = 64 (sine, src/logic/move.6502)
+ASSERT LEN(ZX_SINE) = 36
 .KeyCodes   EQUB ZX_KEY_CODES                   ; a code for each key, five a half-row
 .KeyActions EQUB ZX_ACTIONS                     ; the action of each code from KEY_LOW, from the key table (action_of)
 ASSERT MAX(ZX_KEY_CODES) < 128

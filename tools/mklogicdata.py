@@ -155,6 +155,14 @@ def main():
     for c in codes:
         for shoot in (0, 1):
             assert dense(c, shoot) == actions[shoot][c], f"key code {c}"
+    # The original's 72 (sin, cos) pairs are one half wave: the 6502 keeps
+    # the sines of the first 36 angles (src/logic/move.6502's sine), the
+    # next 36 their negatives and each cosine the sine 18 angles on.
+    pairs = m[SINCOS:SINCOS + 144]
+    sine = pairs[0::2][:36]
+    for a in range(72):
+        assert pairs[2 * a] == (sine[a % 36] if a < 36 else -sine[a % 36] & 255), a
+        assert pairs[2 * a + 1] == (pairs[2 * ((a + 18) % 72)]), a
     most = max(n for _, n in areas(m))
     # src/logic/area.6502's place_rigs indexes the rigs by the area's id less
     # one for ids below &13, as the original's JP P on the id less &13 picks
@@ -195,7 +203,7 @@ def main():
         *(blist(f"ZXI_{n}", m[a:a + sz]) for n, a, sz in outside),
         "",
         "\\ the original's tables",
-        blist("ZX_SINCOS", m[SINCOS:SINCOS + 144]),
+        blist("ZX_SINE", sine),
         blist("ZX_KEY_TABLE", m[KEY_TABLE:KEY_TABLE + 3 * n3 + 2 * n2]),
         blist("ZX_KEY_CODES", m[KEY_CODES:KEY_CODES + 40]),
         "\\ the rigs' messages, 14 characters each, but the two its figures go",
