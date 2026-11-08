@@ -26,8 +26,11 @@
 // minute to take (the trace's "soon"), the next pass comes at once, so its
 // keys go down then
 // (none, for the pass of none the trace puts in where the next step isn't
-// one of keys). A minute's end comes by its clock (the minute otherwise
-// kept away), with its pass's keys; a poke or an FCL script's result is
+// one of keys). A minute's end comes by its clock (held otherwise: the
+// clock's frame given as the oracle holds it), with its pass's keys; a
+// game over brings the pass that finds it, and the end, at once; the end's
+// wait is answered by RETURN, or left to run out into the demo, whose passes
+// come at once; a poke or an FCL script's result is
 // written into the logic's state and the disc asked to take it
 // (lv_request). It fails (exit status 1) unless:
 //
@@ -928,7 +931,11 @@ async function logicScript() {
     // the visibility probe's flags: to be written at the next loop, and as
     // they stand (the frames' expected flags, not the logic's records)
     let flagWrites = null, visibility = null;
-    const LV_MINUTE = S("lv_minute"), LV_REQUEST = S("lv_request"), KEYS_MADE = S("keys_made");
+    const LV_REQUEST = S("lv_request"), KEYS_MADE = S("keys_made");
+    // The clock (src/live.6502's lv_clock) is held, as the sensors' is: its
+    // fields come only for a minute's pass, which the trace's tick holds
+    // as the oracle does (tools/logic/passes.py's hold_minute)
+    ram[S("cl_hold")] = 1;
     onLoop = () => {
         if (flagWrites) {
             // (and vw_flags set, as the disc sets it after each logic_go_shown,
@@ -939,14 +946,14 @@ async function logicScript() {
             flagWrites = null;
             idleSeen = false;
         }
-        const f = word(S("fields"));
-        const m = minuteDue ? f : f + 20000;
-        ram[LV_MINUTE] = m & 0xff;
-        ram[LV_MINUTE + 1] = (m >> 8) & 0xff;
         if (minuteDue) {
-            // the minute and its pass's keys at once (as gone down since the
-            // last pass), as this loop's pass takes the minute: the keys
-            // alone may not have been read yet
+            // the minute's frame (the seconds at 00 and the frame at the
+            // second's last, a field) and its pass's keys at once (as gone
+            // down since the last pass), as this loop's pass takes the
+            // minute: the keys alone may not have been read yet
+            ram[bbcOf(0x88aa)] = ram[bbcOf(0x88ab)] = 0x30;
+            ram[bbcOf(0x88a3)] = 49;
+            ram[S("cl_more")] = 1;
             minuteDue = false;
             want.rec.keys.forEach((r, i) => (ram[KEYS_MADE + i] |= r));
         }

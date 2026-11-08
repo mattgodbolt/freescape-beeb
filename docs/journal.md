@@ -1753,3 +1753,37 @@ sound wait for a full queue.
 Left: OUT OF TIME (the clock's seconds aren't kept: the next layer), the
 information screen (TERMINATED is its 1). Decisions 150 and 151 are
 Matt's to take or change.
+
+## 2026-11-08: the clock
+
+The original's interrupt keeps a clock ($BAFA-$BB90): 50 frames to a
+second, its text from 04:00:00 down, the minute ($BB27: the energy, the
+minute counters) where the seconds go past 0, and past 00:00:00 the time
+out, OUT OF TIME. The disc had only the minute, every 3,000 fields from
+its start. Now the clock is the logic's (`tools/logic/passes.py`'s
+`clock_frame`, `src/logic/pass.6502`'s `logic_clock`), and the disc runs a
+frame of it for each field counted since its last loop (`lv_clock`,
+decision 152): the text, the minute where it says, the time out. A
+scenario's `tick` holds the clock as the oracle does (the seconds 00, the
+frame the second's last) and runs a frame, so the transcription's and the
+6502's ticks are the original's frame, text and all;
+`tests/logic/clock.txt` counts it down, to 00:09 and past 00:00:00 into
+the end, and its new game's 04:00:00: the same as the original, the 6502
+and the disc. The checks hold the disc's clock (`cl_hold`) as the
+sensors' is held, and give a minute its frame. Run free on the disc, the
+clock's first minute ends a second in (energy 48 to 47), as the
+original's does from 04:00:00, and the next a minute after.
+
+`SecondFrames` counts now, so the rigs' yields' rotation is the frame of
+the second the first rig finds gas, as the original's (decision 120,
+amended); the checks' stays 0 under their hold.
+
+**Room**: `BANK_DATA` 506 to 376 (`logic_clock`, `logic_minute`'s new
+callers, `logic_tick`); `Work` 15 to 13. **Cycles**: a minute's pass 1,916
+at the median (`make logic6502`), a field of the clock a few dozen.
+**Speed** (as before, over the runs the last entry had): walking 1.57 /
+4.51 / 146.5 to 1.58 / 4.51 / 145.5, turning 2.17 / 5.63 / 127.69 to 2.2 /
+5.74 / 127.7, entrances 8.6 / 14.37 / 18.24 to 8.62 / 14.39 / 18.25.
+
+Left: nothing shows the clock (the panel has no field for it); the
+information screen.

@@ -57,7 +57,7 @@ INCLUDE "../src/logic/hooks.6502"
 
 .chk_minute
     ZA_ENTRY
-    JSR logic_go_minute
+    JSR logic_go_tick
     RTS
 
 .chk_shown

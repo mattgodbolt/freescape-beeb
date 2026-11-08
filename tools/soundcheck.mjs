@@ -61,11 +61,10 @@ await session.runUntilAddress(sym("live_loop"), 120);
 
 const FIELD = sym("FIELD_CYCLES");
 const SOUNDS = sym("SND_SOUNDS");
-const LV_MINUTE = sym("lv_minute"), FIELDS = sym("fields");
+// (the clock held: no minute ends, src/live.6502's lv_clock)
+const CL_HOLD = sym("cl_hold");
 const awayMinute = () => {
-    const f = (ram[FIELDS] | (ram[FIELDS + 1] << 8)) + 20000;
-    ram[LV_MINUTE] = f & 0xff;
-    ram[LV_MINUTE + 1] = (f >> 8) & 0xff;
+    ram[CL_HOLD] = 1;
 };
 // run until cond(), a quarter field at a time, for at most limit fields
 async function until(cond, limit, what) {

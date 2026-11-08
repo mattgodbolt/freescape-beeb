@@ -187,9 +187,12 @@ do nothing yet,
   stop in the list is the logic's own), the information screen and the
   game's end. The sensors' test after a redraw and their shots are the
   disc's (`docs/research/sensors.md`).
-- **The clock**: a minute is `MINUTE_FIELDS` fields, as the original's
-  interrupt counts 50 to a second; `logic_go_minute` goes in just before
-  the pass the minute's end comes before, which takes it.
+- **The clock** (decision 152): the original's interrupt's, a frame a
+  field (`lv_clock`, each loop, `logic_go_clock` for the fields since the
+  last): `SecondFrames` to 50, the text from 04:00:00 down a second at a
+  time, the minute where the text says (so the game's first ends a second
+  in, as the original's), the time out past 00:00:00; the next pass takes
+  a minute's end.
 - **An area's change** (a doorway, an area's edge, any GOTO): the pass's
   walk into it is shown in the old area, its angles as they were, and the
   new area comes the frame after (`lv_switch`, `lv_switched`): the area's
@@ -572,9 +575,10 @@ minute to take: in that instant the next pass's keys go down instead, and
 where the next step isn't a pass of keys the trace puts in a pass of none
 before it (`soon`; `tests/logic/minutes.txt`). A poke or an FCL script's
 result is written into the logic's state at `live_loop`'s top and the disc
-asked to take it (`lv_request`); a minute's end comes by setting
-`lv_minute`, which is kept away otherwise, with its pass's keys put in as
-gone down at the same loop. It fails unless:
+asked to take it (`lv_request`); the clock is held (`cl_hold`), and a
+minute's end comes by its frame as the oracle holds it (the seconds 00,
+the frame the second's last, a field: `cl_more`), with its pass's keys put
+in as gone down at the same loop. It fails unless:
 
 - the disc's state at boot is the game's start; after every pass every
   variable of the original's (`tools/logic/state.py`) and the whole

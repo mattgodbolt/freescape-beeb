@@ -24,13 +24,48 @@
     RTS
 }
 
-\ logic_minute ($BB27, the interrupt's, as a minute of the clock ends): a
-\ unit of energy spent and the minute counters (FCL variables 30 and 31)
-\ up, or with no energy left the game over. Once the game is over no time
-\ is kept. The next pass takes the minute.
-.logic_minute
+\ logic_clock ($BAFA-$BB90, the interrupt's clock, a frame): once the game
+\ is over no time is kept. SecondFrames counts to 50; then the clock's text
+\ counts down a second: the seconds' units, their tens, and past 0 the
+\ minute (logic_minute) and the minutes' units, tens and the hours' units,
+\ each from 9 or 5 again below 0; past 00:00:00 the time is out (GameOver
+\ 2). The next pass takes a minute. (The text isn't shown: the panel has
+\ no clock.)
+CLOCK_FRAMES = 50
+.logic_clock
 {
     LDA GameOver : BNE done
+    INC SecondFrames
+    LDA SecondFrames : CMP #CLOCK_FRAMES : BNE done
+    STZ SecondFrames
+    LDX #0
+.digit
+    LDY clock_at,X
+    LDA Clock,Y : DEC A : CMP #'0' - 1 : BNE counted
+    CPX #1 : BNE not_tens
+    JSR logic_minute                            ; (the seconds' tens past 0)
+.not_tens
+    LDA clock_top,X : BEQ out                   ; (the hours' tens past 0)
+    STA Clock,Y
+    INX
+    BRA digit
+.counted
+    STA Clock,Y
+.done
+    RTS
+.out
+    LDA #2 : STA GameOver
+    RTS
+.clock_at   EQUB 7, 6, 4, 3, 1, 0              ; the digits, the seconds' units first ...
+.clock_top  EQUB '9', '5', '9', '5', '9', 0     ; ... and each one's top
+}
+Clock = zx(&88A4)                               ; the clock's text, hh:mm:ss
+
+\ logic_minute ($BB27, the interrupt's, as a minute of the clock ends): a
+\ unit of energy spent and the minute counters (FCL variables 30 and 31)
+\ up, or with no energy left the game over. Keeps X and Y.
+.logic_minute
+{
     LDA Energy : BEQ out
     INC FclVar30 : INC MinuteCount
     DEC Energy
@@ -38,9 +73,15 @@
     RTS
 .out
     LDA #3 : STA GameOver
-.done
     RTS
 }
+
+\ logic_tick: the checks' minute, as the oracle holds it: the seconds 00
+\ and the frame the second's last, then the interrupt's frame.
+.logic_tick
+    LDA #'0' : STA Clock+6 : STA Clock+7
+    LDA #CLOCK_FRAMES - 1 : STA SecondFrames
+    JMP logic_clock
 
 \ input_pass ($9990): clear the pass's flags, read the keys, and do each
 \ key's action in turn, in the keyboard's order (decision 19). A as

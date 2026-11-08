@@ -867,7 +867,11 @@ for them are the ZX's, and the ZX's sounds are the ones remade (decision
   checks would stay as they are, with the scripts made from the CPC's
   tables instead.
 
-## 120. The rigs' yields don't depend on the clock (2026-11-08, autonomous, proposed for Matt)
+## 120. The rigs' yields don't depend on the clock (2026-11-08, autonomous, proposed for Matt; amended by 152)
+
+*Amended by decision 152: the disc counts `SecondFrames` now, so the
+rotation is the original's, the frame of the second the first rig finds
+gas; the checks hold the clock, so their rotation stays 0.*
 
 The original picks the gas yields of the whole game the first time a rig
 finds gas: one of sixteen rotations of its table of eighteen (`$88EB`), by
@@ -1019,4 +1023,34 @@ rigs' messages', the laser's) hold it as they hold a pass of keys. Why:
 the disc shows each pass over its fields whatever drives it, and the
 original's pace is its renderer's, which the BBC's differs from. Against:
 the original's demo runs faster where its views are simple.
+
+## 152. The disc counts the original's clock a frame a field (2026-11-08, autonomous, proposed for Matt; amends 120)
+
+The original's interrupt counts its clock every frame ($BAFA-$BB90): 50
+frames to a second, the text from 04:00:00 down, at each minute's end the
+energy and the minute counters ($BB27), and past 00:00:00 the time out
+(OUT OF TIME, `GameOver` 2). Until now the disc spent a minute every
+3,000 fields from its start and kept no seconds (decision 120 left
+`SecondFrames` still). Now the logic has the clock (`logic_clock`, the
+transcription's `clock_frame`), and the disc runs it once for each field
+counted since its last loop (`lv_clock`, `logic_go_clock`): its text, the
+minute where the text says, the time out. So the game's first minute ends
+a second in, as the original's (its clock starts at 04:00:00 with the
+second's frames at 0), and the rigs' yields' rotation is the frame of the
+second, as the original's (decision 120 amended). It's deterministic in
+the fields the disc counts, so a game played the same way runs the same.
+The checks hold it, as they hold the sensors' clock (decision 133): no
+field counts but a minute's, given as the oracle holds it (the seconds 00,
+the frame the second's last, then a frame); `tests/logic/clock.txt`
+checks the text and the time out against the original.
+
+The options, for Matt: as built; or the old way, a minute each 3,000
+fields from the start and no seconds, with a minute's countdown of the
+text and the time out added (the first minute a minute in, the yields'
+rotation fixed). Against as built: nothing shows the clock, as the panel
+has no field for it (the ST's console has none either); a field is the
+original's frame, so the clock runs at its speed, but a loop that waits
+longer than 255 fields (a sound's wait, decision 110) counts no more than
+that.
+
 

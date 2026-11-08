@@ -195,13 +195,55 @@ def crosshair_action(s, a, hooks):
     hooks.crosshair(s)    # $AA3F, then a busy loop of 1,000
 
 
+CLOCK = 0x88A4          # the clock's text, hh:mm:ss (Clock)
+DIGIT_BELOW_0 = 0x2F    # '0' - 1
+FRAMES_A_SECOND = 50
+
+
+def clock_frame(s, hooks):
+    """$BAFA-$BB90: the interrupt's clock, a frame. Once the game is over it
+    keeps no time. SecondFrames counts to 50; then the clock's text counts
+    down a second: the seconds' units, then their tens, and past 0 the
+    minute ($BB27) and the minutes' units, tens, the hours' units, each
+    from 9 or 5 again when it goes below 0; past 00:00:00 the time is out
+    (GameOver 2). The text is shown at each second (hooks.clock) but that
+    last."""
+    if s.GameOver:
+        return
+    s.SecondFrames = s.SecondFrames + 1
+    if s.SecondFrames != FRAMES_A_SECOND:
+        return
+    s.SecondFrames = 0
+    m = s.mem
+    for at, top in ((7, 0x39), (6, None), (4, 0x39), (3, 0x35), (1, 0x39), (0, None)):
+        a = (m[CLOCK + at] - 1) & 0xFF
+        if a != DIGIT_BELOW_0:
+            m[CLOCK + at] = a
+            hooks.clock(s)
+            return
+        if at == 6:
+            # the seconds' tens past 0: the minute, and the tens from 5
+            minute(s, hooks)
+            m[CLOCK + at] = 0x35
+        elif at == 0:
+            s.GameOver = 2              # (the hours' tens left as they were)
+        else:
+            m[CLOCK + at] = top
+
+
+def hold_minute(s):
+    """The oracle's hold for a pass in which a minute ends
+    (tools/logic/oracle.py): the seconds 00 and the frame the second's
+    last, so that the interrupt's next frame ends the minute."""
+    s.mem[CLOCK + 6] = s.mem[CLOCK + 7] = 0x30
+    s.SecondFrames = FRAMES_A_SECOND - 1
+
+
 def minute(s, hooks):
     """$BB27: the interrupt, as a minute of the clock ends: a unit of
     energy spent and the minute counters (FCL variables 30 and 31) up, or,
-    with no energy left, the game over. Once the game is over the
-    interrupt keeps no time."""
-    if s.GameOver:
-        return
+    with no energy left, the game over (clock_frame calls it only while
+    the game goes on)."""
     if s.Energy:
         s.FclVar30 = s.FclVar30 + 1
         s.MinuteCount = s.MinuteCount + 1
@@ -324,7 +366,8 @@ def run_pass(s, keys=(), tick=False, hooks=None):
     goes on after the pass. Raises move.Freeze where the original hangs."""
     hooks = hooks or Hooks()
     if tick:
-        minute(s, hooks)
+        hold_minute(s)
+        clock_frame(s, hooks)
     if not input_pass(s, keys, hooks):
         return "over"
     events(s, hooks)

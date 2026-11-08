@@ -215,8 +215,9 @@ The text (`src/text.6502`) stays the slideshow's.
 
 ## What's left
 
-- The clock (hh:mm:ss): the disc counts the minutes (`lv_minute`) but not
-  the original's countdown text; it would want drawing a second at a time.
+- The clock (hh:mm:ss): the disc keeps the original's countdown text
+  since 2026-11-08 (decision 152), but the panel has no field for it; it
+  would want drawing a second at a time.
 - The rig's animation in its slot (the ST's; the ZX has none). The end's
   messages by cause show in the message line till a new game, and area
   127's name the safe sectors, since 2026-11-08 (`docs/research/end.md`;

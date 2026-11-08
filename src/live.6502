@@ -419,7 +419,6 @@ ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 \ key going down gives a pass at once, and the keys held repeat
 \ REPEAT_FIELDS fields after it (lv_pass), so a tap shorter than that is
 \ one pass, as a keyboard's auto-repeat.
-MINUTE_FIELDS = 50 * 60         ; a minute of the original's clock, a field a frame of its
 ASSERT PASS_FIELDS >= 2 AND PASS_FIELDS < 128   ; (lv_setup: a pass's first frame isn't its last)
 ASSERT REPEAT_FIELDS < 256
 
@@ -485,8 +484,9 @@ IF LIVE_LOGIC
     LDA lv_now : CMP lz_until : LDA lv_now+1 : SBC lz_until+1 : BMI unlit
     STZ lz_on
 .unlit
-    \ the sensors' fields since the last loop (the original's interrupt's),
-    \ and the panel's shield after their shots
+    \ the clock's and the sensors' fields since the last loop (the
+    \ original's interrupt's), and the panel's shield after their shots
+    JSR lv_clock
     PAGE_IN BANK_DATA
     JSR sn_clock
     LDA sn_shot : BEQ unshot
@@ -695,7 +695,9 @@ SECTION Work
 .lv_until       SKIP 2      ; fields before which no pass comes: its frames and its waits
 .lv_repeat      SKIP 2      ; ... and before which the keys held don't repeat, if none goes down
 .lv_made        SKIP 1      ; non-zero: the pass took a key gone down since the last
-.lv_minute      SKIP 2      ; fields when the clock's minute ends
+.cl_f0          SKIP 2      ; the clock's fields counted to (lv_clock) ...
+.cl_hold        SKIP 1      ; ... held by the check, and its fields asked for
+.cl_more        SKIP 1
 .lv_over        SKIP 1      ; non-zero once the game is over (2, the pass's answer), till a new game
 .lv_end_t0      SKIP 2      ; ... fields at the end
 .lv_call        SKIP 1      ; the pass's call: 0 logic_go_pass, else logic_go_restart's A + 1
@@ -761,8 +763,7 @@ SECTION LiveBoot
     STZ lv_request
     PAGE_IN BANK_DATA
     JSR lv_lines_init                           ; (the crosshair's, the laser's and the sensors')
-    LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
-    LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
+    STZ cl_f0 : STZ cl_f0+1 : STZ cl_hold       ; (the clock from now, lv_clock)
     JMP lv_requested
 ENDSECTION
 
@@ -814,9 +815,9 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 \ gone down (lv_repeat), as a keyboard's auto-repeat: a key going down
 \ since the last pass, or a minute's end, brings one as soon as it's due,
 \ so a tap is one pass, and a key held passes every PASS_FIELDS after the
-\ first repeat (the pace, decision 48). A minute of the clock goes in just
-\ before the pass it ends, as the original's interrupt would count it in
-\ its input's wait.
+\ first repeat (the pace, decision 48). The clock (lv_clock) counts in
+\ each loop before it, so a minute's end is the next pass's, as the
+\ original's interrupt would count it in its input's wait.
 .lv_pass
 {
     LDA lv_now : CMP lv_until : LDA lv_now+1 : SBC lv_until+1 : BPL due
@@ -858,17 +859,13 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     LDA GameOver : BNE repeats
     LDA Demo : CMP #DEMO_ON : BEQ repeats
     LDA lv_now : CMP lv_repeat : LDA lv_now+1 : SBC lv_repeat+1 : BPL repeats
-    LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BPL repeats
+    LDA MinuteSeen : CMP MinuteCount : BNE repeats    ; (a minute's end: lv_clock)
     LDX #KEYS_BYTES - 1
 .made
     LDA keys_made,X : BNE repeats
     DEX : BPL made
     RTS
 .repeats
-    LDA lv_now : CMP lv_minute : LDA lv_now+1 : SBC lv_minute+1 : BMI timed
-    LDA lv_minute : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
-    LDA lv_minute+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
-    JSR logic_go_minute
 .timed
     \ (with the interrupt held off, so a key the vertical sync reads between
     \ the two isn't taken as held now and as gone down by the next pass)
@@ -919,11 +916,9 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     BRA ran
 .not_over
     CMP #3 : BNE ran
-    \ a new game: the end over, its message gone, the clock's minute from
-    \ now (and the area entered as for any pass that loads one)
+    \ a new game: the end over, its message gone (the clock's text 04:00:00
+    \ again, and the area entered as for any pass that loads one)
     STZ lv_over : STZ lv_msg_on
-    LDA lv_now : CLC : ADC #LO(MINUTE_FIELDS) : STA lv_minute
-    LDA lv_now+1 : ADC #HI(MINUTE_FIELDS) : STA lv_minute+1
 .ran
     \ the laser fired: its lines from now, for LASER_FIELDS (the pass's
     \ waits hold the next pass that long: lv_hook_laser)
@@ -985,6 +980,28 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     PAGE_IN BANK_GLUE
     JMP lv_setup
 .done
+    RTS
+}
+
+\ lv_clock (each loop): the original's interrupt's clock, a frame a field,
+\ for the fields counted since the last loop (decision 152): its seconds,
+\ a minute's end (which the next pass takes), the time out. Held by
+\ tools/livecheck.mjs (cl_hold): only the fields it asks for (cl_more).
+.lv_clock
+{
+    LDA lv_now : SEC : SBC cl_f0 : TAX
+    LDA lv_now+1 : SBC cl_f0+1 : BEQ few
+    LDX #&FF                                    ; (a long wait: as many as a byte counts)
+.few
+    LDA lv_now : STA cl_f0
+    LDA lv_now+1 : STA cl_f0+1
+    LDA cl_hold : BEQ counted
+    LDX cl_more
+    STZ cl_more
+.counted
+    TXA : BEQ none
+    JMP logic_go_clock
+.none
     RTS
 }
 
@@ -2059,7 +2076,7 @@ ENDSECTION
 \ zero page (the logic is assembled the same for both, so the map is).
 .live_no_logic
     ZA_ENTRY
-    JSR logic_go_init : JSR logic_go_minute : JSR logic_go_pass
+    JSR logic_go_init : JSR logic_go_clock : JSR logic_go_tick : JSR logic_go_pass
     JSR logic_go_colours : JSR logic_go_shown
     JSR logic_go_end : JSR logic_go_restart
     RTS

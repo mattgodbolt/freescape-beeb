@@ -1,0 +1,32 @@
+# The clock ($BAFA-$BB90): the interrupt's countdown from 04:00:00, a
+# second each 50 frames; at each minute's end the energy and the minute
+# counters ($BB27), then the minutes' and hours' digits; past 00:00:00 the
+# time is out (GameOver 2): OUT OF TIME, and a new game's clock 04:00:00.
+# (A pass in which a minute ends, "tick", holds the seconds at 00 and the
+# frame at the second's last, as the oracle does.)
+tick
+expect Clock[0] $30
+expect Clock[1] $33
+expect Clock[3] $35
+expect Clock[4] $39
+expect Clock[6] $35
+expect Clock[7] $39
+expect SecondFrames 0
+O
+tick
+expect Clock[4] $38
+# Ten minutes left, then a minute: 00:09
+poke 88A4 30 30 3A 31 30
+tick
+expect Clock[1] $30
+expect Clock[3] $30
+expect Clock[4] $39
+# The last minute: past 00:00:00
+poke 88A4 30 30 3A 30 30
+tick
+expect GameOver 2
+end
+expect GameOver 0
+expect Clock[1] $34
+expect Clock[3] $30
+O

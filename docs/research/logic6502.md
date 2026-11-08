@@ -85,9 +85,13 @@ bank it needs in:
   input, and here the frame calls again), 1 if a pass ran, 2 if the game
   is over. The pass clears the flags it reports, so the frame takes them
   before calling it again.
-- `logic_go_minute`, when a minute of the clock ends (the original's
-  interrupt counts the clock, `$BAE6`): the energy and the minute
-  counters. The next pass takes the minute. Nothing counts the clock yet.
+- `logic_go_clock`, A frames of the original's interrupt's clock
+  (`$BAFA`-`$BB90`): `SecondFrames`, the clock's text, at a minute's end
+  the energy and the minute counters, past 00:00:00 the time out. The next
+  pass takes the minute. `logic_go_tick` is the checks' minute, held as
+  the oracle holds it (the seconds 00, the frame the second's last).
+- `logic_go_end` and `logic_go_restart`, the game's end and the new game
+  after its wait (`docs/research/end.md`).
 - `logic_go_colours`, the original's `$A77A`, for the frame's redraw when
   `AreaChanged` is set: `ScreenColours` takes the area's colours, the
   sensors' flash counters restart, `AreaChanged` is cleared.
@@ -209,5 +213,4 @@ other form, which runs on past its target to an object without hanging.
   screen (`$C3DC`). The game's end (`$9AB7`), a new game (`$9C36`) and
   the demo (`$9A27`) are the logic's since 2026-11-08
   (`src/logic/end.6502`, `docs/research/end.md`).
-- The clock: the interrupt's seconds and minutes (`$BAE6`), which call
-  `logic_go_minute`.
+- The clock is the logic's since 2026-11-08 (`logic_go_clock`).

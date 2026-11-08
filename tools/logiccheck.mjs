@@ -12,7 +12,9 @@
 // transcription's. The six words that point into the database point into
 // the bank's copy, moved by DB_MOVE. A pass's keys go into the keyboard's
 // bitmap as the interrupt leaves it; a pass that ends a minute calls
-// logic_go_minute first, as the interrupt would. The arithmetic's cases
+// logic_go_tick first, the clock's frame as the oracle holds it. The game's
+// end and the new game after it are logic_go_end and logic_go_restart.
+// The arithmetic's cases
 // (cross_coord, mul_a_hl and shift6) go through in batches.
 //
 // It reports the cycles of each pass (logic_pass, from its first

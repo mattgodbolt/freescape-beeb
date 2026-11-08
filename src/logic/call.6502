@@ -27,10 +27,26 @@ ENDMACRO
     LOGIC_PAGE A, LOGIC_CODE_BANK
     JMP logic_pass
 
-\ logic_go_minute: a minute of the clock has ended (logic_minute).
-.logic_go_minute
+\ logic_go_clock: A frames of the original's interrupt's clock
+\ (logic_clock), A from 1: the seconds, a minute's end (which the next
+\ pass takes), the time out. Keeps nothing.
+.logic_go_clock
+{
+    TAX
     LOGIC_PAGE A, LOGIC_CODE_BANK
-    JMP logic_minute
+.frame
+    PHX
+    JSR logic_clock
+    PLX
+    DEX : BNE frame
+    RTS
+}
+
+\ logic_go_tick: the checks' minute (logic_tick): the seconds held at 00,
+\ the frame at the second's last, and a frame of the clock.
+.logic_go_tick
+    LOGIC_PAGE A, LOGIC_CODE_BANK
+    JMP logic_tick
 
 \ logic_go_init: the logic ready, once LOGICW, LOGIC and LOGICC are
 \ loaded: the area's objects indexed.

@@ -66,6 +66,10 @@ class Hooks:
         y, as the crosshair's) to the view's top and bottom by its centre."""
         self._note("sensor_lines", x, y)
 
+    def clock(self, s):
+        """$BB86-$BB8D: the clock's text shown, a second on."""
+        self._note("clock")
+
     def border(self, s, colour):
         """OUT ($FE): the border's colour (the interrupt's flash of a shot)."""
         self._note("border", colour)

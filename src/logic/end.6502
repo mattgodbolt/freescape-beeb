@@ -25,7 +25,6 @@ Demo        = zx(&891F)     ; 3: the demo plays itself
 DemoStream  = zx(&8924)     ; the demo's stream (in the bank) ...
 DemoCount   = zx(&8926)     ; ... the times its action has left ...
 DemoAt      = zx(&8927)     ; ... and where it's got to
-Clock       = zx(&88A4)     ; the clock's text, hh:mm:ss
 
 \ logic_go_end ($9AB7-$9B40): the game's end, once logic_go_pass has
 \ answered 2: the message by cause (hook_message), sound 20 unless won,

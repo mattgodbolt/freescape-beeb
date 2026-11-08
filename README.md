@@ -70,7 +70,9 @@ ends the game as the original does: the panel says why, the end's own
 scene comes up with the safe sectors in its name, and after a moment any
 key (RETURN will do) starts a new game. Leave it alone and Driller's own
 demo plays itself, the original's recorded moves, drilling and shooting
-included, until a key starts a game.
+included, until a key starts a game. The original's four-hour clock
+counts down too, a second at a time, spending a unit of energy each
+minute; let it run out and the game ends OUT OF TIME.
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the
@@ -97,8 +99,8 @@ draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
 stock Master. Driller's game itself is coming in layer by layer: its
-sound, rigs, laser, sensors, the end, a new game and the demo are in;
-the clock running out and the information screen are next
+sound, rigs, laser, sensors, the clock, the end, a new game and the demo
+are in; the information screen is next
 (`docs/research/game-audit.md`). `docs/journal.md` has the
 story as it goes.
 
