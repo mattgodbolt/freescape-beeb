@@ -81,10 +81,11 @@ SECTION LiveGlue
     RTS
 \ centre: A, a pixel's place, to its centre in sixteenths: A X = 16 A + 8.
 .centre
-    LDX #0 : STX pk_qn
-    ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn
+    STA pk_qn
+    LSR A : LSR A : LSR A : LSR A : TAX         ; (the high byte)
+    LDA pk_qn
+    ASL A : ASL A : ASL A : ASL A
     ORA #SUB DIV 2
-    LDX pk_qn
     RTS
 }
 
