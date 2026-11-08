@@ -104,14 +104,13 @@ def generate(db, layout, out):
     L += equb("ld_pat_ix", ix)
     for plane in range(4):
         L += equb(f"ld_pool{plane}", (p[plane] for p in pool))
-    # Each area id's index in that order, &FF for none: the logic names an
-    # area by its id (AreaId).
-    of = [0xFF] * AREA_IDS
-    for i, a in enumerate(areas):
+    # Each area's id in that order: the logic names an area by its id
+    # (AreaId), which lv_switched searches for.
+    for a in areas:
         assert 0 < a["id"] < AREA_IDS, a["id"]
-        of[a["id"]] = i
+    assert len({a["id"] for a in areas}) == len(areas)
     L.append(f"LIVE_AREA_IDS = {AREA_IDS}")
-    L += equb("ld_area_of", of)
+    L += equb("ld_area_ids", (a["id"] for a in areas))
     L.append("ENDSECTION")
     # The free camera's (src/live.6502's FREE_CAMERA build), in its glue.
     L += ["", "IF NOT(LIVE_LOGIC)", "SECTION LiveGlue"]

@@ -718,9 +718,14 @@ ENDSECTION
 {
     STZ lv_switch : STZ an_on
     PAGE_IN BANK_DATA
-    LDX AreaId : BMI none
-    LDA ld_area_of,X : BMI none
-    JSR lv_enter_area
+    LDA AreaId : BMI none
+    LDX #LIVE_AREAS - 1
+.find
+    CMP ld_area_ids,X : BEQ got
+    DEX : BPL find
+    BRA none                                    ; (none of the records')
+.got
+    TXA : JSR lv_enter_area
 .none
     LDA AreaChanged : BEQ shown
     JSR logic_go_colours
