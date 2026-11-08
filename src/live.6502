@@ -221,7 +221,7 @@ IF LIVE_LOGIC
     LOGIC_HOOK_REDRAW = lv_hook_redraw
     LOGIC_HOOK_MESSAGE = lv_hook_message
     LOGIC_HOOK_LASER  = lv_hook_laser
-    LOGIC_HOOK_SHOT   = lv_pick         ; (src/laser.6502: in BANK_DATA, which the pass has paged)
+    LOGIC_HOOK_SHOT   = lv_hook_shot    ; (src/laser.6502's lv_pick, paged in)
 ENDIF
 \ The vertical sync's interrupt plays the sounds (src/sound.6502).
 IRQ_TICK = snd_tick
@@ -996,6 +996,14 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 .drawn
     RTS
 }
+
+\ lv_hook_shot (hook_shot, $B153): the pick (src/laser.6502's lv_pick, in
+\ BANK_GLUE), the logic's bank put back.
+.lv_hook_shot
+    LDA #BANK_GLUE : STA romsel
+    JSR lv_pick
+    LDA logic_paged : STA romsel
+    RTS
 
 \ lv_hook_loaded (hook_loaded): an area is loading.
 .lv_hook_loaded

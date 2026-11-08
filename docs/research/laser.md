@@ -44,8 +44,9 @@ look.
 
 `src/laser.6502`, `src/live.6502`.
 
-- **The pick** (`lv_pick`, the logic's `hook_shot`, in `BANK_DATA` with the
-  pass's own code): the front end leaves its draw list (`dl_*`), each
+- **The pick** (`lv_pick`, in `LiveGlue`, `LOGIC_BANK`'s room; the logic's
+  `hook_shot` is `lv_hook_shot`, which pages it in and the pass's bank back):
+  the front end leaves its draw list (`dl_*`), each
   object's faces (`tf_*`) and their clipped polygons (`out_v*`) in place
   until its next frame, so the pick walks them as the original walks its
   list: nearest first (`emit_faces`' order), and hits the first face whose

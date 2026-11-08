@@ -381,9 +381,9 @@ come with it, to see where the cycles go.
   a half turn, and the areas' ids searched for (`docs/journal.md`,
   2026-11-08, "room in the logic's banks"); and `next_crossing` and
   `move` walk the three axes by index. `LOGIC_CODE_BANK`'s room after the
-  logic's code (`LiveData`) holds the shot's pick, which the pass calls
-  there, the crosshair, the laser's and the sensors' lines and the
-  sensors' clock (2026-11-08, `docs/research/laser.md`,
+  logic's code (`LiveData`) holds the crosshair, the laser's and the
+  sensors' lines and the sensors' clock, and `LOGIC_BANK`'s (`LiveGlue`)
+  the shot's pick (2026-11-08, `docs/research/laser.md`,
   `docs/research/sensors.md`). The pick and the sensors need no record of
   the front end's beyond its frame's: its draw list (`dl_*`, `tf_*` in
   `ObjWork`) and polygons (`ObjOut`) stay until its next frame, and say

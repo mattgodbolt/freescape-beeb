@@ -1638,12 +1638,15 @@ for the next pass) going in before the disc's test, which must come first:
 they now wait for it.
 
 **Room** (the disc's, before and after: the merged branch's, then this):
-`LOGIC_BANK` 863 to 975 bytes (the crosshair moved out to `LiveData` with
-the lines); `BANK_DATA` 1,723 to 44 (the pick, the lines, the sensors'
-clock); `ObjMore` 1,445 to 1,189 (`LIVE` grew past a page of its
-alignment); shadow RAM past `RigCode` 715 to 60 (the sensors' test);
+`LOGIC_BANK` 863 to 453 bytes (the pick, behind a trampoline in main RAM,
+`lv_hook_shot`; the crosshair moved out to `LiveData` with the lines);
+`BANK_DATA` 1,723 to 566 (the lines, the sensors' clock, a sensor's
+pixel); `ObjMore` 1,445 to 1,189 (`LIVE` grew past a page of its
+alignment); shadow RAM past `RigCode` 715 to 52 (the sensors' test);
 `Work` 44 to 18. The free disc's `LiveGlue` room 400 to 368 (the logic's
-stop in the FCL, which both assemble).
+stop in the FCL, which both assemble). A first build had the pick in
+`BANK_DATA` too, which left it 44 bytes; the banks are balanced so for
+the end of the game, which wants room in both.
 
 **Cycles** (`tools/livecheck.mjs --time`, the shooting and sensors
 scenarios): the pick 4,450 / 6,489 / 10,362 a call (median / p90 / most);
@@ -1663,6 +1666,7 @@ turning 2.11 / 5.51 / 11.83 to 2.13 / 5.53 / 11.84. With them, all 1.86 /
 
 Left: the test inside a rig's redraw or the FCL's `REDRAW`; the border's
 flash (decision 133); the lines' plot, which works out each pixel's
-address afresh; `BANK_DATA`'s room, which the end of the game will want
-some of back (the pick could go to `LOGIC_BANK` behind a trampoline).
-Decisions 130 to 134 are Matt's to take or change.
+address afresh; shadow RAM past `RigCode` is nearly full. Decisions 130
+to 134 are Matt's to take or change. `mk/live.mk` now names
+`src/laser.6502` and `src/sensors.6502` among the disc's sources (a build
+had missed a change to one).

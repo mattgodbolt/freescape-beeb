@@ -29,9 +29,9 @@ ZA_AUTO 3, pk_mp
 ZA_AUTO 3, pk_pp
 
 \ ---------------------------------------------------------------------------
-\ The pick, in LiveData (BANK_DATA, the logic's LOGIC_CODE_BANK, which the
-\ pass has paged when it calls hook_shot).
-SECTION LiveData
+\ The pick, in LiveGlue (BANK_GLUE, the logic's LOGIC_BANK): the pass's
+\ hook_shot is lv_hook_shot, which pages it in (src/live.6502).
+SECTION LiveGlue
 
 \ lv_pick (hook_shot, $B153): Collided = the id of the object whose face,
 \ nearest first, is the first to hold the crosshair's pixel; unchanged if

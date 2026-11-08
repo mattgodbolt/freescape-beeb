@@ -985,7 +985,7 @@ The original draws a shot's four lines at the frame its counter wraps,
 plays sound 2 (two fields, the game held) and takes them off at the next
 frame's interrupt. The disc shows them from the shot for sound 2's fields
 and one more (`SENSOR_LINES`), in frames of their own as the laser's
-(decision 130), by the same line, halved the same way; a line's end on the
-view's last line but one (y 0, which the original draws below the view)
+(decision 130), by the same line, halved the same way; a line's end at y 0,
+a line below the view's bottom (where the original's row table puts it),
 isn't drawn.
 

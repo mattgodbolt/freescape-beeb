@@ -147,7 +147,6 @@ SECTION RigCode
 .sn_sight
 {
     ZA_AUTO1 i, e, cx, cy, jet, margin
-    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (move and the pick)
     LDA SN_FOUND_N : BNE some
     JMP merge
 .some
@@ -162,6 +161,7 @@ SECTION RigCode
     STZ Collided
     LDA SN_FOUND + 4,X : STA CrossX
     LDA SN_FOUND + 5,X : STA CrossY
+    LOGIC_PAGE A, LOGIC_BANK                    ; (the pick's, BANK_GLUE)
     JSR lv_pick
     LDA cx : STA CrossX : LDA cy : STA CrossY
     LDX e
@@ -181,6 +181,7 @@ SECTION RigCode
 .found
     LDA InJet : STA jet : LDA Margin : STA margin
     LDA #1 : STA InJet : STZ Margin
+    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (move)
     LDA ix_xo,Y : LDX #0 : JSR target
     LDA ix_yo,Y : LDX #2 : JSR target
     LDA ix_zo,Y : LDX #4 : JSR target
@@ -253,7 +254,7 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     LDA #0
     PLP : BCC state
     \ in range: drawn?
-    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (lv_spot, with the pick)
+    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (lv_spot, BANK_DATA's)
     LDA k : JSR lv_spot
     LDX e
     BCC unseen
@@ -280,7 +281,8 @@ ENDSECTION
 ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 
 \ ---------------------------------------------------------------------------
-\ The drawn sensor's pixel, in LiveData with the pick (BANK_DATA).
+\ The drawn sensor's pixel, in LiveData (BANK_DATA, the logic's
+\ LOGIC_CODE_BANK).
 SECTION LiveData
 
 \ lv_spot: whether the frame drew the indexed object A (the draw list's
