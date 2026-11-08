@@ -92,6 +92,9 @@ def generate(db, layout, out):
     # Each area's patterns (the sky's, then colours 1 to 15's: four bytes
     # each) are named by index into a pool of the distinct ones, kept a
     # byte plane at a time so that an index reaches all four (live_patterns).
+    # Every plane's byte is under 64 (asserted), so the fourth plane's six
+    # bits ride in the other three's top two: plane 3's bits 0-1 in plane
+    # 0's, 2-3 in plane 1's, 4-5 in plane 2's.
     pool, ix = [], []
     for a in areas:
         for p in [parts.sky(a)] + [parts.pattern(a, c) for c in range(1, 16)]:
@@ -102,8 +105,9 @@ def generate(db, layout, out):
             ix.append(pool.index(p))
     assert len(pool) <= 256, len(pool)
     L += equb("ld_pat_ix", ix)
-    for plane in range(4):
-        L += equb(f"ld_pool{plane}", (p[plane] for p in pool))
+    assert all(0 <= b < 64 for p in pool for b in p), "a pattern byte past six bits"
+    for plane in range(3):
+        L += equb(f"ld_pool{plane}", (p[plane] | (((p[3] >> (2 * plane)) & 3) << 6) for p in pool))
     # Each area's id in that order: the logic names an area by its id
     # (AreaId), which lv_switched searches for.
     for a in areas:

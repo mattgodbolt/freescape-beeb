@@ -10,9 +10,10 @@
 \ original's rows, ZX_INFO_ROWS), each character the panel's font's glyph
 \ (tools/model/panel.py's FONT: four pixels a character, so 26 fill the
 \ view's 104), in yellow, as the original's ink 6 on black. The code in
-\ main RAM (section LogicMore, after the front end's ObjMore), the tables
-\ with the text (section InfoData, in the front end's bank, INFO_BANK),
-\ which it pages in.
+\ main RAM (section LogicMore, after the front end's ObjMore), the text and
+\ the character map (section InfoData, in the front end's bank, INFO_BANK)
+\ and the panel's font (PanelData, LOGIC_CODE_BANK), which it pages in
+\ turn, a character's glyph then the next character's code.
 \ ***************************************************************************
 
 SECTION LogicMore
@@ -63,8 +64,9 @@ ASSERT ZX_INFO_COLS * 4 = VIEW_W AND MAX(ZX_INFO_ROWS) < VIEW_H DIV 8 AND PANEL_
     TAX : LDA info_ascii,X                      ; its glyph ...
     STA ch
     ASL A : ASL A : ADC ch : TAX                ; ... whose lines start at 5 g
+    LDA #LOGIC_CODE_BANK : STA ROMSEL_COPY : STA romsel   ; (the panel's font is that bank's)
 .glyph
-    LDA info_font,X
+    LDA pt_font,X
     PHA
     LSR A : LSR A : TAY : LDA ink,Y             ; the left two pixels
     LDY #0 : STA (p),Y                          ; (p: the glyph's line)
@@ -75,6 +77,7 @@ ASSERT ZX_INFO_COLS * 4 = VIEW_W AND MAX(ZX_INFO_ROWS) < VIEW_H DIV 8 AND PANEL_
     INX
     LDA p : AND #7 : CMP #PANEL_FONT_H : BNE glyph
     \ on to the next character: two columns on, from its top
+    LDA #INFO_BANK : STA ROMSEL_COPY : STA romsel
     LDA p : AND #&F8 : CLC : ADC #16 : STA p
     BCC same
     INC p+1
@@ -92,9 +95,10 @@ ASSERT ZX_INFO_COLS * 4 = VIEW_W AND MAX(ZX_INFO_ROWS) < VIEW_H DIV 8 AND PANEL_
 \ an eight-byte boundary, so p's low bits count its lines; no glyph's line
 \ is past a byte's reach)
 ASSERT PANEL_FONT_H = 5 AND (LO(VIEW_ADDR) AND 15) = 0 AND LEN(PANEL_FONT) <= 256
+\ (the font is the panel's own, pt_font in PanelData: the same bytes)
+ASSERT LOGIC_CODE_BANK = BANK_DATA AND pt_bar - pt_font = LEN(PANEL_FONT)
 ENDSECTION
 SECTION InfoData
 .info_rows  EQUB ZX_INFO_ROWS
 .info_ascii EQUB PANEL_ASCII
-.info_font  EQUB PANEL_FONT
 ENDSECTION

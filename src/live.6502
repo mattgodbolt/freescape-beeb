@@ -1400,10 +1400,13 @@ SECTION LiveData
     LDA (p),Y : STA t
     TYA : ASL A : ASL A : TAX
     LDY t
-    LDA ld_pool0,Y : STA rs_pat,X
-    LDA ld_pool1,Y : STA rs_pat + 1,X
-    LDA ld_pool2,Y : STA rs_pat + 2,X
-    LDA ld_pool3,Y : STA rs_pat + 3,X
+    \ (planes 0 to 2 are six bits and carry plane 3's in their top two:
+    \ 4-5 in plane 2's, then 2-3, then 0-1, shifted into t high first)
+    STZ t
+    LDA ld_pool2,Y : ASL A : ROL t : ASL A : ROL t : LSR A : LSR A : STA rs_pat + 2,X
+    LDA ld_pool1,Y : ASL A : ROL t : ASL A : ROL t : LSR A : LSR A : STA rs_pat + 1,X
+    LDA ld_pool0,Y : ASL A : ROL t : ASL A : ROL t : LSR A : LSR A : STA rs_pat,X
+    LDA t : STA rs_pat + 3,X
     TXA : LSR A : LSR A : TAY
     DEY : BPL pattern
     RTS
