@@ -1476,3 +1476,41 @@ Not done: the laser (the audit's plan: the lines as frames of their own,
 as the crosshair is, and the pick from the front end's faces, which needs
 an object a face), the sensors, the end and a new game. Left for Matt:
 decisions 120 to 122.
+
+## 2026-11-08: room in the front end for the laser and the sensors (the fifteenth round)
+
+The laser wants the front end to say which object each output face
+belongs to, and the sensors' line-of-sight tests want code; the front
+end's regions were counted and the cold-path shares decision 76 allowed to
+be reverted were put back (each a commit of its own, byte-exact against the
+model; `make check` passes on the last).
+
+Bytes freed, and objectcheck's entrance views / walks / yaw sweeps (medians,
+117,737 / 92,678 / 65,457 before):
+
+| change | region | bytes | after, all three together |
+|---|---|---|---|
+| the projection's cases share `pj_patch` | `ObjMore` | 381 | |
+| the 2D clip's passes share a body per axis | `ObjMore` | 284 | 118,204 / 92,875 / 65,503 |
+| `camera_setup` a loop over the axes | bank | 243 | 118,348 / 93,014 / 65,587 |
+
+(+0.5%, +0.4%, +0.2% in all.) The live check's flip to flip, median /
+p90 / max, against the entry above: entrances 8.05 to 8.45 (the rigs'
+scenarios are in this run: 8.35 before), walking 1.55 to 1.58, turning
+2.07 to 2.1, all 1.76 to 1.81. Not taken: the level camera's bound patch
+(594 bytes for about 560 cycles on a turn's frame, 0.9%).
+
+Room now: the bank 1,176 (from 933), `ObjMore` 1,445 (from 780), ANDY 70,
+`ObjWork` 169, main RAM before `RasterEnds` 382, the fill's bank 1,024,
+`AreaConv`'s bank 135, the OS's pages 44. A scan for routines nothing
+calls and for repeated runs of code found no dead code; what repeats is
+the unrolled hot code (`fill_point`'s columns, `transform_object`'s vertex
+types), which stays.
+
+For the laser's per-face byte: `emit_faces` can store the object's slot
+(`dl_obj`, once an object) beside `out_fn`/`out_fv`/`out_fc`, about 8 cycles
+a face (0.3% of a median entrance view) and 128 bytes; it fits `ObjMore`
+or `ObjWork`, both read whatever X (main RAM's `&3000` room is not: the
+logic reads with X set). A table of runs by object (slot and first output
+face, 2 bytes an object, about 20 cycles an object, the laser scanning it)
+costs less.
