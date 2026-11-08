@@ -540,6 +540,7 @@ def assembly(build, packed):
         f"PANEL_PITCH_MID = {panel.PITCH_MID}",
         f"PANEL_PITCH_LINES = {panel.PITCH_LINES}",
         f"PANEL_PITCH_H = {panel.PITCH_H}",
+        f"PANEL_PITCH0_PERIOD = {panel.PITCH0_PERIOD}",
         f"PANEL_PITCH1_PERIOD = {panel.PITCH1_PERIOD}",
         f"PANEL_BAR_MAX = {panel.BAR_MAX}",
         f"PANEL_NEUTRAL_FROM = {panel.NEUTRAL_FROM}",

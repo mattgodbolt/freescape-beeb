@@ -410,10 +410,14 @@ ENDIF
     LDX #PF_PITCH0
     LDY #PN_PITCH0
 .pitch_cell
+    PHA                                         ; (each column's tape is a period: the line mod it)
+    CMP #PANEL_PITCH0_PERIOD : BCC pitch_tens   ; (the tens': half the lines)
+    SBC #PANEL_PITCH0_PERIOD
+.pitch_tens
     JSR panel_set
-    PHA : TXA : CLC : ADC #PF_PITCH1 - PF_PITCH0 : TAX : PLA
-    PHA                                         ; (the units' column is one period of its tape: the line mod it)
-    SEC
+    TXA : CLC : ADC #PF_PITCH1 - PF_PITCH0 : TAX
+    PLA : PHA
+    SEC                                         ; (the units': a twelfth)
 .period
     SBC #PANEL_PITCH1_PERIOD : BCS period
     ADC #PANEL_PITCH1_PERIOD
@@ -568,6 +572,7 @@ ENDIF
 }
 ASSERT pm_over - pm_neutral < 256 AND pm_build - pm_neutral < 256 AND pm_cleared - pm_neutral < 256
 ASSERT PN_MESSAGE = PANEL_MESSAGE AND PN_NAME = PANEL_MESSAGE AND PN_X = 4 AND PN_Y = 4 AND PN_Z = 4
+ASSERT 2 * PANEL_PITCH0_PERIOD = PANEL_PITCH_LINES AND PANEL_PITCH_LINES MOD PANEL_PITCH1_PERIOD = 0
 ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
 
 \ mod_turn: A mod STEPS_TURN. Keeps X and Y.
