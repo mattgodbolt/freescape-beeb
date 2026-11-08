@@ -1071,3 +1071,13 @@ would want the loader's own disc access kept and a write (a sector or two
 of the disc), a layer of its own.
 
 
+
+## 170. The panel's pitch tapes and names, and the pattern pool, are stored as their periods and packings (2026-11-08, autonomous, proposed for Matt)
+
+Memory is short, so the build keeps less where the data repeat: the pitch
+tapes are one period each and their cells the line mod the period (a few
+hundred cycles more in `panel_values` when the pitch changes); the area
+names are the original's 12 characters, not 14 cells; the pattern pool
+keeps its fourth plane in the other three's top two bits; the information
+screen reads the panel's font, paging two banks as it draws. No picture
+changes. The option, for Matt: put the bytes back for the cycles.

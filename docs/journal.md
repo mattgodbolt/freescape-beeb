@@ -1859,3 +1859,35 @@ stream, behind a trampoline in main RAM (`demo_next`). Nothing the logic
 does changed (`make logic6502`, `make live`). Room, logic disc, before and
 after: `ObjMore`'s 83 to 314; `LOGIC_BANK` 453 to 226; the free disc's
 `LiveGlue` 353 to 126.
+
+## 2026-11-08: scavenging round (decision 170)
+
+Nothing a frame shows changed (`make live`: every frame the model's, byte
+for byte) and the frame loop's cycles are as before within noise. The
+wins were all in tables the build generates or cold code:
+- The information screen reads the panel's font (`pt_font`) instead of
+  keeping its own copy in the front end's bank: it pages `LOGIC_CODE_BANK`
+  for a character's glyph and `INFO_BANK` for the next character's code.
+  Front end bank's room 142 to 377; `LogicMore` grows by the paging, 314 to
+  300.
+- The area pattern pool keeps its fourth plane in the top two bits of the
+  other three (every plane's byte is under 64, asserted); `live_patterns`
+  shifts it out. `BANK_DATA` 271 to 418.
+- The pitch's two tapes are periodic: the units' every twelve lines, the
+  tens' every half turn. Each table is one period and the window past it,
+  and the cells are the line mod the period (`tools/model/panel.py`
+  asserts the periods; `panel_values` runs a few hundred more cycles when
+  the pitch changes). `BANK_DATA` 418 to 609.
+- The area names keep their twelve characters, not fourteen cells (the
+  spaces each side are written by `names`). `BANK_DATA` 609 to 657.
+- `sensor_watching` (ANDY) is a loop over its three axes: ANDY 70 to 196.
+Room, logic disc, before and after: `BANK_DATA` 271 to 657, front end bank
+142 to 377, ANDY 70 to 196, main RAM after `LogicMore` 314 to 300,
+`LOGIC_BANK` 226, shadow RAM 52, raster bank 1,024.
+Not taken: moving `new_game`'s object-flag loop into `LOGIC_BANK` (a
+transfer that spends the bank's room) and `info_draw` into ANDY (it would
+spend the ANDY room just gained). Not done: `ac_cuboid`'s unrolled faces
+(a loop would give back about 160 bytes of `BANK_DATA` for some hundred
+cycles an entrance); the figures' arithmetic; 224 bytes of shadow RAM
+between the logic's lists and `AreaShapes`, which the loader would need a
+part of its own for.

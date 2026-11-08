@@ -404,10 +404,12 @@ come with it, to see where the cycles go.
   projection's patch, the 2D clip's bodies and `camera_setup`'s axes again
   for the laser's and the sensors' room). Their guards in
   `src/live.6502` say when any doesn't fit.
-- The front end's bank after its code: the information screen's text, the
-  code that writes its fields, and the panel's font to draw it with
-  (`InfoData`, 2026-11-08, `docs/research/info.md`), reached from main
-  RAM with that bank paged.
+- The front end's bank after its code: the information screen's text and
+  the code that writes its fields (`InfoData`, 2026-11-08,
+  `docs/research/info.md`), reached from main RAM with that bank paged. Its
+  glyphs are the panel's font in `BANK_DATA`, paged by character
+  (`docs/journal.md`, 2026-11-08, "scavenging round", decision 170, which
+  also has the panel's tapes and names and the pattern pool packed).
 - ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the paged bank's
   first 4K): the front end's rarely run code, reached through trampolines
   in main RAM (decision 52, `docs/research/objects.md`, "ANDY").
