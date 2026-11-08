@@ -90,22 +90,10 @@ ZA_AUTO2 lk
     LDA FoundId
     LDX ix_n : STA ix_id,X                      ; (the stop)
     LDX AreaObjects
-.global
-    CMP ix_id,X : BEQ global_is
-    INX
-    CMP ix_id,X : BEQ global_is
-    INX
-    BRA global
-.global_is
+    JSR scan
     CPX ix_n : BNE indexed
     LDX #0                                      ; not a global: the area's
-.area
-    CMP ix_id,X : BEQ area_is
-    INX
-    CMP ix_id,X : BEQ area_is
-    INX
-    BRA area
-.area_is
+    JSR scan
     CPX AreaObjects : BCS none
 .indexed
     LDA ix_pl,X : STA lk
@@ -129,6 +117,16 @@ ZA_AUTO2 lk
     RTS
 .found
     SEC
+    RTS
+    \ scan: X the index of the first object from X with id A (the stop
+    \ after the last is one)
+.scan
+    CMP ix_id,X : BEQ scanned
+    INX
+    CMP ix_id,X : BEQ scanned
+    INX
+    BRA scan
+.scanned
     RTS
 .is_it
     LDY #7 : LDA (lk),Y : CMP FoundId

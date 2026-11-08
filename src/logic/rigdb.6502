@@ -7,7 +7,11 @@
 \ ***************************************************************************
 
 \ The rig's state across its routines, in both banks.
-ZA_AUTO1 rig_c, rig_pct, rig_yld, rig_b, rig_h, rig_cz
+ZA_AUTO1 rig_c, rig_pct, rig_yld
+ZA_AUTO 3, rig_box                              ; the rig's cell x, y, z in turn (suitable's loop)
+rig_b = rig_box
+rig_h = rig_box + 1
+rig_cz = rig_box + 2
 rig_v = RigScratch + 3                          ; the score's change: its instruction's operands
 
 RIG_SHOWN = 50              ; frames a message shows ($C29A), and the redraw's
@@ -52,12 +56,17 @@ SECTION RigCode
     JSR first : BEQ yes
 .object
     LDA (p) : AND #&40 : BNE next_o
-    LDY #1 : LDX rig_b : JSR ends_before : BMI next_o
-    LDY #2 : LDX rig_h : JSR ends_before : BMI next_o
-    LDY #3 : LDX rig_cz : JSR ends_before : BMI next_o
-    LDA rig_b : CLC : ADC #RIG_W - 1 : LDY #1 : CMP (p),Y : BMI next_o
-    LDA rig_h : CLC : ADC #RIG_H : LDY #2 : CMP (p),Y : BMI next_o
-    LDA rig_cz : CLC : ADC #RIG_W - 1 : LDY #3 : CMP (p),Y : BPL no
+    \ each axis (x, y, z): the object ends (cell + size - 1) before the rig
+    \ starts, or starts after its far end (by the signs), and it's clear
+    LDX #2
+.axis
+    TXA : INC A : TAY                           ; (the object's cell: byte 1 to 3)
+    LDA (p),Y : INY : INY : INY
+    CLC : ADC (p),Y : DEC A : CMP rig_b,X : ZA_INDEXEDBY 0..2 : BMI next_o
+    DEY : DEY : DEY
+    LDA rig_b,X : ZA_INDEXEDBY 0..2 : CLC : ADC reach,X : CMP (p),Y : BMI next_o
+    DEX : BPL axis
+    BRA no
 .next_o
     JSR next : BNE object
 .yes
@@ -91,13 +100,9 @@ SECTION RigCode
 .out
     CLC
     RTS
-    \ ends_before: N set if the object's axis at Y ends (cell + size - 1)
-    \ before X, by the sign
-.ends_before
-    STX t
-    LDA (p),Y : INY : INY : INY
-    CLC : ADC (p),Y : DEC A : CMP t
-    RTS
+    \ reach: the rig's far end from its cell, by axis (x, y, z)
+.reach
+    EQUB RIG_W - 1, RIG_H, RIG_W - 1
 }
 
     \ the messages that never change

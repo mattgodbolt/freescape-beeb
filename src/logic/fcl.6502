@@ -232,33 +232,21 @@ ZA_AUTO1 a1, a2, a3
     CMP #&20 : BEQ if_shown
     CMP #&21 : BEQ if_hidden
     LDA (lk) : AND #&20 : BNE on                ; destroyed: nothing more
-    LDA run.op
-    CMP #&11 : BNE not_destroy
-    LDA (lk) : ORA #&20 : STA (lk)
-    BRA hide
-.not_destroy
-    CMP #6 : BNE vis_or_not
-    LDA (lk) : AND #&40 : BNE show              ; toggled
-    BRA hide
-.vis_or_not
-    CMP #7 : BEQ show
-.hide
-    LDA (lk) : ORA #&40 : STA (lk)
-    BRA on
-.show
-    LDA (lk) : AND #&BF : STA (lk)
+    LDA run.op : SEC : SBC #3                   ; 6, 7, 8 as 3, 4, 5
+    CMP #&0E : BNE flagged
+    LDA #&10                                    ; &11 as &10
+.flagged
+    JSR object_flags
 .on
     SEC
     RTS
 }
 
-\ show_hide ($B424-$B4C9): TOGVIS, VIS, INVIS or DESTROY (run.op) on the
-\ object at lk, a global or this area's.
-.show_hide
+\ object_flags: TOGVIS (A = 3), VIS (4), INVIS (5) or DESTROY (&10) on the
+\ object at lk, which isn't destroyed: C set if it is hidden after, else
+\ shown.
+.object_flags
 {
-    LDA (lk) : AND #&20 : BNE done              ; destroyed: nothing more
-    LDA #1 : STA Wipe
-    LDA run.op
     CMP #&10 : BNE not_destroy
     LDA (lk) : ORA #&20 : STA (lk)
     BRA hide
@@ -270,12 +258,27 @@ ZA_AUTO1 a1, a2, a3
     CMP #4 : BNE hide
 .show
     LDA (lk) : AND #&BF : STA (lk)
+    CLC
+    RTS
+.hide
+    LDA (lk) : ORA #&40 : STA (lk)
+    SEC
+    RTS
+}
+
+\ show_hide ($B424-$B4C9): TOGVIS, VIS, INVIS or DESTROY (run.op) on the
+\ object at lk, a global or this area's.
+.show_hide
+{
+    LDA (lk) : AND #&20 : BNE done              ; destroyed: nothing more
+    LDA #1 : STA Wipe
+    LDA run.op
+    JSR object_flags : BCS hide
     LDA #4 : TSB GameFlags
 .done
     RTS
 .hide
-    LDA (lk) : ORA #&40 : STA (lk)
-    AND #&0F : CMP #2 : BNE drawn               ; a sensor leaves the interrupt's list
+    LDA (lk) : AND #&0F : CMP #2 : BNE drawn    ; a sensor leaves the interrupt's list
     LDA SensorList+1 : BEQ drawn
     LDY #7 : LDA (lk),Y : PHA
     \ ($B467) its entry in the interrupt's list, of its count, goes off, and
@@ -325,23 +328,17 @@ ASSERT FclVars + 255 < zxv + ZXV_LEN
 \ (bit_of).
 .fcl_set
     JSR bit_of
-    ORA FclBits,X : STA FclBits,X
-    SEC
-    RTS
+    ORA FclBits,X
+    BRA bit_put
 .fcl_clear
     JSR bit_of
-    EOR #&FF : AND FclBits,X : STA FclBits,X
-    SEC
-    RTS
+    EOR #&FF : AND FclBits,X
+    BRA bit_put
 .fcl_togbit
     JSR bit_of
-    STA bit_of.mask
-    AND FclBits,X : BNE bit_was                 ; set: cleared, else set
-    LDA bit_of.mask : ORA FclBits,X : STA FclBits,X
-    SEC
-    RTS
-.bit_was
-    LDA bit_of.mask : EOR #&FF : AND FclBits,X : STA FclBits,X
+    EOR FclBits,X                               ; (a set bit cleared, a clear one set)
+.bit_put
+    STA FclBits,X
     SEC
     RTS
 .fcl_ifbit
@@ -359,7 +356,6 @@ ASSERT FclVars + 255 < zxv + ZXV_LEN
 \ on, or of 0.
 .bit_of
 {
-    ZA_AUTO1 mask
     LDA a1 : DEC A
     LDX #0
 .byte

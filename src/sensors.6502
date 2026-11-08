@@ -91,11 +91,7 @@ SECTION RigCode
     \ hi = lo + 64 size: its sign
     PHY
     INY : INY : INY
-    LDA (sn_rec),Y : STA sn_hi : STZ sn_hi+1
-    LDX #6
-.times64
-    ASL sn_hi : ROL sn_hi+1
-    DEX : BNE times64
+    LDA (sn_rec),Y : JSR mul64 : STA sn_hi+1 : LDA sn_m : STA sn_hi
     PLY
     LDA sn_lo : CLC : ADC sn_hi
     LDA sn_lo+1 : ADC sn_hi+1 : BPL summed
@@ -121,18 +117,22 @@ SECTION RigCode
     RTS
 \ cells: sn_lo = 64 A - the camera's coordinate on axis Y - 1 (1 to 3).
 .cells
-    STZ sn_lo+1
-    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
-    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
-    ASL A : ROL sn_lo+1 : ASL A : ROL sn_lo+1
-    STA sn_lo
+    JSR mul64 : STA sn_lo+1
     LDX sn_axis,Y
-    LDA sn_lo : SEC : SBC PlayerX,X : STA sn_lo
+    LDA sn_m : SEC : SBC PlayerX,X : STA sn_lo
     LDA sn_lo+1 : SBC PlayerX+1,X : STA sn_lo+1
     RTS
 .sn_axis    EQUB 0, 0, 2, 4                     ; (by Y: PlayerX's offset for x, y, z)
 .sn_bit     EQUB 0, 1, 4, 16                    ; (by Y: the low face's bit; the high's is twice it)
 }
+
+\ mul64: 64 A (a cell's first unit) as a 14-bit count: the high byte in A,
+\ the low in sn_m. Keeps X and Y.
+.mul64
+    STZ sn_m
+    LSR A : ROR sn_m
+    LSR A : ROR sn_m
+    RTS
 
 \ sn_redraw: the projection's list if the pass re-projected (sn_proj), then
 \ the line of sight and the interrupt's list. Pages LOGIC_CODE_BANK in last.
@@ -220,12 +220,9 @@ SECTION RigCode
 \ target: the target's coordinate X (0, 2, 4) and sn_want's, cell A's
 \ first unit (64 A). Keeps Y.
 .target
-    STZ sn_want+1,X
-    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
-    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
-    ASL A : ROL sn_want+1,X : ASL A : ROL sn_want+1,X
-    STA sn_want,X : STA TargetX,X
-    LDA sn_want+1,X : STA TargetX+1,X
+    JSR mul64
+    STA sn_want+1,X : STA TargetX+1,X
+    LDA sn_m : STA sn_want,X : STA TargetX,X
     RTS
 }
 ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
@@ -277,6 +274,7 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 }
 SENSOR_TYPE = 2
 ZA_AUTO2 sn_lo, sn_hi, sn_rec
+ZA_AUTO1 sn_m
 ENDSECTION
 ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 

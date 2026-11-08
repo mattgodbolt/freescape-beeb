@@ -24,7 +24,9 @@
 \ the product, and the edge's first
 ZA_AUTO2 pk_qx, pk_qy
 ZA_AUTO1 pk_qn
-ZA_AUTO2 pk_ma, pk_mb
+ZA_AUTO 4, pk_m                                 ; pk_ma, pk_mb: pk_smul's loop is over the pair
+pk_ma = pk_m
+pk_mb = pk_m + 2
 ZA_AUTO 3, pk_mp
 ZA_AUTO 3, pk_pp
 
@@ -79,10 +81,11 @@ SECTION LiveGlue
     RTS
 \ centre: A, a pixel's place, to its centre in sixteenths: A X = 16 A + 8.
 .centre
-    LDX #0 : STX pk_qn
-    ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn : ASL A : ROL pk_qn
+    STA pk_qn
+    LSR A : LSR A : LSR A : LSR A : TAX         ; (the high byte)
+    LDA pk_qn
+    ASL A : ASL A : ASL A : ASL A
     ORA #SUB DIV 2
-    LDX pk_qn
     RTS
 }
 
@@ -98,11 +101,12 @@ SECTION LiveGlue
     STZ seen
     LDY v0
 .bracket
-    LDA out_vxl,Y : CMP pk_qx : LDA out_vxh,Y : SBC pk_qx+1
+    LDA out_vxl,Y : SEC : SBC pk_qx : TAX       ; (the difference's low byte kept for the equal test)
+    LDA out_vxh,Y : SBC pk_qx+1
     BVC xv : EOR #&80
 .xv BMI x_lt
-    LDA out_vxl,Y : CMP pk_qx : BNE x_gt
-    LDA out_vxh,Y : CMP pk_qx+1 : BNE x_gt
+    BNE x_gt
+    CPX #0 : BNE x_gt
     LDA #3 : BRA x_set                          ; equal: both
 .x_gt
     LDA #2 : BRA x_set
@@ -110,11 +114,12 @@ SECTION LiveGlue
     LDA #1
 .x_set
     TSB seen
-    LDA out_vyl,Y : CMP pk_qy : LDA out_vyh,Y : SBC pk_qy+1
+    LDA out_vyl,Y : SEC : SBC pk_qy : TAX
+    LDA out_vyh,Y : SBC pk_qy+1
     BVC yv : EOR #&80
 .yv BMI y_lt
-    LDA out_vyl,Y : CMP pk_qy : BNE y_gt
-    LDA out_vyh,Y : CMP pk_qy+1 : BNE y_gt
+    BNE y_gt
+    CPX #0 : BNE y_gt
     LDA #12 : BRA y_set
 .y_gt
     LDA #8 : BRA y_set
@@ -183,14 +188,13 @@ SECTION LiveGlue
 {
     ZA_AUTO1 sign
     LDA pk_ma+1 : EOR pk_mb+1 : STA sign
-    LDA pk_ma+1 : BPL a_pos
-    LDA #0 : SEC : SBC pk_ma : STA pk_ma
-    LDA #0 : SBC pk_ma+1 : STA pk_ma+1
-.a_pos
-    LDA pk_mb+1 : BPL b_pos
-    LDA #0 : SEC : SBC pk_mb : STA pk_mb
-    LDA #0 : SBC pk_mb+1 : STA pk_mb+1
-.b_pos
+    LDX #2                                      ; pk_mb, then pk_ma
+.magnitude
+    LDA pk_ma+1,X : ZA_INDEXEDBY 0..2 : BPL positive
+    LDA #0 : SEC : SBC pk_ma,X : ZA_INDEXEDBY 0..2 : STA pk_ma,X : ZA_INDEXEDBY 0..2
+    LDA #0 : SBC pk_ma+1,X : ZA_INDEXEDBY 0..2 : STA pk_ma+1,X : ZA_INDEXEDBY 0..2
+.positive
+    DEX : DEX : BPL magnitude
     STZ pk_mp : STZ pk_mp+1 : STZ pk_mp+2
     LDX #0                                      ; (pk_ma's top byte, shifted in)
 .bit
