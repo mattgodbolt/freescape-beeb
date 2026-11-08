@@ -274,16 +274,16 @@ ZA_AUTO1 rig_f, rig_f2                          ; the redraw flags before the re
     LDA AreaGas : SEC : SBC rig_b : SEC : SBC #6 : JSR magnitude : STA d
     LDA AreaGas+1 : SEC : SBC rig_cz : SEC : SBC #6 : JSR magnitude
     CLC : ADC d : STA d
-    \ v = d * 100 (= 64 d + 32 d + 4 d), less 25600 for a d of &80 on
-    STZ v+1
-    ASL A : ROL v+1 : ASL A : ROL v+1           ; 4 d
-    LDX v+1 : STX q+1 : STA q
-    ASL A : ROL v+1 : ASL A : ROL v+1 : ASL A : ROL v+1    ; 32 d
-    PHA : CLC : ADC q : STA q
-    LDA v+1 : ADC q+1 : STA q+1
-    PLA : ASL A : ROL v+1                       ; 64 d
-    CLC : ADC q : STA v
-    LDA v+1 : ADC q+1 : STA v+1
+    \ v = d * 100 by adding (a drill is a key's, not a frame's), less 25600
+    \ for a d of &80 on
+    STZ v : STZ v+1
+    LDX #100
+.times100
+    LDA v : CLC : ADC d : STA v
+    BCC counted
+    INC v+1
+.counted
+    DEX : BNE times100
     BIT d : BPL positive
     LDA v+1 : SEC : SBC #100 : STA v+1
 .positive

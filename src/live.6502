@@ -1343,10 +1343,11 @@ SECTION LiveGlue
     ASL m : ROL m+1                             ; 2m
     LDA m : STA lo+1 : LDA m+1 : STA lo+2
     ASL m : ROL m+1                             ; 4m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
+    JSR add_m
     ASL m : ROL m+1                             ; 8m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
+    JSR add_m
     ASL m : ROL m+1 : ASL m : ROL m+1 : ASL m : ROL m+1   ; 64m
+.add_m
     LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
     RTS
 }
@@ -1531,9 +1532,7 @@ IF LIVE_LOGIC
     INX : LDA CrossY : JSR vw_byte
     BRA laser
 .off
-    JSR vw_byte                                 ; (A is 0)
-    INX : LDA #0 : JSR vw_byte
-    INX : LDA #0 : JSR vw_byte
+    JSR zeros
 .laser
     INX
     LDA lz_on : BEQ dark
@@ -1542,11 +1541,16 @@ IF LIVE_LOGIC
     INX : LDA lz_y : JSR vw_byte
     BRA lines
 .dark
-    JSR vw_byte                                 ; (A is 0)
-    INX : LDA #0 : JSR vw_byte
-    INX : LDA #0 : JSR vw_byte
+    JSR zeros
 .lines
     INX : LDA sl_gen : JMP vw_byte
+\ zeros: the three inputs from vw_rec + X as 0 (off: no crosshair or laser).
+\ Leaves X at the last.
+.zeros
+    LDA #0 : JSR vw_byte
+    INX : LDA #0 : JSR vw_byte
+    INX : LDA #0
+    \ (on into vw_byte)
 ELSE
     RTS
 ENDIF

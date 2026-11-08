@@ -325,23 +325,17 @@ ASSERT FclVars + 255 < zxv + ZXV_LEN
 \ (bit_of).
 .fcl_set
     JSR bit_of
-    ORA FclBits,X : STA FclBits,X
-    SEC
-    RTS
+    ORA FclBits,X
+    BRA bit_put
 .fcl_clear
     JSR bit_of
-    EOR #&FF : AND FclBits,X : STA FclBits,X
-    SEC
-    RTS
+    EOR #&FF : AND FclBits,X
+    BRA bit_put
 .fcl_togbit
     JSR bit_of
-    STA bit_of.mask
-    AND FclBits,X : BNE bit_was                 ; set: cleared, else set
-    LDA bit_of.mask : ORA FclBits,X : STA FclBits,X
-    SEC
-    RTS
-.bit_was
-    LDA bit_of.mask : EOR #&FF : AND FclBits,X : STA FclBits,X
+    EOR FclBits,X                               ; (a set bit cleared, a clear one set)
+.bit_put
+    STA FclBits,X
     SEC
     RTS
 .fcl_ifbit
@@ -359,7 +353,6 @@ ASSERT FclVars + 255 < zxv + ZXV_LEN
 \ on, or of 0.
 .bit_of
 {
-    ZA_AUTO1 mask
     LDA a1 : DEC A
     LDX #0
 .byte
