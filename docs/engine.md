@@ -385,7 +385,10 @@ come with it, to see where the cycles go.
   for each axis, one vertex 0 for `transform_object`, loops for
   `camera_setup`, `transform_setup`'s tilted rows and `bound_frame`'s
   ceilings, and `bp_site` for a level camera's bound patch too (decisions 75
-  and 76, the journal's "twelfth round" for the figures). Their guards in
+  and 76, the journal's "twelfth round" for the figures; the thirteenth put
+  some back for speed, and the fifteenth, 2026-11-08, shared the
+  projection's patch, the 2D clip's bodies and `camera_setup`'s axes again
+  for the laser's and the sensors' room). Their guards in
   `src/live.6502` say when any doesn't fit.
 - ANDY (`&8000-&8FFF` with ROMSEL's bit 7, in place of the paged bank's
   first 4K): the front end's rarely run code, reached through trampolines
