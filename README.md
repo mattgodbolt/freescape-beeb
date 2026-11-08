@@ -89,7 +89,7 @@ draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
 stock Master. Driller's game itself is coming in layer by layer: its
-sound and its rigs are in, the laser and the sensors next
+sound, rigs, laser and sensors are in, game over and a new game next
 (`docs/research/game-audit.md`). `docs/journal.md` has the
 story as it goes.
 
