@@ -313,86 +313,77 @@ ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 {
     ZA_AUTO1 b
     ZA_AUTO2 t
-    LDA wk_mc : AND #X_MOVES OR X_UP : BEQ to_z
-    LDA MoveScratch : CMP CellX : BNE x_first
-.to_z
-    JMP z_first
-.x_first
-    LDA wk_mc : AND #X_MOVES OR X_UP : STA b
-    LDX #0 : LDA CellX : JSR recall : BCS x_known
-    LDA wk_mc : AND #X_UP : CMP #X_UP           ; (C: going up)
-    LDA CellX : JSR boundary
-    STA MoveScratch+3 : STX MoveScratch+4
-    SEC : SBC PlayerX : STA t
-    TXA : SBC PlayerX+1 : STA t+1
-    LDX #11 : LDY #9 : JSR coord_at             ; y at the x boundary
-    LDA cres : STA MoveScratch+5
-    LDA cres+1 : STA MoveScratch+6
-    LDX #13 : LDY #9 : JSR coord_at             ; z
-    LDA cres : STA MoveScratch+7
-    LDA cres+1 : STA MoveScratch+8
-    LDX #0 : JSR keep
-.x_known
-    LDA wk_mc : AND #Z_MOVES : BEQ x_y
-    LDX #7 : LDA CellZ : LDY #Z_UP : JSR boundary_with
-    CMP #1 : BCC x_y : BNE z_first              ; (2: z crosses first)
-    LDA MoveScratch+2 : CMP CellZ : BEQ x_y     ; (decision 18)
-    LDA wk_mc : AND #Z_MOVES OR Z_UP : TSB b
-.x_y
-    LDA wk_mc : AND #Y_MOVES : BEQ done
-    LDX #5 : LDA CellY : LDY #Y_UP : JSR boundary_with
-    CMP #1 : BCC done : BNE z_first
-    LDA MoveScratch+1 : CMP CellY : BEQ done    ; (decision 18)
-    LDA wk_mc : AND #Y_MOVES OR Y_UP : TSB b
+    ZA_AUTO1 p, ax, ax2, r, cc, o2
+    \ The axes by position (p): x, then z, then y, each by its index (0 x,
+    \ 1 y, 2 z). One that has a crossing left and isn't at its target cell
+    \ is the one; y, last, is whatever its cell.
+    STZ p
+.search
+    LDY p
+    LDX order,Y : STX ax
+    CPY #2 : BEQ compute
+    LDA wk_mc : AND bits,X : BEQ skip
+    LDA MoveScratch,X : CMP CellX,X : BNE compute
+.skip
+    INC p
+    BRA search
+.compute
+    LDA wk_mc : AND bits,X : STA b
+    TXA : ASL A : STA ax2
+    LDA CellX,X : JSR recall : BCS kept
+    LDX ax
+    LDA wk_mc : AND up,X : CMP up,X             ; (C: going up)
+    LDA CellX,X : JSR boundary
+    LDY ax2
+    STA MoveScratch+3,Y
+    SEC : SBC PlayerX,Y : STA t
+    TXA : STA MoveScratch+4,Y : SBC PlayerX+1,Y : STA t+1
+    \ the other two axes' coordinates at that boundary
+    LDA #4 : STA o2
+.other
+    LDX o2 : CPX ax2 : BEQ next_other
+    LDA ax2 : CLC : ADC #9 : TAY
+    TXA : CLC : ADC #9 : TAX
+    JSR coord_at
+    LDX o2
+    LDA cres : STA MoveScratch+3,X
+    LDA cres+1 : STA MoveScratch+4,X
+.next_other
+    DEC o2 : DEC o2 : BPL other
+    LDX ax : JSR keep
+.kept
+    \ The axes after it, in the same order: one that crosses at the same
+    \ point crosses too; one that crosses first starts the search again
+    \ from the next axis (as the original's x does for z, whether it was z
+    \ or y that crossed first).
+    LDA p : CMP #2 : BEQ done
+    INC A : STA r
+.later
+    LDY r
+    LDX order,Y : STX cc
+    LDA wk_mc : AND moves,X : BEQ next_later
+    LDY up,X
+    LDA CellX,X : PHA
+    TXA : ASL A : ADC #3 : TAX                  ; its coordinate at the point
+    PLA
+    JSR boundary_with
+    CMP #1 : BCC next_later : BNE restart       ; (2: it crosses first)
+    LDX cc
+    LDA MoveScratch,X : CMP CellX,X : BEQ next_later    ; (decision 18)
+    LDA wk_mc : AND bits,X : TSB b
+.next_later
+    INC r : LDA r : CMP #3 : BNE later
 .done
     RTS
-    \ $A07E: z, if z has a crossing left.
-.z_first
-    LDA wk_mc : AND #Z_MOVES OR Z_UP : BEQ to_y
-    LDA MoveScratch+2 : CMP CellZ : BNE z_on
-.to_y
-    JMP y_only
-.z_on
-    LDA wk_mc : AND #Z_MOVES OR Z_UP : STA b
-    LDX #2 : LDA CellZ : JSR recall : BCS z_known
-    LDA wk_mc : AND #Z_UP : CMP #Z_UP
-    LDA CellZ : JSR boundary
-    STA MoveScratch+7 : STX MoveScratch+8
-    SEC : SBC PlayerZ : STA t
-    TXA : SBC PlayerZ+1 : STA t+1
-    LDX #9 : LDY #13 : JSR coord_at             ; x at the z boundary
-    LDA cres : STA MoveScratch+3
-    LDA cres+1 : STA MoveScratch+4
-    LDX #11 : LDY #13 : JSR coord_at            ; y
-    LDA cres : STA MoveScratch+5
-    LDA cres+1 : STA MoveScratch+6
-    LDX #2 : JSR keep
-.z_known
-    LDA wk_mc : AND #Y_MOVES : BEQ done
-    LDX #5 : LDA CellY : LDY #Y_UP : JSR boundary_with
-    CMP #1 : BCC z_done : BNE to_y
-    LDA MoveScratch+1 : CMP CellY : BEQ z_done  ; (decision 18)
-    LDA wk_mc : AND #Y_MOVES OR Y_UP : TSB b
-.z_done
-    RTS
-    \ $A107: y.
-.y_only
-    LDA wk_mc : AND #Y_MOVES OR Y_UP : STA b
-    LDX #1 : LDA CellY : JSR recall : BCS y_known
-    LDA wk_mc : AND #Y_UP : CMP #Y_UP
-    LDA CellY : JSR boundary
-    STA MoveScratch+5 : STX MoveScratch+6
-    SEC : SBC PlayerY : STA t
-    TXA : SBC PlayerY+1 : STA t+1
-    LDX #9 : LDY #11 : JSR coord_at             ; x at the y boundary
-    LDA cres : STA MoveScratch+3
-    LDA cres+1 : STA MoveScratch+4
-    LDX #13 : LDY #11 : JSR coord_at            ; z
-    LDA cres : STA MoveScratch+7
-    LDA cres+1 : STA MoveScratch+8
-    LDX #1 : JMP keep
-.y_known
-    RTS
+.restart
+    INC p
+    JMP search
+    \ the axes by index: the crossing bits of each, and its movement's and
+    \ its way's (X_MOVES and the rest)
+.order  EQUB 0, 2, 1
+.bits   EQUB X_MOVES OR X_UP, Y_MOVES OR Y_UP, Z_MOVES OR Z_UP
+.moves  EQUB X_MOVES, Y_MOVES, Z_MOVES
+.up     EQUB X_UP, Y_UP, Z_UP
 
     \ An axis's next crossing point depends on nothing that changes in the
     \ walk but its cell, so each axis's (0 x, 1 y, 2 z) is kept, with the
