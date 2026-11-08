@@ -20,6 +20,11 @@ RIG_H = &16                 ; ... and its height less one, for the clear test
 FUNCTION msg(a) = WHERE(a < ZX_RIG_FIGURES, rig_msg_a + a - ZX_RIG_MESSAGES, WHERE(a < ZX_RIG_MESSAGES_B, RigFigures + a - ZX_RIG_FIGURES, rig_msg_b + a - ZX_RIG_MESSAGES_B))
 
 
+\ In section RigCode (src/logic/rig.6502 says where): only a pass runs
+\ these, with LOGIC_BANK paged and ACCCON's X set, and the rig's code
+\ calls them through far_rig_*.
+SECTION RigCode
+
 \ suitable ($C009-$C0E9): the rig at rig_b, rig_h, rig_cz inside the area's
 \ extent, standing on the floor or on the top of a shown cuboid that holds
 \ it, and no shown object in its box. C set if so.
@@ -100,3 +105,4 @@ FUNCTION msg(a) = WHERE(a < ZX_RIG_FIGURES, rig_msg_a + a - ZX_RIG_MESSAGES, WHE
 .rig_msg_b  EQUB ZX_RIG_MSG_B
 ASSERT LEN(ZX_RIG_MSG_A) = ZX_RIG_FIGURES - ZX_RIG_MESSAGES
 ASSERT ZX_RIG_FIGURES = &8C3C AND ZX_RIG_MESSAGES_B = &8C3C + 28
+ENDSECTION

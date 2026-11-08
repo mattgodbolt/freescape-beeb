@@ -15,7 +15,6 @@
 \ ***************************************************************************
 
 SECTION RigCode
-.rig_code
 
 \ MESSAGE a: the message at the original's a shown, for RIG_SHOWN frames.
 MACRO MESSAGE a

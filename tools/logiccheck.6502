@@ -17,6 +17,7 @@ INCLUDE "../src/zp.6502"
 INCLUDE "../src/logic/vars.6502"
 \ The rigs' code in main RAM (RIGC), where the live disc has it in shadow RAM.
 SECTION RigCode, org = &2000, guard = &3000, filename = "RIGC", cmos = TRUE
+.rig_code
 ENDSECTION
 INCLUDE "../src/logic/bank.6502"
 
