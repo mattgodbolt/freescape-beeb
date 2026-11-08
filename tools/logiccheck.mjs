@@ -41,6 +41,7 @@ const work = fs.readFileSync(path.join(dir, "LOGICW"));
 const bank = fs.readFileSync(path.join(dir, "LOGIC"));
 m.load(path.join(dir, "CHECK"), sym("chk_code"));
 m.load(path.join(dir, "LOGICC"), 0x8000, CODE_BANK);
+m.load(path.join(dir, "RIGC"), sym("rig_code"));
 
 let failures = 0;
 function fail(msg) {

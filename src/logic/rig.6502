@@ -7,7 +7,15 @@
 \ area's code and the FCL is in LOGIC_BANK (src/logic/rigdb.6502, through
 \ src/logic/call.6502's far_rig_*), with the messages that never change;
 \ the two the figures go into are in LogicWork (RigFigures).
+\
+\ In section RigCode, which the includer declares first (wherever it can
+\ run from): the live disc keeps it in shadow RAM past the sounds' scripts
+\ (src/live.6502), as only a pass runs it, with ACCCON's X set. It calls
+\ nothing in the banks, only main RAM's far_rig_*, wait and the hooks.
 \ ***************************************************************************
+
+SECTION RigCode
+.rig_code
 
 \ MESSAGE a: the message at the original's a shown, for RIG_SHOWN frames.
 MACRO MESSAGE a
@@ -330,3 +338,4 @@ ZA_AUTO1 rig_f, rig_f2                          ; the redraw flags before the re
     ORA #'0'
     RTS
 }
+ENDSECTION

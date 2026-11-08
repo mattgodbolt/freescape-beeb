@@ -240,6 +240,11 @@ ENDSECTION
 SOUND_DATA_ORG = area_shapes_end
 SECTION SoundData, org = SOUND_DATA_ORG, guard = RASTER_ENDS_ORG, filename = "SDATA"
 ENDSECTION
+\ And the rigs' code (src/logic/rig.6502), which only a pass runs, with X
+\ set: loaded and copied across with the sounds' scripts.
+LOGIC_SHADOW_CODE = TRUE
+SECTION RigCode, org = sound_data_end, guard = RASTER_ENDS_ORG, filename = "RIGC", cmos = TRUE
+ENDSECTION
 INCLUDE "logic/vars.6502"
 INCLUDE "logic/bank.6502"
 ASSERT LOGIC_BANK = BANK_DB AND LOGIC_CODE_BANK = BANK_DATA
@@ -1140,9 +1145,9 @@ ENDIF
     RTS
 
 \ sound_init (start's, with interrupts off and ACCCON's X clear): the chip
-\ silent, the driver idle (src/sound.6502), and the sounds' scripts copied
-\ from main RAM, where the loader put them, into shadow RAM's same
-\ addresses (SoundData).
+\ silent, the driver idle (src/sound.6502), and the sounds' scripts and the
+\ rigs' code copied from main RAM, where the loader put them, into shadow
+\ RAM's same addresses (SoundData, RigCode).
 .sound_init
 {
     ZA_AUTO2 p
@@ -1163,13 +1168,13 @@ ENDIF
     TYA : STA (p)
     LDA #ACCCON_X : TRB acccon
     INCW p
-    LDA p : CMP #LO(sound_data_end) : BNE copy
-    LDA p+1 : CMP #HI(sound_data_end) : BNE copy
+    LDA p : CMP #LO(rig_code_end) : BNE copy
+    LDA p+1 : CMP #HI(rig_code_end) : BNE copy
     RTS
 .snd_quiet
     EQUB &9F, &BF, &DF, &FF                     ; every channel's attenuation 15, tone 0's first
 }
-ASSERT sound_data_end > SOUND_DATA_ORG
+ASSERT rig_code_end > sound_data_end AND sound_data_end > SOUND_DATA_ORG
 
 ENDSECTION
 
@@ -2131,6 +2136,9 @@ ENDSECTION
 SECTION SoundData
 .sound_data_end
 ENDSECTION
+SECTION RigCode
+.rig_code_end
+ENDSECTION
 SECTION SoundCode
 .sound_code_end
 ENDSECTION
@@ -2188,8 +2196,9 @@ ASSERT logic_faces_end <= hm_u AND LOGIC_FACES_ORG >= &3000
 ASSERT area_shapes_end <= RASTER_ENDS_ORG
 \ ... then the sounds' scripts; the loader puts them in main RAM's same
 \ addresses, clear of what else it puts there
-ASSERT SOUND_DATA_ORG >= area_shapes_end AND sound_data_end <= RASTER_ENDS_ORG
+ASSERT SOUND_DATA_ORG >= area_shapes_end AND rig_code_end <= RASTER_ENDS_ORG
 ASSERT SOUND_DATA_ORG >= panel_pack_end AND SOUND_DATA_ORG >= obj_const_end
+\ ... and the rigs' code after them (only a pass runs it, with X set)
 ASSERT BANK_DB <> BANK_DATA AND BANK_DB <> BANK_OBJ AND BANK_DB <> BANK_RASTER
 ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_RASTER
 
@@ -2216,7 +2225,8 @@ LIVE_PARTS = {
     {"OMORE", -1, logic_work_end, obj_more_end},
     {"PANEL", -1, PANEL_LOAD, panel_pack_end},
     {"OCONST", -1, obj_memo_end, obj_const_end},
-    {"SDATA", -1, SOUND_DATA_ORG, sound_data_end}
+    {"SDATA", -1, SOUND_DATA_ORG, sound_data_end},
+    {"RIGC", -1, sound_data_end, rig_code_end}
 }
 LIVE_LATE = {
     {"HAZEL", -1, &C000, hazel_tables_end},
