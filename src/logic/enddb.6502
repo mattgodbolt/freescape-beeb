@@ -1,0 +1,82 @@
+\ ***************************************************************************
+\ FREESCAPE for the BBC Master - the end's part in LOGIC_BANK
+\ (src/logic/end.6502 has the rest, in main RAM, and says what they do):
+\ the end's messages, and the demo's stream, which is in the database.
+\ ***************************************************************************
+
+Demo        = zx(&891F)     ; 3: the demo plays itself
+DemoStream  = zx(&8924)     ; the demo's stream (in the bank) ...
+DemoCount   = zx(&8926)     ; ... the times its action has left ...
+DemoAt      = zx(&8927)     ; ... and where it's got to
+
+\ The end's messages ($8CBA on, 14 characters each), and where each
+\ cause's is, by GameOver from 1 (logic_go_end).
+.end_msg    EQUB ZX_END_MSG
+.end_at     EQUB ZX_END_AT
+ASSERT LEN(ZX_END_AT) = 6 AND LEN(ZX_END_MSG) < 256
+
+\ end_name ($9B11-$9B2C): the safe sectors (FclVar32) into area 127's name
+\ in the database, two digits after its first character, the first a space
+\ for 0.
+.end_name
+{
+    ZA_AUTO2 p
+    LDA AreaNamePtr : CLC : ADC #1 : STA p
+    LDA AreaNamePtr+1 : ADC #0 : STA p+1
+    LDA FclVar32
+.hundreds
+    CMP #100 : BCC tens
+    SBC #100
+    BRA hundreds
+.tens
+    LDX #'0'
+.ten
+    CMP #10 : BCC units
+    SBC #10 : INX
+    BRA ten
+.units
+    ORA #'0' : LDY #1 : STA (p),Y
+    TXA : CMP #'0' : BNE named
+    LDA #' '
+.named
+    STA (p)
+    RTS
+}
+
+\ demo_stream ($9A34-$9A62): the demo's pass, no key held: KeyCount 1 and
+\ the stream's next action, C set and A; or at the stream's end (a 0), C
+\ clear and GameFlags bit 1 (a new game, the demo again). A byte of &80 +
+\ n is followed by an action done n times. (src/logic/end.6502's
+\ demo_next calls it with this bank paged.)
+.demo_stream
+{
+    ZA_AUTO2 p
+    LDA #1 : STA KeyCount
+    LDA DemoAt : STA p
+    LDA DemoAt+1 : STA p+1
+    LDA DemoCount : BEQ fresh
+    DEC DemoCount
+    LDA (p)
+    LDX DemoCount : BNE acted
+    INC DemoAt : BNE acted
+    INC DemoAt+1
+.acted
+    SEC
+    RTS
+.fresh
+    LDA (p) : BEQ ended
+    PHA
+    INC p : BNE stepped
+    INC p+1
+.stepped
+    LDA p : STA DemoAt
+    LDA p+1 : STA DemoAt+1
+    PLA : BPL acted
+    AND #&7F : DEC A : STA DemoCount
+    LDA (p)
+    BRA acted
+.ended
+    LDA #2 : STA GameFlags : STZ GameFlags2
+    CLC
+    RTS
+}

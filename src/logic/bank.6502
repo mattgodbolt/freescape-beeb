@@ -31,6 +31,7 @@ INCLUDE "area.6502"
 INCLUDE "fcl.6502"
 INCLUDE "index.6502"
 INCLUDE "rigdb.6502"
+INCLUDE "enddb.6502"
 .logic_db_code_end
 ASSERT P% <= LOGIC_DB
     SKIPTO LOGIC_DB

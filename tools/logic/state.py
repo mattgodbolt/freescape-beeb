@@ -131,7 +131,7 @@ VARS = [
     ("Sound", 0x8A1F, 1, "sync", "a sound to play after the screen copy, which clears it"),
     ("Wipe", 0x8BF0, 1, "logic", "non-zero: the screen copy wipes ($AB25)"),
     ("ShotFlag", 0x8BF1, 1, "logic", "non-zero: the events are a shot's"),
-    ("GameOver", 0x8BF2, 1, "sync", "why the game ended: 1 shield, 2 time, 3 energy, 4 a fall"),
+    ("GameOver", 0x8BF2, 1, "sync", "why the game ended: 1 shield, 2 time, 3 energy, 4 a fall, 5 won, 6 abandoned"),
     ("KeyCount", 0x8FBC, 1, "logic", "the keys read this pass, at most 5"),
     ("Keys", 0x8FBD, ("bytes", 5), "logic", "their codes, in the keyboard's order"),
     ("Countdown", 0x8FC2, 1, "sync", "frames to wait, counted down by the interrupt"),

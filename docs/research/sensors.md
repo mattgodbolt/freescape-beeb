@@ -89,7 +89,8 @@ the BBC's (`tools/model/pick.py`, decision 131).
   2's and the frame the original takes them off in, decision 134), in
   frames of their own as the laser's (`sl_eor`, each buffer's set
   `sb_*`). No border: the BBC's is blank (decision 133). None once the
-  game's over (`lv_over`).
+  game's over (`lv_over`) or while the information screen shows
+  (`lv_info`), as the original's stop then.
 - **Hiding a sensor**: the logic's own (`src/logic/fcl.6502`'s
   `show_hide`), then `hook_sensor_off`.
 

@@ -42,7 +42,7 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | **New game** | `$9C36`, `$BD74`, `$97CD`: the header's values, the objects' flags from bit 7, the control menu | **yes** | **yes** (`logic_go_restart`, `new_game_due`) | **yes** (RETURN, or the wait run out) | the start's area, the crosshair | **`end`, `demo`** | the control menu (decision 150) |
 | **The information screen** | `$C3DC`, `$C7EB` (I alone) | **yes** (`tools/logic/info.py`) | **yes** (`src/logic/info.6502`) | **yes**: its frame, its key (decision 153) | **the original's nine lines in the panel's font, in the view** | **`info`: every rig's case, an area, 1 (TERMINATED); the text against the original's buffer** | nothing |
 | Save and load | `$C3DC`: to tape by the ROM (`$04C6`, `$0562`), 333 bytes of state and every object's flags | no | no | S and L go on (decision 153) | - | - | to the BBC's disc, if wanted (decision 153's options) |
-| Title, protection, control menu | `$97A4`, `$CB7A`, `$C9C6` | no | no | the disc's own boot | - | - | the protection is the original's copy protection (not ported); the menu's choices are the ZX's joysticks |
+| Title, protection, control menu | `$97A4`, `$CB7A`, `$C9C6` | the menu's read of the keys (`end.start`) | the same | the disc's own boot | - | `end`, `demo` (the menu's read) | the protection is the original's copy protection (not ported); the menu's choices are the ZX's joysticks (decision 150); the title is the tape's loading screen |
 | **The demo** | `$9A27` (`$891F` 3), after the end's wait | **yes** (`passes.demo_action`) | **yes** (`demo_next`) | **yes**, at a held key's pace (decision 151) | **every pass's frames** | **`demo`: the stream whole, twice, and a key** | nothing |
 | Sounds | `$9574` and the interrupt's 2 | yes (hooks) | yes | yes (decisions 110-113; 2 from the main loop) | sound | every pass's, every `sensors` step's, **the end's 20 and 6** | nothing |
 
@@ -170,6 +170,14 @@ The plan as written before follows.*
   would need the disc read the loader does, and a write.
 
 ### Memory
+
+*Since the end, the clock and the information screen: the logic's code
+that reaches both of its banks is in main RAM after `ObjMore`
+(`LogicMore`), what of it reads `LOGIC_BANK` alone in that bank, and the
+information screen's text, its fields' code and its font in the front
+end's bank after its code (`InfoData`); the journal's entries of
+2026-11-08 have the bytes ("room in main RAM again" the last). As written
+after the rigs:*
 
 After the rigs (the journal's entry of 2026-11-08 has the bytes): the
 rigs' code is in both of the logic's banks (`LOGIC_BANK` the scans of the

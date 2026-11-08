@@ -21,7 +21,8 @@ Addresses written `$` are the original's; the 6502's are symbols.*
 | `src/logic/arith.6502` | the original's multiplies and divide as the logic uses them |
 | `src/logic/rig.6502` | the rigs (`$BEFA`): D drills and C collects, the gas, the score, the messages, the redraw (in `LOGIC_CODE_BANK`) |
 | `src/logic/rigdb.6502` | the rigs' part in `LOGIC_BANK`: whether a rig fits (it scans the records), and the messages that never change |
-| `src/logic/end.6502` | the game's end (`$9AB7`), a new game (`$9C36`, `$97CD`) and the demo's stream (`$9A27`), in main RAM (`LogicMore`), reaching both banks (`docs/research/end.md`) |
+| `src/logic/end.6502` | the game's end (`$9AB7`), a new game (`$9C36`, `$97CD`) and the demo (`$9A27`), in main RAM (`LogicMore`), reaching both banks (`docs/research/end.md`) |
+| `src/logic/enddb.6502` | the end's part in `LOGIC_BANK`: its messages, area 127's name, the demo's stream |
 | `src/logic/info.6502` | the information screen (`$C3DC`): its entries in main RAM, its text and the code that writes its fields in `InfoData`, the includer's (`docs/research/info.md`) |
 | `src/logic/hooks.6502` | where the logic calls what it leaves out (`tools/logic/hooks.py`'s list) |
 | `src/logic/call.6502` | main RAM: the frame's way in, and the way between the two banks |

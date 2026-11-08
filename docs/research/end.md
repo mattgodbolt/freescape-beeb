@@ -73,7 +73,9 @@ after which a new game began answers `"new"`. The redraws are hooks
 
 `src/logic/end.6502`, in a section of main RAM (`LogicMore`, after
 `ObjMore` on the disc), since it reads the database's header and records
-in `LOGIC_BANK` and calls the pass's code in `LOGIC_CODE_BANK`:
+in `LOGIC_BANK` and calls the pass's code in `LOGIC_CODE_BANK` (what reads
+`LOGIC_BANK` alone, the messages, area 127's name and the demo's stream,
+is there: `src/logic/enddb.6502`):
 `logic_go_end`, `logic_go_restart` (A 0 for keys in the logic's bitmap, else
 the demo), `new_game_due`, `new_game`, `demo_next` (the stream, from
 `input_pass`'s demo branch in `src/logic/pass.6502`). `logic_pass` answers

@@ -1848,3 +1848,14 @@ pass and frame weren't timed: each comes once, on a key.)
 
 Left: save and load (decision 153's options); the original wipes the
 view back in, where the disc draws the next frame whole.
+
+## 2026-11-08: room in main RAM again
+
+The three layers above left main RAM's room after `ObjMore` at 83 bytes.
+What of the end's code reads only `LOGIC_BANK` moved there
+(`src/logic/enddb.6502`, beside the rigs' `rigdb.6502`): the end's six
+messages, the safe sectors written into area 127's name, and the demo's
+stream, behind a trampoline in main RAM (`demo_next`). Nothing the logic
+does changed (`make logic6502`, `make live`). Room, logic disc, before and
+after: `ObjMore`'s 83 to 314; `LOGIC_BANK` 453 to 226; the free disc's
+`LiveGlue` 353 to 126.

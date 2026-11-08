@@ -7,7 +7,8 @@
 \ these read the database's header and records (LOGIC_BANK) and call the
 \ pass's code (LOGIC_CODE_BANK), so they page each in as they go. The
 \ frame's entries are logic_go_end and logic_go_restart; the pass calls
-\ new_game_due and demo_next.
+\ new_game_due and demo_next. What reads LOGIC_BANK alone is there
+\ (src/logic/enddb.6502: the messages, area 127's name, the demo's stream).
 \ ***************************************************************************
 
 SECTION LogicMore
@@ -19,12 +20,9 @@ RESTART_SOUND = 6
 START_WAIT  = &28           ; a game's start's frames before its crosshair ($97F0)
 DEMO_ON     = 3             ; Demo when the demo plays itself
 
-\ hdr(a): the database's byte at the original's a, in LOGIC_BANK.
+\ hdr(a): the database's byte at the original's a, in LOGIC_BANK. (The
+\ demo's variables, Demo on, are src/logic/enddb.6502's.)
 FUNCTION hdr(a) = a + DB_MOVE
-Demo        = zx(&891F)     ; 3: the demo plays itself
-DemoStream  = zx(&8924)     ; the demo's stream (in the bank) ...
-DemoCount   = zx(&8926)     ; ... the times its action has left ...
-DemoAt      = zx(&8927)     ; ... and where it's got to
 
 \ logic_go_end ($9AB7-$9B40): the game's end, once logic_go_pass has
 \ answered 2: the message by cause (hook_message), sound 20 unless won,
@@ -46,39 +44,11 @@ DemoAt      = zx(&8927)     ; ... and where it's got to
     LDA #END_AREA : STA AreaId
     STZ EntranceId : STZ CrossOn
     JSR go_to_entrance
-    JSR end_name
+    JSR end_name                                ; (src/logic/enddb.6502's)
     LDA #4 : STA GameFlags
     LDA #&40 : STA GameFlags2
     RTS
 }
-\ end_name ($9B11-$9B2C): the safe sectors into area 127's name.
-.end_name
-{
-    ZA_AUTO2 p
-    LDA AreaNamePtr : CLC : ADC #1 : STA p
-    LDA AreaNamePtr+1 : ADC #0 : STA p+1
-    LDA FclVar32
-.hundreds
-    CMP #100 : BCC tens
-    SBC #100
-    BRA hundreds
-.tens
-    LDX #'0'
-.ten
-    CMP #10 : BCC units
-    SBC #10 : INX
-    BRA ten
-.units
-    ORA #'0' : LDY #1 : STA (p),Y
-    TXA : CMP #'0' : BNE named
-    LDA #' '
-.named
-    STA (p)
-    RTS
-}
-.end_msg    EQUB ZX_END_MSG
-.end_at     EQUB ZX_END_AT
-ASSERT LEN(ZX_END_AT) = 6 AND LEN(ZX_END_MSG) < 256
 
 \ logic_go_restart ($9B43-$9B6D, then the main loop's $982B): the end's
 \ wait answered: A = 0 by the keys in logic_keys (read as the wait reads
@@ -227,44 +197,13 @@ ASSERT ZXV_ORG <= &8924 AND &8929 <= ZXV_END AND ZXV_ORG <= &88A4 AND &88AC <= Z
 ASSERT FIND(ZXV_PTRS, &8924 - ZXV_ORG, -1) >= 0 AND FIND(ZXV_PTRS, &8927 - ZXV_ORG, -1) >= 0
 ASSERT RigState = RigPlaced + 18 AND FclVars = FclBits + 4 AND FclVar32 = FclBits + 4 + 31
 
-\ demo_next ($9A34-$9A62): the demo's pass, no key held: KeyCount 1 and
-\ the stream's next action, C set and A; or at the stream's end (a 0), C
-\ clear and GameFlags bit 1 (a new game, the demo again). A byte of &80 +
-\ n is followed by an action done n times. Returns with LOGIC_CODE_BANK
+\ demo_next: the demo's pass, from input_pass (src/logic/enddb.6502's
+\ demo_stream, in LOGIC_BANK, which has the stream): C set and A the
+\ action, or C clear at the stream's end. Returns with LOGIC_CODE_BANK
 \ paged.
 .demo_next
-{
-    ZA_AUTO2 p
     LOGIC_PAGE A, LOGIC_BANK
-    LDA #1 : STA KeyCount
-    LDA DemoAt : STA p
-    LDA DemoAt+1 : STA p+1
-    LDA DemoCount : BEQ fresh
-    DEC DemoCount
-    LDA (p)
-    LDX DemoCount : BNE acted
-    INC DemoAt : BNE acted
-    INC DemoAt+1
-.acted
-    LOGIC_PAGE Y, LOGIC_CODE_BANK
-    SEC
+    JSR demo_stream
+    LOGIC_PAGE Y, LOGIC_CODE_BANK               ; (keeps A and C)
     RTS
-.fresh
-    LDA (p) : BEQ ended
-    PHA
-    INC p : BNE stepped
-    INC p+1
-.stepped
-    LDA p : STA DemoAt
-    LDA p+1 : STA DemoAt+1
-    PLA : BPL acted
-    AND #&7F : DEC A : STA DemoCount
-    LDA (p)
-    BRA acted
-.ended
-    LDA #2 : STA GameFlags : STZ GameFlags2
-    LOGIC_PAGE Y, LOGIC_CODE_BANK
-    CLC
-    RTS
-}
 ENDSECTION
