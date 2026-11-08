@@ -105,16 +105,27 @@
 
 \ action_of ($99EF-$9A1B): A = key code A's action from the key table (in
 \ shooting mode, the first table's second action), &7F if none: the
-\ original's search of it, done as the build makes the tables
-\ (tools/mklogicdata.py), by code. Keeps X.
+\ original's search of it, done as the build makes the table
+\ (tools/mklogicdata.py checks this against the search for every key
+\ code): by code from KEY_LOW up, SPACE alone below and none above, and
+\ in shooting mode the movement actions 3 to 6 are 29 less. Keeps X.
 .action_of
 {
-    TAY
-    LDA ShootMode : BNE shooting
-    LDA KeyActions,Y
+    CMP #KEY_LOW : BCC low
+    SBC #KEY_LOW : CMP #LEN(ZX_ACTIONS) : BCS none
+    TAY : LDA KeyActions,Y
+    LDY ShootMode : BEQ done
+    CMP #3 : BCC done
+    CMP #7 : BCS done
+    EOR #&FF : ADC #30                          ; (C clear: 29 - A)
+.done
     RTS
-.shooting
-    LDA KeyShootActions,Y
+.low
+    CMP #&20 : BNE none
+    LDA #30
+    RTS
+.none
+    LDA #&7F
     RTS
 }
 \ (the tables are from the key table as the counts in the workspace find

@@ -51,9 +51,8 @@ INCLUDE "rig.6502"
     \ the original's tables (tools/mklogicdata.py)
 .SinCos     EQUB ZX_SINCOS                      ; 72 (sin, cos) pairs, signed, 1.0 = 64
 .KeyCodes   EQUB ZX_KEY_CODES                   ; a code for each key, five a half-row
-.KeyActions EQUB ZX_ACTIONS                     ; each code's action, from the key table ...
-.KeyShootActions EQUB ZX_SHOOT_ACTIONS          ; ... and in shooting mode
-ASSERT LEN(ZX_ACTIONS) = 128 AND MAX(ZX_KEY_CODES) < 128
+.KeyActions EQUB ZX_ACTIONS                     ; the action of each code from KEY_LOW, from the key table (action_of)
+ASSERT MAX(ZX_KEY_CODES) < 128
     \ the quarter squares, n * n DIV 4 for n from 0 to 511 (mul88): the
     \ includer's (LOGIC_SQUARES, the address of a table laid out as this
     \ one: the live disc shares the maths' in HAZEL), or the logic's own

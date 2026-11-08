@@ -136,6 +136,25 @@ def main():
     for shoot in (0, 0xFF):
         s.ShootMode = shoot
         actions.append([_action_of(s, c) for c in range(0x80)])
+    # The 6502 keeps them densely (src/logic/pass.6502's action_of): the
+    # keys' codes run from KEY_LOW to KEY_LOW + KEY_SPAN - 1 in a table,
+    # SPACE is the one action below them and none are above, and in
+    # shooting mode the four movement actions 3 to 6 become 29 less.
+    key_low = 48
+    key_span = 91 - key_low
+    key_actions = actions[0][key_low:key_low + key_span]
+
+    def dense(code, shoot):
+        if code < key_low:
+            return 30 if code == 32 else 0x7F
+        if code >= key_low + key_span:
+            return 0x7F
+        a = key_actions[code - key_low]
+        return 29 - a if shoot and 3 <= a <= 6 else a
+
+    for c in codes:
+        for shoot in (0, 1):
+            assert dense(c, shoot) == actions[shoot][c], f"key code {c}"
     most = max(n for _, n in areas(m))
     # src/logic/area.6502's place_rigs indexes the rigs by the area's id less
     # one for ids below &13, as the original's JP P on the id less &13 picks
@@ -187,10 +206,10 @@ def main():
         blist("ZX_RIG_MSG_A", m[rig.AREA_NEUTRAL:rig.CFT]),
         blist("ZX_RIG_MSG_B", m[rig.ENERGY_TOO_LOW:rig.NO_RIG_PLACED + rig.MESSAGE_LEN]),
         "",
-        "\\ each key code's action from the key table, as $99EF finds it, and in",
-        "\\ shooting mode",
-        blist("ZX_ACTIONS", actions[0]),
-        blist("ZX_SHOOT_ACTIONS", actions[1]),
+        "\\ the action of each key code from KEY_LOW up, from the key table as $99EF",
+        "\\ finds it (the other codes and shooting mode: action_of)",
+        f"KEY_LOW = {key_low}",
+        blist("ZX_ACTIONS", key_actions),
         "",
     ]
     with open(os.path.join(out, "data.6502"), "w") as f:
