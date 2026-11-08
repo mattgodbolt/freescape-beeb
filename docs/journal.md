@@ -1476,3 +1476,68 @@ Not done: the laser (the audit's plan: the lines as frames of their own,
 as the crosshair is, and the pick from the front end's faces, which needs
 an object a face), the sensors, the end and a new game. Left for Matt:
 decisions 120 to 122.
+
+## 2026-11-08: room in the logic's banks
+
+The layers to come (laser, sensors, the end, the information screen) need
+room, and `LOGIC_CODE_BANK` had 135 bytes, `LOGIC_BANK` 482 (the
+free-camera disc's `LiveGlue` 19). Nothing the logic does changed: every
+pass is the transcription's (`make logic6502`) and every frame the model's
+(`make live`); `make check` passes after each commit.
+
+**Denser tables** (`LOGIC_CODE_BANK`, 372 bytes):
+- The key actions were two 128-byte tables by code, for 40 codes. Now one
+  table of the codes from `KEY_LOW` up, SPACE below it and none above it
+  in `action_of`, and in shooting mode the four movement actions 3 to 6
+  become 29 less (the original's shooting table says exactly that for
+  every key). `tools/mklogicdata.py` asserts the dense scheme against the
+  original's search, every code, both modes. 185 bytes, for 14 to 27
+  cycles a pass.
+- The 72 (sin, cos) pairs are the sines of the first 36 angles, the next
+  36 their negatives, a cosine the sine 18 on; `tools/mklogicdata.py`
+  asserts the symmetries. 88 bytes, for about 60 cycles in a step.
+- `ld_area_of` (128 bytes, by area id, 29 used) is the 29 ids, searched by
+  `lv_switched` when an area changes. 99 bytes.
+
+**Axes by index** (`LOGIC_CODE_BANK`, 309 bytes): `next_crossing` had a
+written-out block for each of x, z and y, with the original's quirks
+between them (a later axis that crosses first sends the search to the
+next axis, whichever it was). Now one body, the axes by position in the
+order x, z, y, a later axis that crosses first restarting from the next
+position. `move`'s cells and crossing bits, deltas and stop pulls are
+loops over the axes too. Together: a probe step's pass 9,711 to 10,258
+cycles (5.6%), a jet step's 10,941 to 12,071 (10%), the rest within 15
+cycles; 309 bytes. (A pass is a field or two of a frame's work: the step's
+frames are the pass's PASS_FIELDS.) `keep_clear`, `at_extent` and
+`cross`'s `across` have the same three blocks and were left: 20 to 65
+bytes each for 60 to 300 cycles a walk.
+
+**Code that only a pass runs, in shadow RAM** (1,288 bytes out of the
+banks, 907 of them `LOGIC_CODE_BANK`'s and 381 `LOGIC_BANK`'s): a pass
+runs with ACCCON's X set (`lv_pass`), so code at shadow RAM's addresses
+runs as fast as anywhere, and the pass already reads its lists by face
+there. `RigCode` holds the rigs' code (`rig.6502`), `suitable` and the
+rigs' unchanging messages (`rigdb.6502`), after the sounds' scripts. The
+loader puts it in main RAM at those addresses (part `RIGC`) and
+`sound_init` copies it across with the scripts. It calls nothing in the
+banks: the far calls (`far_rig_*`, which page `LOGIC_BANK` for `suitable`
+too), `wait` and the hooks are main RAM's. The logic's
+check build declares `RigCode` in main RAM (`RIGC`, loaded by
+`tools/logiccheck.mjs`), so the shadow placement itself is the live
+check's, over the rigs' scenarios. Cost in cycles: none.
+
+**The room, logic disc, before and after:** `LOGIC_BANK` (`live_glue_end`
+to `LOGIC_DB`) 482 to 863 bytes (the free-camera disc's 19 to 400);
+`BANK_DATA` (`area_conv_end` to `&C000`) 135 to 1,723; `ObjMore` to `&3000`
+780, untouched; shadow RAM past `rig_code_end` to `RasterEnds` 715 bytes.
+The main RAM below `&3000` has a gap of its own: `ObjMore` starts on the
+next page after `LogicWork` for the maths' alignment, so `LIVE`,
+`AreaCode` and `LogicWork` can grow into that gap for nothing (the bytes
+before the page), but shrinking them gives `ObjMore` nothing; left alone
+as the other agent works in `ObjMore`.
+
+Not done, and how far each would go: the FCL's cold handlers
+(`fcl_swapjet`, `fcl_goto`, the bit and variable ones) to `RigCode`, about
+300 bytes of `LOGIC_BANK` for nothing in cycles, when shadow RAM has the
+room to spare; the figures' arithmetic in `LiveGlue` shared (`div_times`
+and `fig_ratio` are two shift-and-add loops), tens of bytes.

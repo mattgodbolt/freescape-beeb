@@ -337,8 +337,16 @@ come with it, to see where the cycles go.
   their shape (`AreaShapes`, decision 101), which the area's conversion
   reads and writes setting X round each access, then the sounds' scripts
   (`SoundData`, decision 111), which the interrupt reads so, putting X
-  back; the rest of it to `RasterEnds` is free, for data the front end can
-  reach so.
+  back, then the rigs' code (`RigCode`, `src/logic/rig.6502` and
+  `rigdb.6502`), which only a pass runs, with X set; the loader puts the
+  scripts and that code in main RAM at these addresses (`SDATA`, `RIGC`)
+  and `sound_init` copies them across. Code that only a pass runs, and
+  that calls nothing but main RAM and its own bank's routines with that
+  bank paged, can go here, whichever bank it was in (the logic's check
+  build keeps `RigCode` in main RAM, `RIGC`). The rest of it to
+  `RasterEnds` is free, for data the front end can reach so or such code
+  (`docs/journal.md`, 2026-11-08, "room in the logic's banks", for what is
+  left).
 - `SCREEN` to `&7FFF`: the screen, `SCREEN_ROWS` character rows (Driller's
   192 lines) in each of main and shadow RAM.
 - HAZEL (`&C000-&DFFF`): tables (squares, reciprocals, the transform's
@@ -365,7 +373,11 @@ come with it, to see where the cycles go.
   has two: `LOGIC_BANK`, Driller's database in the original's layout and
   the code that reads it, and `LOGIC_CODE_BANK`, the rest of the logic,
   with room to share. The renderer reads the database too, as it enters
-  an area (`src/area.6502`).
+  an area (`src/area.6502`). The logic keeps its tables dense: the key
+  actions by code from `KEY_LOW` (shooting mode's by a rule), the sines of
+  a half turn, and the areas' ids searched for (`docs/journal.md`,
+  2026-11-08, "room in the logic's banks"); and `next_crossing` and
+  `move` walk the three axes by index.
 - The front end's bank (`ObjCode`), ANDY (`ObjAndy`) and `ObjMore` (main
   RAM below `&3000`, after the maths' code, the projection and the 2D
   clip) share repeated code where a frame hardly spends the cycles: one
