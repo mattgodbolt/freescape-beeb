@@ -624,7 +624,7 @@ ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
 \ stops at &7FFFFF, the rest are words).
 .panel_number
 {
-    ZA_AUTO1 n, k
+    ZA_AUTO1 n, k, t16
     STA n
     LDA panel_num : CMP panel_cache,Y : BNE changed
     LDA panel_num+1 : CMP panel_cache+1,Y : BNE changed
@@ -645,9 +645,35 @@ ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
     INX
     DEC n : BNE digit
     RTS
-\ times: how many of POWERS[Y] panel_num holds, taken away, in A
+\ times: how many of POWERS[Y] panel_num holds, taken away, in A. (By
+\ bytes, as wide as the power and the number need: a position's digits are
+\ mostly 16 and 8 bits, and the units the number itself.) Keeps X.
 .times
     STZ k
+    LDA pw_hi,Y : ORA panel_num+2 : BNE again
+    LDA pw_mid,Y : ORA panel_num+1 : BNE again16
+    CPY #LEN(POWERS) - 1 : BEQ units
+    LDA panel_num
+.again8
+    CMP pw_lo,Y : BCC enough8
+    SBC pw_lo,Y                                 ; (C is set)
+    INC k
+    BRA again8
+.enough8
+    STA panel_num
+    LDA k
+    RTS
+.units
+    LDA panel_num
+    STZ panel_num
+    RTS
+.again16
+    LDA panel_num : SEC : SBC pw_lo,Y : STA t16
+    LDA panel_num+1 : SBC pw_mid,Y : BCC enough
+    STA panel_num+1
+    LDA t16 : STA panel_num
+    INC k
+    BRA again16
 .again
     LDA panel_num : CMP pw_lo,Y
     LDA panel_num+1 : SBC pw_mid,Y
