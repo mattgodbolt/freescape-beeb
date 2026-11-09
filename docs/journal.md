@@ -1899,3 +1899,127 @@ spend the ANDY room just gained). Not done: `ac_cuboid`'s unrolled faces
 cycles an entrance); the figures' arithmetic; 224 bytes of shadow RAM
 between the logic's lists and `AreaShapes`, which the loader would need a
 part of its own for.
+
+## 2026-11-09: the sixteenth round
+
+The coordinator asked for a speed pass on the whole frame, flip to flip
+on the live disc (`tools/livecheck.mjs`), after the end, the clock and the
+information screen had taken the check's medians from walking 1.57 and
+turning 2.16 fields to 1.76 and 2.35: first how much of that was the new
+scenarios and how much the new layers' cost, then the regressions, then
+whatever the profiles found.
+
+**What the rise was.** The disc at 8b9c930 (before the end's layer) and
+at 9189946 (the round's start), over the same runs (the 29 scenarios the
+earlier check had, the keys and the tour), fields a frame, median / p90 /
+max:
+
+| | 8b9c930 | 9189946, the same runs | 9189946, all runs |
+|---|---|---|---|
+| walking | 1.57 / 4.5 / 13.76 | 1.57 / 4.51 / 145.5 | 1.76 / 4.84 / 145.5 |
+| turning | 2.16 / 5.65 / 11.82 | 2.21 / 5.66 / 127.69 | 2.35 / 5.93 / 127.69 |
+| entrance | 8.5 / 12.96 / 18.24 (92) | 8.7 / 14.41 / 18.28 (105) | 8.63 / 14.59 / 18.28 (121) |
+
+- Most of it is the measured set: `end`, `demo`, `clock` and `info` bring
+  94 walking and 97 turning frames, at medians of about 5 fields (the
+  demo's and the end's views); with them the walking median goes from
+  1.575 to 1.755, turning from 2.208 to 2.355.
+- Over the same runs, frames matched by run, order, camera and kind (2,198
+  of them) differ at the median by 20 cycles in each half (where code
+  falls against pages) and by about 200 in the loop (182 walking, 222
+  turning): the vertical sync's interrupt, 896 to 916 cycles at the median
+  (RETURN and 1 joined the key map, each read when its column has a key
+  down), and each loop's clock and the end's and the information screen's
+  tests (an idle loop 957 cycles at the median to 1,048). Turning's 2.16 to
+  2.21 is the frames' mix, not their cost.
+- The new maxima, and about 4.7K cycles of a walking frame's mean, are the
+  logic waiting in `snd_ask` (decision 110) for sound 20, as runs that
+  used to stop now go on into the end.
+
+So the layers' own cost was small; the round went after what each frame
+does round its two halves, and what each pass does after the logic.
+
+**What went in** (each a commit of its own, every frame the model's and
+every pass the transcription's, `make live`; `make check` passes on the
+last), with what it took of each region (bytes):
+
+| change | region, bytes |
+|---|---|
+| the sensors' test after a redraw: each record's type looked at before the range test, `LOGIC_BANK` paged once | shadow RAM past `RigCode` 26 |
+| the frame's halves no longer timed on the BBC (decision 180) | freed: `LOGIC_BANK` 168, main RAM below `&3000` 115, `Work` 20 |
+| the panel's digits in 16 or 8 bits where the number and the power fit, the units what's left | `BANK_DATA` 77 |
+| the index lists its sensors (`ix_sn`, at most `ZX_SENSORS_MOST`, which `tools/mklogicdata.py` counts), and the test reads those alone | `LOGIC_BANK` 21, `LogicWork` 6 |
+| `lv_inputs` compares the index's `ix_n` flags, not `IX_MAX` | `LOGIC_BANK` 4 |
+| the panel's bars, tapes and message set only when what decides them changes (`panel_cache`) | `BANK_DATA` 42, `Work` 5 |
+| the vertical sync's eight key bytes written out | main RAM below `&3000` 153 |
+| the crosshair's EORs as code made where it moves (`cross_code`), and `lv_camera`'s pointers once a frame | `BANK_DATA` 123 |
+
+The pieces, on the check's runs (cycles, median / p90 / most):
+`panel_values` 2,587 / 6,216 / 10,661 a call to 1,138 / 3,208 / 8,671; the
+vertical sync's interrupt 915 / 1,104 / 1,678 to 826 / 1,015 / 1,591; the
+sensors' `sn_need` 1,330 a call at the median after the first of their two
+changes to 63 after the second, `sn_redraw` 2,497 to 756; the T2 timing
+about 700 a frame drawn (`clock`, `clock_from`, `clock_to` in the
+profile); the crosshair off and on (`lv_cross_off`, `lv_cross_on`) 448
+and 454 a call to 140 and 146 at the median (about 1,000 at p90, where
+the crosshair moved and its code is made again); `lv_camera` between
+passes, most 2,450 to 2,240. The rest of a frame (its loop but its halves), walking
+0.1 / 0.74 fields to 0.06 / 0.49, turning 0.1 / 0.61 to 0.06 / 0.37.
+
+The whole frame, the check's runs (all of them), fields a frame, median /
+p90 / max, and the mean of the lowest 97% (the median moves with where
+flips fall: after the panel's caches walking stood at 1.66, after the
+crosshair's code at 1.69, while the trimmed mean went 2.128 to 2.116):
+
+| | before | after | trimmed mean, before | after |
+|---|---|---|---|---|
+| all (4,778 / 4,855 frames) | 1.81 / 5.63 / 145.5 | 1.75 / 5.51 / 149.82 | 2.304 | 2.231 |
+| entrance (121) | 8.63 / 14.59 / 18.28 | 8.51 / 14.39 / 18.08 | 9.233 | 9.099 |
+| standing (1,104) | 0.54 / 3.53 / 104.83 | 0.54 / 3.53 / 104.71 | 1.049 | 1.030 |
+| walking | 1.76 / 4.84 / 145.5 | 1.69 / 4.68 / 149.82 | 2.206 | 2.116 |
+| turning | 2.35 / 5.93 / 127.69 | 2.18 / 5.75 / 128.66 | 2.823 | 2.730 |
+
+Over the runs 8b9c930's check had (the first table's), median and trimmed
+mean: walking 1.57 and 2.071 at 8b9c930, 1.57 and 2.078 at 9189946, 1.55
+and 1.994 now; turning 2.16 and 2.702, 2.21 and 2.706, 2.09 and 2.619;
+entrances 8.5, 8.7 and 8.52 at the median (13 of their 105 frames now
+area 127's end).
+
+The halves are unchanged (their code wasn't touched; the interrupt's
+saving shows in each, about 90 cycles at the median). The maxima are the
+sound's waits, which land on whichever frame is being made. A key's first
+changed view, walking 5.05 fields to 4.9 at the median, turning 5.08 to
+5.05. More frames are drawn over the same runs (4,855 against 4,778): the
+frames between passes come quicker.
+
+Room, logic disc, before and after the round: `BANK_DATA` 657 to 415,
+`LOGIC_BANK` 337 to 482, shadow RAM past `RigCode` 151 to 126, `Work` 12 to
+27, the front end's bank 377, ANDY 196 and main RAM after `LogicMore` 300
+unchanged. Main RAM before `ObjMore`'s page (`LogicWork`'s end to the
+page's start, where `LIVE`, `AreaCode` and `LogicWork` can grow for
+nothing) 64 to 20: the next growth past it moves `ObjMore` a page.
+
+Measured and not kept: the crosshair's code for two points, so that the
+buffers' two crosshairs after a move don't make it again in turn. The
+check's runs make it in about a quarter of the EORs either way (2,087
+makes of 8,445 with one point, 1,847 of 8,449 with two: the crosshair
+does move that often in them), and the search for the slot cost each
+EOR what the makes saved; backed out.
+
+Counted and not built, each under 1% of the frame it's in:
+- `bound_object`'s `BD_STORE` (a box's three bounds times 64, about 170
+  cycles an object a turn, 0.3% of a turning frame) by shifting less: the
+  13th round's bounds at a 64th cost the walks' compares more;
+- a tilted camera's `fill_point` by rows, its first term set rather than
+  added to zeros (about 100 cycles a point, 0.3% of a turning frame), in
+  more code than the bank has room for;
+- the panel's glyph by a product, not the stride's additions (about 50
+  cycles a glyph: 0.4% of an entrance, 0.1% of a walk);
+- `lv_inputs`'s camera compared written out, and the raster's line heads'
+  loop written out (under 100 cycles a frame each);
+- the logic's `shown_flags` only when a pass changes an object's flags
+  (about 1,400 cycles a pass), which wants every writer of a record's
+  flags (the FCL's, the rigs', the area's load, a new game) to say so;
+  not built, as one missed would show a wrong view, and the check would
+  find it only where a scenario goes;
+- the waits in `snd_ask` are decision 110's, not the frame's.

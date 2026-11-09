@@ -260,6 +260,11 @@ In order. Formats are the model's; the 6502 matches them exactly.
 Round the frame, the logic (`docs/research/logic6502.md`) and the panel
 (`docs/research/panel.md`): Driller's instruments round the view, drawn
 into both buffers in the beam's window as the logic's variables change.
+The panel sets a cell's value only when what decides it changes (each
+number, bar, tape's first line and message is kept as last set), and the
+crosshair's EORs are code made where it last moved, so a frame's work
+round the view is little more than the cells that change (the journal's
+2026-11-09 entry, "the sixteenth round").
 
 ## 5. Checking
 
@@ -287,6 +292,15 @@ share (cycles between the stages' labels), and a sampling profile on
 request. It's the proof of the engine, so every optimisation round reports
 against it. The model's counts (vertices, faces, face-rows, runs, bytes)
 come with it, to see where the cycles go.
+
+On the live disc the measure is `tools/livecheck.mjs` (`make live`, in
+`make check`): the whole frame, flip to flip, and each half and the rest,
+by what the frame did, with `--profile-all` / `--profile-rest` for the
+cycles by routine and `--time` for a routine's a call. The harness times
+the halves itself; the disc no longer does (decision 180). Its median
+moves with the frames' mix and with where flips fall, so a round reports
+the trimmed mean and per-routine cycles beside it (the journal's
+2026-11-09 entry).
 
 ## 7. Where things live
 

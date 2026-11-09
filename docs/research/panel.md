@@ -206,8 +206,9 @@ The text (`src/text.6502`) stays the slideshow's.
   shows the same.
 - **The text goes from the live discs**: the frames a second stay on the
   screen (with "TECH DEMO" and the credit); the fields a frame and the
-  halves' cycles leave it (the check still times the halves with User VIA
-  T2), as do the keys' lines (the README has the keys).
+  halves' cycles leave it (the check times the halves itself: decision
+  180 took the disc's User VIA T2 timing out), as do the keys' lines (the
+  README has the keys).
 - **The packed picture is loaded once into the transform's cache's
   memory** and unpacked into both buffers at the start (proposed
   2026-11-01; amends decision 40's map): `PanelData` takes the text's

@@ -1081,3 +1081,21 @@ names are the original's 12 characters, not 14 cells; the pattern pool
 keeps its fourth plane in the other three's top two bits; the information
 screen reads the panel's font, paging two banks as it draws. No picture
 changes. The option, for Matt: put the bytes back for the cycles.
+
+(The pitch tapes' extra cycles no longer come every pass: since the
+sixteenth round, 2026-11-09, the panel sets a tape's cells only when its
+first line changes.)
+
+## 180. The disc no longer times the frame's halves itself (2026-11-09, autonomous, proposed for Matt)
+
+The live discs timed stages 1-7 and 8-10 of every frame by User VIA T2
+(`clock`, `clock_from`, `clock_to`), once for the figures on the screen
+and, since the panel took that room, for the check alone, which held the
+BBC's figure to its own count of the same span. That cost every frame
+drawn four reads of T2 with interrupts held off and two spans made into
+microseconds, the largest piece of the loop round the halves that did
+nothing for the game (the journal's 2026-11-09 entry, "the sixteenth
+round", has the cycles and the bytes). It's gone, and the check times the
+halves itself, as it always did; nothing on the screen changes. The
+option, for Matt: put it back, for a disc that could show its own halves'
+cycles again.

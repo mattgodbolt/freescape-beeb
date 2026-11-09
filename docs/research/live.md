@@ -391,16 +391,10 @@ credit and the frames a second: from the flips and fields counted
 every `FIGURE_FIELDS` fields.
 
 The window is measured early when the loop goes idle with its frames all
-shown (the idle loop, above). The halves (no longer on the screen) are
-timed on the BBC by User VIA T2, which runs free down at
-1MHz and wraps every 65,536 microseconds, beside the fields counted
-(`clock`, `clock_to`). A span that saw n vertical syncs is longer than n − 1
-fields and shorter than n + 1, a window of two fields, narrower than T2's
-wrap (`ASSERT 2 * FIELD_US < 65536`), so its length is the one value in
-that window with T2's difference modulo 65,536. A sync flagged and not yet
-counted when the clock is read counts. The check holds the BBC's own figure
-for every frame to the emulator's count of the same span, within
-`CLOCK_SLACK` cycles.
+shown (the idle loop, above). The halves were once timed on the BBC too,
+by User VIA T2 beside the fields counted, for the screen and then for the
+check alone; the check times them itself, so that went from the frame
+(decision 180).
 
 ## The disc
 
@@ -462,7 +456,7 @@ logic's code and variables unused.
 
 | Where | What |
 |---|---|
-| bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, written over `LOGIC`'s gap): the figures and the clock's arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
+| bank `BANK_DB` | the logic's `LOGIC_BANK` (`Logic`, file `LOGIC`): Driller's database at its top, which the logic walks and `area_enter` builds each area's working copy from, and the logic's code that reads it (the areas, the FCL, the index); in the gap between, `LiveGlue` (`LGLUE`, written over `LOGIC`'s gap): the figures' arithmetic, the frames between passes and the crosshair, or the free camera's code and tables |
 | bank `BANK_DATA` | the logic's `LOGIC_CODE_BANK` (`LogicCode`, `LOGICC`: the pass, the moves, the walk, the object test, the arithmetic and the original's tables), then `LiveData` (`LDATA`: the areas' patterns and index by id, the lines' code), the panel's code and tables (`PanelData`, `PDATA`), and the working copy's conversion (`AreaConv`, `ACONV`) |
 | bank `BANK_RASTER` | the rasteriser: row runs, code and work (decision 20); its quarter squares are the maths' in HAZEL (`RASTER_SQUARES`: the same table, ASSERTed) |
 | bank `BANK_OBJ` | the object pipeline's code (`ObjCode`), from `OBJ_CODE_ORG` (`src/defs.6502`; below): the transform's and the object pass's first, then from `obj_andy_reach`, past the bank's first 4K, what ANDY's code may call |
@@ -471,7 +465,7 @@ logic's code and variables unused.
 | `&0E00` on | `RasterState` (the rasteriser's state, from a page, so its `ALIGN` costs nothing), `LIVE` (the loop, the screen, the interrupt, the keys, `panel_set`, the logic's entries and hooks, the glue that pages), `AreaCode` (`LAREA`: `area_init`, `area_enter` and the database's reader), `LogicWork` (`LOGICW`, the logic's variables), then `ObjMore` (`OMORE`) to `&3000`: the maths' code (`src/maths.6502`, `src/project.6502`, which patch themselves), from a page as in its own check, then the 2D clip's |
 | `&0400` on | `Work` (`src/zp.6502`, this disc's variables with it), then `AreaKeep` (the globals' records their slots were last built from: `src/area.6502`'s `ag_kept`, 2026-11-06) |
 | `RASTER_IN_ORG` to `RASTER_IN_END` | `RasterIn`, with `ObjOut` over it, in the OS's pages, which nothing uses once the engine owns the machine |
-| page `&0D`, below `&0D9F` | `start`, with `lv_start` and `clock_init`, which run once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
+| page `&0D`, below `&0D9F` | `start`, with `lv_start`, which run once (`LiveBoot`, `LBOOT`: the loader puts it there after its last read), after an RTI at `&0D00` |
 | main RAM's `&3000` up to `SCREEN` | the front end's data: the transform's cache (`ObjCache`), the sort's memory (`ObjMemo`), the pipeline's tables (`ObjConst`, `OCONST`), the area's working copy (`ObjArea`) and the objects' bounds (`ObjBound`, kept with the cache), which only `objects_frame` and `area_enter` touch, with ACCCON's X clear: `live_loop` clears it before `objects_frame`, `lv_enter_area` before `area_enter` (decision 31); until `clear_work` at the start, the panel's packed picture (`PanelPack`, `PANEL`, which the loader puts there) in the cache's place |
 | shadow RAM's `&3000` up to `SCREEN` | the logic's lists by face (`LogicFaces`), which only its passes touch: `lv_pass` sets ACCCON's X round `logic_go_pass`; the slanted faces' memo (`AreaShapes`); the sounds' scripts (`SoundData`, decision 111), which the loader puts in main RAM at the same addresses (`SDATA`) and `sound_init` copies across at the start |
 | `SCREEN` up to `&8000` | the screen, main RAM's and shadow RAM's: Driller's 192 lines (`docs/engine.md`, section 1) |
