@@ -91,10 +91,12 @@ SECTION Work
 .panel_behind   SKIP 1              ; panel_catch_up's calls since the panel was last all drawn
 .panel_lines    SKIP 2 * PANEL_MAX_H    ; panel_draw's: a glyph cell's bytes, the left column's then the right's
 .panel_num      SKIP 3              ; panel_number's
-.panel_cache    SKIP PC_BYTES       ; ... each number as last shown (PC_SCORE ..), the vehicle's and the area's
+.panel_cache    SKIP PC_BYTES       ; ... each number as last shown (PC_SCORE ..), the vehicle's and the area's,
+                                    ; the bars', the tapes' first lines and the message's (&FF: none, or a rig's)
 ENDSECTION
 PC_SCORE = 0 : PC_STEP = 3 : PC_TURN = 6 : PC_X = 9 : PC_Z = 12 : PC_Y = 15
-PC_VEHICLE = 18 : PC_AREA = 19 : PC_BYTES = 20
+PC_VEHICLE = 18 : PC_AREA = 19 : PC_ENERGY = 20 : PC_SHIELD = 21 : PC_HEADING = 22
+PC_PITCH = 23 : PC_MESSAGE = 24 : PC_BYTES = 25
 
 \ panel_set: cell X to show A. Keeps A, X and Y. (In the section the
 \ includer includes this file in, which must be main RAM's, below &3000:
@@ -379,8 +381,8 @@ ENDSECTION
     LDA PANEL_POS+2 : STA panel_num : LDA PANEL_POS+3 : STA panel_num+1
     LDX #PF_Y : LDY #PC_Y : JSR position
     \ the energy and shield
-    LDA Energy : LDX #PF_ENERGY : JSR panel_bar
-    LDA Shield : LDX #PF_SHIELD : JSR panel_bar
+    LDA Energy : LDX #PF_ENERGY : LDY #PC_ENERGY : JSR panel_bar
+    LDA Shield : LDX #PF_SHIELD : LDY #PC_SHIELD : JSR panel_bar
     \ the heading: the tape's window (yaw - span + 4 i) mod 72, but where
     \ the original's compass doesn't turn ($B83B)
 IF NOT(PANEL_FREE)
@@ -393,6 +395,10 @@ ENDIF
     SEC : SBC #PANEL_HEADING_SPAN : BCS heading
     ADC #STEPS_TURN
 .heading
+    \ (each tape's cells are set only when its first changes: they're the
+    \ panel's alone, so they hold what it last set)
+    CMP panel_cache + PC_HEADING : BEQ no_compass
+    STA panel_cache + PC_HEADING
     LDX #PF_HEADING
     LDY #PN_HEADING
 .heading_cell
@@ -407,6 +413,8 @@ ENDIF
     ASL A : SEC : SBC #PANEL_PITCH_MID : BCS pitch
     ADC #PANEL_PITCH_LINES
 .pitch
+    CMP panel_cache + PC_PITCH : BEQ pitched
+    STA panel_cache + PC_PITCH
     LDX #PF_PITCH0
     LDY #PN_PITCH0
 .pitch_cell
@@ -427,6 +435,7 @@ ENDIF
     SBC #PANEL_PITCH_LINES
 .pitch_next
     DEY : BNE pitch_cell
+.pitched
     \ the vehicle: the jet's picture and name, or the probe's and its
     \ extension's (ExtLevel, 1 to 4)
     LDA InJet : BEQ probe
@@ -498,6 +507,7 @@ IF NOT(PANEL_FREE)
     \ the message: one of a rig's while it shows (src/live.6502's
     \ lv_messages: ASCII, as the original's, into the font's places) ...
     LDA lv_msg_on : BEQ no_rig
+    LDY #&FF : STY panel_cache + PC_MESSAGE     ; (the next of the others drawn whole)
     TAY : LDA panel_msg_at - 1,Y : TAY
     LDX #PF_MESSAGE
 .rig_cell
@@ -530,6 +540,8 @@ IF NOT(PANEL_FREE)
     LDA RigPlaced,X : CMP #PANEL_CLEARED : BNE message
     LDY #LO(pm_cleared - pm_neutral)
 .message
+    TYA : CMP panel_cache + PC_MESSAGE : BEQ valued
+    STA panel_cache + PC_MESSAGE
     LDX #PF_MESSAGE
 .message_cell
     LDA pm_neutral,Y : JSR panel_set
@@ -694,7 +706,8 @@ ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
 POWERS = {10000000, 1000000, 100000, 10000, 1000, 100, 10, 1}
 
 \ panel_bar: a bar of energy or shield A, into cells X on: the pixels it
-\ lights, (min(A, PANEL_BAR_MAX) 3 + 7) >> 3, four a cell from the left.
+\ lights, (min(A, PANEL_BAR_MAX) 3 + 7) >> 3, four a cell from the left;
+\ none set if they're as last shown (panel_cache + Y).
 .panel_bar
 {
     CMP #PANEL_BAR_MAX + 1 : BCC fits
@@ -702,6 +715,8 @@ POWERS = {10000000, 1000000, 100000, 10000, 1000, 100, 10, 1}
 .fits
     STA panel_num : ASL A : CLC : ADC panel_num : ADC #7
     LSR A : LSR A : LSR A
+    CMP panel_cache,Y : BEQ shown
+    STA panel_cache,Y
     LDY #PN_SHIELD
 .cell
     CMP #4 : BCC part
@@ -713,6 +728,7 @@ POWERS = {10000000, 1000000, 100000, 10000, 1000, 100, 10, 1}
     LDA #0
 .next
     INX : DEY : BNE cell
+.shown
     RTS
 }
 ASSERT PN_SHIELD = PN_ENERGY AND PANEL_BAR_MAX * 3 + 7 < 256
