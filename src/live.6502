@@ -1782,7 +1782,7 @@ ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
 .lv_camera
 {
     ZA_AUTO1 f, k
-    ZA_AUTO2 m
+    ZA_AUTO2 m, sl, sh, nl, nh
     LDA an_on : BEQ logic
     LDA lv_now : SEC : SBC an_t0 : TAX
     LDA lv_now+1 : SBC an_t0+1 : BNE done        ; (an_t0 is never after now)
@@ -1800,6 +1800,13 @@ ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
     RTS
 .going
     LDA pace_f,X : STA f
+    \ (times_f's pointers into the quarter squares, by f: once a frame)
+    STA sl : STA sh
+    EOR #&FF : STA nl : STA nh
+    LDA #HI(sq_lo) : STA sl+1
+    LDA #HI(sq_hi) : STA sh+1
+    LDA #HI(ng_lo) : STA nl+1
+    LDA #HI(ng_hi) : STA nh+1
     LDX #4
 .axis
     LDA an_p0,X : STA lv_cam,X
@@ -1855,19 +1862,13 @@ ASSERT STEPS_TURN = 72 AND Yaw = Pitch + 1 AND Roll = Pitch + 2
     RTS
     \ times_f: m = (m f) >> 8, m 16-bit; k the bits below (bit 7 the half).
     \ By the maths' quarter squares in HAZEL, each byte of m by f: f g =
-    \ sq(f + g) - ng(255 + g - f), through pointers f into the tables. Most
-    \ of a frame's are 0: a step's angles, a turn's position.
+    \ sq(f + g) - ng(255 + g - f), through pointers f into the tables (sl,
+    \ sh, nl, nh: set at going). Most of a frame's are 0: a step's angles,
+    \ a turn's position.
 .times_f
 {
-    ZA_AUTO2 sl, sh, nl, nh
     ZA_AUTO1 lh, hl
     LDA m : ORA m+1 : BEQ zero
-    LDA f : STA sl : STA sh
-    EOR #&FF : STA nl : STA nh
-    LDA #HI(sq_lo) : STA sl+1
-    LDA #HI(sq_hi) : STA sh+1
-    LDA #HI(ng_lo) : STA nl+1
-    LDA #HI(ng_hi) : STA nh+1
     \ m's low byte by f: the bits below, and what goes into m's
     LDY m
     SEC
@@ -1959,13 +1960,30 @@ SECTION LiveData
     RTS
 }
 \ cross_eor: the crosshair at CrossX = A, CrossY = Y EORed into the buffer
-\ drawn, each pixel inside the view.
+\ drawn, each pixel inside the view. Its bytes' EORs are code (cross_code,
+\ made by cross_make for the point last asked for, cr_x and cr_y), as the
+\ crosshair is EORed off and on in every frame and mostly where it was.
 CROSS_LEFT  = mode2_byte(7, 0)
 CROSS_RIGHT = mode2_byte(0, 7)
 .cross_eor
+    CMP cr_x : BNE cross_make
+    CPY cr_y : BNE cross_make
+    JMP cross_code
+.cr_x       EQUB 0
+.cr_y       EQUB &FF                            ; (none made yet: no CrossY is &FF)
+ASSERT VIEW_H < &FF
+\ cross_code: LDA, EOR #, STA for each of the crosshair's bytes, then RTS
+.cross_code
+    SKIP CROSS_BYTES * CROSS_OP + 1
+CROSS_BYTES = 2 + 4                             ; (the arms across, and up and down: CROSS_DY)
+CROSS_OP = 8                                    ; (LDA abs, EOR #, STA abs)
+\ cross_make: cross_code made for A and Y, then run.
+.cross_make
 {
-    ZA_AUTO1 bc, r, mask, top
+    ZA_AUTO1 bc, r, mask, top, n
     ZA_AUTO2 at
+    STA cr_x : STY cr_y
+    STZ n
     DEC A : LSR A : STA bc
     STY r : LDA #VIEW_H : SEC : SBC r : STA r
     \ every pixel has the centre's parity, the arms across being two from it
@@ -1988,11 +2006,11 @@ CROSS_RIGHT = mode2_byte(0, 7)
     LSR A : LSR A : AND #&FE : CLC : ADC top : STA at+1
     TYA : AND #7 : TAY
     LDA bc : SEC : SBC #2 : CMP #VIEW_W : BCS no_left
-    LDA (at),Y : EOR mask : STA (at),Y
+    JSR emit
 .no_left
     LDA bc : CLC : ADC #2 : CMP #VIEW_W : BCS up_down
     TYA : ORA #16 : TAY
-    LDA (at),Y : EOR mask : STA (at),Y
+    JSR emit
 .up_down
     \ the arms up and down, in bc's column: lines r + CROSS_DY
     LDA bc : CMP #VIEW_W : BCS done
@@ -2002,14 +2020,31 @@ CROSS_RIGHT = mode2_byte(0, 7)
     TAY
     LSR A : LSR A : AND #&FE : CLC : ADC top : STA at+1
     TYA : AND #7 : ORA #8 : TAY
-    LDA (at),Y : EOR mask : STA (at),Y
+    JSR emit
 .next
     DEX : BPL line
 .done
+    LDX n
+    LDA #OP_RTS : STA cross_code,X
+    JMP cross_code
+\ emit: the EOR of byte at + Y into cross_code. Keeps X and Y.
+.emit
+    PHX
+    LDX n
+    LDA #OP_LDA_ABS : STA cross_code,X
+    LDA #OP_EOR_IMM : STA cross_code + 3,X
+    LDA #OP_STA_ABS : STA cross_code + 5,X
+    LDA mask : STA cross_code + 4,X
+    TYA : CLC : ADC at : STA cross_code + 1,X : STA cross_code + 6,X
+    LDA at+1 : ADC #0 : STA cross_code + 2,X : STA cross_code + 7,X
+    TXA : CLC : ADC #CROSS_OP : STA n
+    PLX
     RTS
 .cross_dy   EQUB CROSS_DY AND &FF
 }
 CROSS_DY = {-3, -2, 2, 3}                       ; (the arms across are two either side, on the centre's line)
+ASSERT LEN(CROSS_DY) + 2 = CROSS_BYTES
+OP_LDA_ABS = &AD : OP_EOR_IMM = &49 : OP_STA_ABS = &8D
 ASSERT SCREEN_ROW = 512 AND VIEW_W < 128
 ASSERT VIEW_W < 254 AND VIEW_H < 253          ; (an arm off an edge wraps past the view)
 ENDSECTION
