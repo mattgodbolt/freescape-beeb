@@ -2023,3 +2023,17 @@ Counted and not built, each under 1% of the frame it's in:
   not built, as one missed would show a wrong view, and the check would
   find it only where a scenario goes;
 - the waits in `snd_ask` are decision 110's, not the frame's.
+
+## 2026-11-09: the README and its pictures
+
+The README's "Where it's up to" now says the whole game is in, and what
+isn't: the title screen (the tape's loading screen), the panel's rig
+animation (the ST's only) and save and load (decision 153). Its keys are
+the key map's (`src/input.6502`): 0 or COPY fires, D and C, I for the
+information screen, ESCAPE or 1 to abandon from it, RETURN for a new game
+after the end. `make game-shots` (`tools/mkgameshots.py`) makes
+`docs/images/disc_game.png` (the start, a rig set down, the laser firing)
+and `disc_screens.png` (the information screen, the end's scene), through
+PAL. The older pictures are still true and stay. "How fast" is the
+sixteenth round's table (walking 1.69, turning 2.18, entrances 8.5 over
+every run the check makes).

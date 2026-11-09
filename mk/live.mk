@@ -105,6 +105,24 @@ live: $(LIVE_DISC) $(LIVE_FREE) $(LIVE_GEN) $(LIVE_TRACE)
 	node tools/livecheck.mjs --free --disc $(LIVE_FREE) --live $(LIVE_DIR)/live.json \
 	    --json $(LIVE_DIR)/check-free.json
 
+.PHONY: game-shots
+# The game in play on the live disc, through PAL, for the README
+# (tools/mkgameshots.py): the start, a rig set down (D), the laser firing
+# (K0), the information screen (I) and the end's scene (1 abandons).
+# Writes docs/images/disc_game.png and disc_screens.png.
+GAME_SHOTS = start rig laser info end
+game-shots: $(LIVE_DISC)
+	node tools/play.mjs 'f60,!start,D:tap,f6,f40,!rig' \
+	    shots/game_ --disc $(LIVE_DISC) --until live_loop
+	node tools/play.mjs 'f60,K0:down,f1,f1,f2,f3,f4,!laser' \
+	    shots/game_ --disc $(LIVE_DISC) --until live_loop
+	node tools/play.mjs 'f60,I:tap,f30,!info,K1:tap,f240,!end' \
+	    shots/game_ --disc $(LIVE_DISC) --until live_loop
+	for s in $(GAME_SHOTS); do \
+	    $(PYTHON) -I tools/pal.py --shrink 2 shots/game_$$s.png shots/game_$${s}_pal.png || exit 1; \
+	done
+	$(PYTHON) -I tools/mkgameshots.py shots docs/images
+
 LIVE_COMMA := ,
 live-run: $(LIVE_FREE)
 	node tools/play.mjs '=lv_want:0$(foreach v,$(LIVE_SHOTS),$(LIVE_COMMA)=lv_want:$(v)$(LIVE_COMMA)f160$(LIVE_COMMA)!view$(v))' \

@@ -14,11 +14,35 @@ work as it lands, so it's in progress.
 
 ![Driller's Beryl area, as the engine's model draws it in MODE 2 through a PAL television](docs/images/hero_pal.png)
 
-*A preview: Beryl, one of Driller's areas, as the engine's Python model renders it
+*Beryl, one of Driller's areas, as the engine's Python model renders it
 in MODE 2, the ST's colours dithered from the BBC's eight, seen through
-jsbeeb's PAL television. The 6502 is being built to draw exactly this.*
+jsbeeb's PAL television. The 6502 draws exactly this. Driller is Incentive
+Software's.*
 
 ## Where it's up to
+
+**All of Driller's game is on the disc, as one game**: walking, sound,
+the drilling rigs, the laser, the guard sensors, the clock, the end and a
+new game, the information screen, and Driller's own demo. Not in: the
+title screen (the tape's loading screen, which the disc doesn't have), the
+panel's rig animation (the Atari ST version's only; the Spectrum's, which
+is the specification, has none) and save and load (the Spectrum's go to tape;
+decision 153). The sections below are how each layer landed, dated.
+
+![Driller on the disc through a PAL television: its start in Amethyst, a rig set down with the panel saying RIG POSITIONED, and the laser's four beams firing at the scenery](docs/images/disc_game.png)
+
+*The disc in jsbeeb through PAL television (the blur blends the dithers), left
+to right: Driller's start with the panel; a drilling rig set down (D),
+its message RIG POSITIONED; the laser firing (0), its four beams from the
+view's bottom corners to the crosshair, a hit scoring. Driller is Incentive
+Software's.*
+
+![Driller's information screen, and the end's scene, on the disc through a PAL television](docs/images/disc_screens.png)
+
+*Left: Driller's information screen (I), in the original's words. Right:
+the end's scene, area 127's 3D END, after the game is abandoned (1 on the
+information screen), with its panel message TERMINATED. Any key starts a
+new game. Driller is Incentive Software's.*
 
 *2026-10-31.* **You can walk Driller on the BBC, with Driller's own
 logic, and every frame worked out live.** The disc starts at Driller's
@@ -26,8 +50,9 @@ start, in Amethyst. **Z and X turn, : and / walk** (or the cursor keys,
 or Driller's own Q, W, O and K); P and L look up and down, N and M roll,
 R and F rise and fall, U turns round, f0 and f1 set the turn's size and f2
 and f3 the step's, B shows the crosshair, SPACE is shooting mode (the
-walking keys move the crosshair), 0 or COPY fires, D drills and C collects
-a rig. You collide, climb, fall and go through
+walking keys move the crosshair), 0 or COPY fires, D sets a rig down, C
+collects it, I is the information screen (and ESCAPE or 1 abandons the
+game from it), and RETURN starts a new game after the end. You collide, climb, fall and go through
 doorways into other areas as in the original, because it is the
 original's logic, transcribed into 6502 and checked pass by pass against
 the original running headless. A tap turns 5° or steps 25 units, one
@@ -97,7 +122,7 @@ the whole frame. Driller is Incentive Software's.*
 
 **How fast:** measured on the disc's check (journal, 2026-11-09), the
 whole frame, flip to flip, walking through Driller's areas takes a median
-of about 1.7 fields (about 30 frames a second) and turning about 2.2
+of about 1.69 fields (about 30 frames a second) and turning about 2.18
 (about 23), over every run the check makes, which since the end and the
 demo came include their busier views (over the runs it had before them,
 walking takes about 1.55 and turning 2.1); wide open views, like the
@@ -105,11 +130,9 @@ entrances, take longer, about 8.5 fields at the median. Standing still
 draws nothing, so a key starts the next frame at once. The original
 redrew about once every two-thirds of a second on the Spectrum. Every
 stage matches the model exactly, so the work from here is speed, on a
-stock Master. Driller's game itself is coming in layer by layer: its
-sound, rigs, laser, sensors, the clock, the end, a new game, the demo and
-the information screen are in
-(`docs/research/game-audit.md`). `docs/journal.md` has the
-story as it goes.
+stock Master. Driller's game itself is all in (see below);
+`docs/research/game-audit.md` has what of it is ported, checked, and
+what isn't, and `docs/journal.md` has the story as it goes.
 
 ![Nine of Driller's views from the model, through PAL](docs/images/gallery_pal.png)
 
@@ -120,8 +143,8 @@ is Incentive Software's.*
 ![Two Driller views: the original's ZX drawing, the model's MODE 2 render in the ST's colours, and the same through PAL](docs/images/model_views.png)
 
 *Two of Driller's entrance views. Left: Driller's own ZX code drawing
-them, run headless. Middle: the Python model's render, which the 6502 is
-being built to match, in the ST's colours as MODE 2 dithers on an RGB
+them, run headless. Middle: the Python model's render, which the 6502
+matches byte for byte, in the ST's colours as MODE 2 dithers on an RGB
 monitor. Right: the same through jsbeeb's PAL television. Driller is
 Incentive Software's.*
 
