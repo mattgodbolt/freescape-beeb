@@ -33,19 +33,26 @@ ASSERT SL_ENTRY = 6 AND SL_ENTRIES = 5
 SECTION RigCode
 
 \ sn_need: A non-zero (and Z clear) if the test needs the frame of the
-\ pass's end: re-projecting (sn_proj), a sensor in range (sn_in_range), whose
-\ pixel the frame may have drawn; else one the list has on the screen, whose
-\ pick is the frame's. Otherwise the test can come at once.
+\ pass's end: re-projecting (sn_proj), a sensor shown in range (sn_range),
+\ whose pixel the frame may have drawn; else one the list has on the screen,
+\ whose pick is the frame's. Otherwise the test can come at once. Leaves
+\ LOGIC_BANK paged if it re-projects.
 .sn_need
 {
     ZA_AUTO1 k
     LDA sn_proj : BEQ listed
-    LDA ix_n : BEQ none
-    STA k
+    LDX ix_n : BEQ none
+    \ (each record's type and flag looked at here, and sn_range asked only
+    \ of a sensor shown: most objects are none, and this comes after every
+    \ pass that redraws)
+    LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
 .object
-    DEC k
-    LDA k : JSR sn_in_range : BCS found
-    LDA k : BNE object
+    DEX
+    LDA ix_pl,X : STA sn_rec
+    LDA ix_ph,X : STA sn_rec+1
+    LDA (sn_rec) : AND #&4F : CMP #SENSOR_TYPE : BEQ sensor   ; (a sensor, not hidden)
+.next
+    TXA : BNE object
 .none
     LDA #0
     RTS
@@ -57,29 +64,26 @@ SECTION RigCode
     LDA SN_FOUND + 3,Y : CMP #1 : BEQ found
     TXA : BNE entry
     BRA none
+.sensor
+    STX k
+    JSR sn_range
+    LDX k
+    BCC next
 .found
     LDA #1
     RTS
 }
 
-\ sn_in_range: whether indexed object A is a sensor in range ($7592's
-\ tests before the projection): C set if so. Shown, the camera on a side
+\ sn_range: whether the sensor shown whose record sn_rec is is in range
+\ ($7592's tests before the projection): C set if so. The camera on a side
 \ its mask (byte &0D) names (the projection's which-side bits: the camera
 \ below each axis's low face, above its high one), and |x| + |y| + |z| of
 \ its point less the camera (16-bit, as the original sums them) short of its
-\ range (bytes &0B, &0C). With LOGIC_BANK paged; sn_rec its record.
-.sn_in_range
+\ range (bytes &0B, &0C). With LOGIC_BANK paged. Clobbers X and Y.
+.sn_range
 {
     ZA_AUTO1 bits
     ZA_AUTO2 sum
-    TAY
-    LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
-    LDA ix_pl,Y : STA sn_rec
-    LDA ix_ph,Y : STA sn_rec+1
-    LDA (sn_rec) : AND #&4F : CMP #SENSOR_TYPE : BEQ shown   ; (a sensor, not hidden)
-    CLC
-    RTS
-.shown
     STZ bits : STZ sum : STZ sum+1
     LDY #1
 .axis
@@ -240,16 +244,24 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     STZ e
     LDA ix_n : BEQ done
     STZ k
+    LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
 .object
-    LDA k : JSR sn_in_range
-    PHP
-    LDA (sn_rec) : AND #&0F : CMP #SENSOR_TYPE : BNE other
+    LDY k
+    LDA ix_pl,Y : STA sn_rec
+    LDA ix_ph,Y : STA sn_rec+1
+    LDA (sn_rec) : AND #&0F : CMP #SENSOR_TYPE : BNE next
     INC SN_FOUND_N
     LDX e
     LDY #7 : LDA (sn_rec),Y : STA SN_FOUND,X
     LDY #&0A : LDA (sn_rec),Y : STA SN_FOUND + 1,X
+    LDA (sn_rec) : AND #&40 : BNE hidden
+    JSR sn_range
+    LDX e
+    BCS in_range
+.hidden
     LDA #0
-    PLP : BCC state
+    BRA state
+.in_range
     \ in range: drawn?
     LOGIC_PAGE A, LOGIC_CODE_BANK               ; (lv_spot, BANK_DATA's)
     LDA k : JSR lv_spot
@@ -257,15 +269,14 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     BCC unseen
     STA SN_FOUND + 4,X
     TYA : STA SN_FOUND + 5,X
-    LDA #1 : BRA state
+    LDA #1 : BRA seen
 .unseen
     LDA #2
+.seen
+    LOGIC_PAGE Y, LOGIC_BANK                    ; (the next records)
 .state
     STA SN_FOUND + 3,X
     TXA : CLC : ADC #SL_ENTRY : STA e
-    BRA next
-.other
-    PLP
 .next
     INC k
     LDA k : CMP ix_n : BNE object
