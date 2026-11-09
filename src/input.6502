@@ -150,16 +150,18 @@ CA2 = 1                     ; sysvia_ifr's bit: the keyboard's auto-scan found a
     DEX : BPL column
     LDA #&0B : STA sysvia_orb                   ; auto-scan back
     LDA #&FF : STA sysvia_ddra
-    \ made: held now and not at the last read, kept until taken
-    STZ keys_any
-    LDX #KEYS_BYTES - 1
-.byte
-    LDA keys,X : EOR #&FF : AND keys_scan,X
-    ORA keys_made,X : STA keys_made,X
-    LDA keys_scan,X : STA keys,X
-    ORA keys_any : STA keys_any
-    DEX : BPL byte
-.done
+    \ made: held now and not at the last read, kept until taken (written
+    \ out: this runs every field a key is held)
+    FOR i = 0..KEYS_BYTES - 1
+        LDA keys + i : EOR #&FF : AND keys_scan + i
+        ORA keys_made + i : STA keys_made + i
+        LDA keys_scan + i : STA keys + i
+    NEXT
+    LDA keys_scan
+    FOR i = 1..KEYS_BYTES - 1
+        ORA keys_scan + i
+    NEXT
+    STA keys_any
     RTS
 }
 ASSERT P% <= &3000
