@@ -8,7 +8,8 @@
 \ logic keeps them in an index in main RAM (ix_*, src/logic/vars.6502),
 \ built from the records in the original's order as the area loads: each
 \ object's first cell and end (first plus size, AND 255) on each axis, its
-\ id, and its record. Its flags and type, which the FCL changes or the
+\ id, and its record; and the sensors among them (ix_sn, for the sensors'
+\ test after a redraw, src/sensors.6502). Its flags and type, which the FCL changes or the
 \ answer needs, are read from the record itself (answer), as the original
 \ reads them. In LOGIC_BANK, with the records.
 \ ***************************************************************************
@@ -21,6 +22,7 @@
     ZA_AUTO2 p
     ZA_AUTO1 n
     LDX #0
+    STZ ix_ns
     LDA AreaObjects : BEQ globals
     STA n
     LDA AreaObjPtr : STA p
@@ -44,6 +46,10 @@
     LDY #3 : LDA (p),Y : STA ix_zo,X
     LDY #6 : CLC : ADC (p),Y : STA ix_ze,X
     LDY #7 : LDA (p),Y : STA ix_id,X
+    LDA (p) : AND #&0F : CMP #IX_SENSOR : BNE not_sensor
+    LDY ix_ns : TXA : STA ix_sn,Y
+    INC ix_ns
+.not_sensor
     LDY #8 : LDA (p),Y
     CLC : ADC p : STA p
     BCC same
@@ -54,6 +60,7 @@
     RTS
 }
 ASSERT ZX_N_GLOBALS > 0 AND ZX_AREAS_MOST + ZX_N_GLOBALS < IX_MAX     ; (and a byte after the last, where touch stops)
+IX_SENSOR = 2               ; a sensor's type (the record's flags' low nibble)
 
 \ shown_flags: each indexed object's flags byte (its record's +0: bit 6
 \ invisible, bit 5 destroyed, the low nibble its type) into ix_flags, in

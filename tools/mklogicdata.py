@@ -171,6 +171,16 @@ def main():
         assert pairs[2 * a] == (sine[a % 36] if a < 36 else -sine[a % 36] & 255), a
         assert pairs[2 * a + 1] == (pairs[2 * ((a + 18) % 72)]), a
     most = max(n for _, n in areas(m))
+    # The most sensors (type 2) an area's index holds, its own and the
+    # globals' (src/logic/index.6502 lists them for src/sensors.6502).
+    def sensors(at, n):
+        count = 0
+        for _ in range(n):
+            count += (m[at] & 0x0F) == 2
+            at += m[at + 8]
+        return count
+    global_sensors = sensors(0x87A5, m[0x890F])
+    sensors_most = global_sensors + max(sensors(area_record(m, a) + 25, n) for a, n in areas(m))
     # src/logic/area.6502's place_rigs indexes the rigs by the area's id less
     # one for ids below &13, as the original's JP P on the id less &13 picks
     # them: true of every id from 1 to &7F.
@@ -194,6 +204,7 @@ def main():
         f"ZXV_END = &{ZXV_END:04X}",
         f"ZX_N_GLOBALS = {m[0x890F]}",
         f"ZX_AREAS_MOST = {most}          \\ the most objects in an area",
+        f"ZX_SENSORS_MOST = {sensors_most}         \\ the most sensors in an area's index, the globals' with its own",
         f"ZX_KEYS3 = {n3}",
         f"ZX_KEYS2 = {n2}",
         "",

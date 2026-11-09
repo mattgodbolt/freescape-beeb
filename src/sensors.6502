@@ -41,16 +41,16 @@ SECTION RigCode
 {
     ZA_AUTO1 k
     LDA sn_proj : BEQ listed
-    LDX ix_n : BEQ none
-    \ (each record's type and flag looked at here, and sn_range asked only
-    \ of a sensor shown: most objects are none, and this comes after every
-    \ pass that redraws)
+    LDX ix_ns : BEQ none
+    \ (the index's sensors alone, ix_sn, as this comes after every pass
+    \ that redraws: sn_range asked of each one shown)
     LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
 .object
     DEX
-    LDA ix_pl,X : STA sn_rec
-    LDA ix_ph,X : STA sn_rec+1
-    LDA (sn_rec) : AND #&4F : CMP #SENSOR_TYPE : BEQ sensor   ; (a sensor, not hidden)
+    LDY ix_sn,X
+    LDA ix_pl,Y : STA sn_rec
+    LDA ix_ph,Y : STA sn_rec+1
+    LDA (sn_rec) : AND #&40 : BEQ sensor        ; (shown)
 .next
     TXA : BNE object
 .none
@@ -239,17 +239,16 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 \ which is its point, else 2.
 .sn_project
 {
-    ZA_AUTO1 k, e
+    ZA_AUTO1 i, k, e
     STZ SN_FOUND_N
     STZ e
-    LDA ix_n : BEQ done
-    STZ k
+    LDA ix_ns : BEQ done
+    STZ i
     LOGIC_PAGE A, LOGIC_BANK                    ; (the records)
 .object
-    LDY k
+    LDY i : LDA ix_sn,Y : STA k : TAY           ; (the index's sensors, ix_sn)
     LDA ix_pl,Y : STA sn_rec
     LDA ix_ph,Y : STA sn_rec+1
-    LDA (sn_rec) : AND #&0F : CMP #SENSOR_TYPE : BNE next
     INC SN_FOUND_N
     LDX e
     LDY #7 : LDA (sn_rec),Y : STA SN_FOUND,X
@@ -277,13 +276,13 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 .state
     STA SN_FOUND + 3,X
     TXA : CLC : ADC #SL_ENTRY : STA e
-.next
-    INC k
-    LDA k : CMP ix_n : BNE object
+    INC i
+    LDA i : CMP ix_ns : BNE object
 .done
     RTS
 }
 SENSOR_TYPE = 2
+ASSERT SENSOR_TYPE = IX_SENSOR AND ZX_SENSORS_MOST <= SL_ENTRIES
 ZA_AUTO2 sn_lo, sn_hi, sn_rec
 ZA_AUTO1 sn_m
 ENDSECTION

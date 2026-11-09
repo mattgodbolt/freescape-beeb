@@ -111,6 +111,10 @@ IX_MAX = 48
 .ix_flags       SKIP IX_MAX             ; the records' flags as logic_go_shown last copied them, for the renderer
 .ix_pl          SKIP IX_MAX
 .ix_ph          SKIP IX_MAX
+    \ ... and the sensors among them (type 2), in the index's order, for
+    \ src/sensors.6502 (by index_objects)
+.ix_ns          SKIP 1
+.ix_sn          SKIP ZX_SENSORS_MOST
 ENDSECTION
 
 \ --- The mirror's variables, at the original's addresses ------------------
