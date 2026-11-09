@@ -1400,10 +1400,12 @@ ASSERT VW_CAM = 0 AND IX_MAX <= 128
 .area
     LDX #VW_AREA : LDA lv_entered : JSR vw_byte
 IF LIVE_LOGIC
-    \ (ix_flags change only by logic_go_shown, which sets vw_flags)
+    \ (ix_flags change only by logic_go_shown, which sets vw_flags, and only
+    \ the index's ix_n of them: the rest changes with the area, lv_entered)
     LDA vw_flags : BEQ flags_kept
     STZ vw_flags
-    LDX #IX_MAX - 1
+    LDX ix_n : BEQ flags_kept
+    DEX
 .flag
     LDA ix_flags,X : AND #IX_HIDDEN
     CMP vw_rec + VW_HID,X : BEQ same
