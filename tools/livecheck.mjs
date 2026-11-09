@@ -90,8 +90,6 @@
 // - every write to the view comes between frame_begin and frame_end, into
 //   the buffer not shown; outside the view, a write to the buffer shown
 //   comes with the beam above the written character row;
-// - the BBC's own timing of each half (clock_to's span_us, from User VIA T2)
-//   is within CLOCK_SLACK cycles of the harness's count of the same call;
 // - the idle loop (docs/research/live.md): every loop that draws nothing
 //   (live_idle) finds the inputs of the frame last handed over, all its view
 //   is made from (the area and its entries, the camera, the objects' hidden
@@ -147,7 +145,6 @@ const verbose = args.includes("--verbose");
 const profileAll = args.includes("--profile-all");
 const profileRest = args.includes("--profile-rest") || profileAll;
 const fineRest = args.includes("--fine");
-const CLOCK_SLACK = 8; // cycles: T2 counts microseconds, from its own phase
 const NAME = FREE ? "live-free" : "live";
 
 const syms = loadSymbols(disc.replace(/\.ssd$/, ".json"));
@@ -223,9 +220,6 @@ const CROSS_ONLY = syms.live_cross_only ?? -1; // (the logic's disc's: frames of
 const INFO_FRAME = syms.live_info ?? -1; // (... and the information screen's frames)
 let crossOnly = 0;
 const LV_CAM = sym("lv_cam"), LV_AREA = sym("lv_area");
-const SPAN_US = sym("span_us"), T_FRONT = sym("T_FRONT"), T_FILL = sym("T_FILL");
-const CLOCK_TO = sym("clock_to"), CLOCK_READ = sym("clock.again");
-let lastClock = null;
 const PANEL_WAITING = sym("panel_catch_up.waiting");
 let panelWaits = 0; // frames that waited for the beam to catch the panel up
 // The idle loop (docs/research/live.md): live_idle is where live_loop finds the
@@ -313,8 +307,6 @@ let inFrame = false, calling = false;
 let lastFlipT = null, lastEndT = null;
 let flips = 0, viewWrites = 0, textWrites = 0;
 let script = "start"; // what the script is doing (frames before it begins aren't counted)
-let clockChecked = 0;
-let afterClock = null; // the span whose clock_to is running
 
 // --profile-rest's routines: each sideways section's labels keyed by its bank
 // (ANDY's as bank 16), so the banks' shared addresses are told apart
@@ -444,8 +436,6 @@ cpu.debugInstruction.add((addr, opcode) => {
         drawFrom = null;
     } else if (addr === IDLE) {
         onIdle();
-    } else if (addr === CLOCK_READ) {
-        lastClock = now(); // (the last of its tries is the one kept)
     } else if ((addr === OBJECTS && bank === BANK_OBJ || addr === CROSS_ONLY || addr === INFO_FRAME) && current) {
         current.tFront = now();
         // a frame of the crosshair alone (live_cross_only): its buffer has
@@ -456,7 +446,6 @@ cpu.debugInstruction.add((addr, opcode) => {
             current.front = current.fill = 0;
             if (addr === CROSS_ONLY) crossOnly++;
         }
-        current.clockFront = lastClock;
         current.camera = camera();
         current.area = ram[LV_AREA];
         current.script = script;
@@ -467,19 +456,10 @@ cpu.debugInstruction.add((addr, opcode) => {
         if (!FREE) current.hiddenAll = hiddenOf(current.ixFlags);
     } else if (addr === FRONT_DONE && current?.tFront !== undefined) {
         current.front = now() - current.tFront;
-        afterClock = "front";
     } else if (addr === RASTER && bank === BANK_RASTER && current) {
         current.tFill = now();
-        current.clockFill = lastClock;
     } else if (addr === FILL_DONE && current?.tFill !== undefined) {
         current.fill = now() - current.tFill;
-        afterClock = "fill";
-    } else if (addr === CLOCK_TO && bank === BANK_GLUE && afterClock && current) {
-        // the span the BBC times: from clock's read before the call to its
-        // read after
-        const from = afterClock === "front" ? current.clockFront : current.clockFill;
-        current[`${afterClock}Span`] = lastClock - from;
-        afterClock = null;
     } else if (addr === FB_BEGIN && calling) {
         calling = false;
         if (inFrame) fail("frame_begin twice, without frame_end");
@@ -520,15 +500,6 @@ cpu.debugInstruction.add((addr, opcode) => {
         if (current.afterIdle) current.loop = now() - current.tLoop;
         else if (lastEndT !== null) current.loop = now() - lastEndT;
         lastEndT = now();
-        // the BBC's own timing of each half, as its figures show it
-        for (const [half, at] of current.crossOnly ? [] : [["front", T_FRONT], ["fill", T_FILL]]) {
-            const us = ram[SPAN_US + at] | (ram[SPAN_US + at + 1] << 8) | (ram[SPAN_US + at + 2] << 16);
-            const span = current[`${half}Span`];
-            current[`${half}Bbc`] = 2 * us;
-            if (span === undefined || Math.abs(2 * us - span) > CLOCK_SLACK)
-                fail(`frame ${current.n}: the BBC timed ${half} at ${2 * us} cycles, the harness ${span}`);
-            else clockChecked++;
-        }
         checkLines(current);
         frames.push(current);
         pending.push(current);
@@ -1690,8 +1661,7 @@ const row = (label, fs) => {
 };
 console.log(`${NAME}: ${summary}; ${compared} frames shown, ` +
     `${compared - wrong} the model's view byte for byte (${requests.length} views); ` +
-    `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be; ` +
-    `the BBC's own timing within ${CLOCK_SLACK} cycles ${clockChecked} times` +
+    `${viewWrites} writes to the view and ${textWrites} outside it, each where it may be` +
     (FREE ? "" : `; ${lasersOk} shots' lasers fired as the transcription's, ${lasersShown} shown, ${laserFrames} frames with the lines; ` +
         `${sensorSteps} steps of the sensors' fields as the transcription's (${sensorShots} shots), ${sensorLineFrames} frames with their lines`));
 if (pace) {

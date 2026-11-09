@@ -34,9 +34,7 @@
 \ logic's (or with the free camera, the camera's), the area's name and its
 \ message (or the entrance), the frames a second, and the credit. The
 \ frames a second is the mean over the frames since it was last drawn,
-\ every FIGURE_FIELDS fields, or once the frames stop; the cycles a frame
-\ of stages 1-7 (objects_frame's call) and of stages 8-10 (raster_frame's)
-\ are timed by User VIA T2 (clock), for the check.
+\ every FIGURE_FIELDS fields, or once the frames stop.
 \ A frame is drawn only when something it's made from has changed since
 \ the frame last handed over (the camera, the area, the objects'
 \ visibility, the crosshair: docs/research/live.md, "The idle loop"), and
@@ -336,7 +334,7 @@ ENDSECTION
 SECTION AreaKeep, org = work_end, guard = RASTER_IN_ORG, virtual = TRUE
 ENDSECTION
 \ Page &0D: the start, which runs once (LiveBoot: start, before live_loop,
-\ with lv_start and clock_init). The
+\ with lv_start). The
 \ DFS's NMI code is there until the loader's last read, and nothing after;
 \ a soft BREAK reads the Master's extended vectors from &0D9F, so the start
 \ stays below. The loader puts it in once the OS is gone (LIVE_LATE).
@@ -386,10 +384,6 @@ ASSERT LIVE_PATTERNS <= RS_PATTERNS
 \ LIVE: all below &3000, after the rasteriser's state.
 SECTION Live, org = raster_state_end, filename = "LIVE", guard = &3000, cmos = TRUE
 
-\ User VIA T2, which nothing else uses: free-running down at 1MHz (clock).
-usrvia_t2cl = &FE68
-usrvia_t2ch = &FE69
-
 \ The panel's values (src/panel.6502): the logic's, or with the free camera
 \ the camera's position, heading and pitch, the rest as the logic starts,
 \ and the entrance where the logic's message goes.
@@ -414,8 +408,6 @@ DEMO_FIELDS   = 500             ; fields without a key before the demo
 FIGURE_FIELDS = 100             ; fields between the figures' updates
 \ The field's rate, a hundred times: frames a second from fields a frame.
 FIELDS_100S = 200000000 DIV FIELD_CYCLES
-FIELD_US2 = FIELD_US            ; (clock's window, below)
-ASSERT 2 * FIELD_US < 65536     ; (clock: two fields' doubt inside T2's wrap)
 
 \ The pace (decisions 4, 36 and 48, docs/research/live.md, "The pace"):
 \ PASS_FIELDS and REPEAT_FIELDS are tools/logic/state.py's, with the
@@ -466,7 +458,6 @@ ENDIF
     JSR panel_flush                             ; (both buffers, before anything is shown)
     JSR input_init
     JSR irq_install
-    JSR clock_init
     JMP live_loop
 ENDSECTION
 
@@ -475,8 +466,8 @@ ENDSECTION
 \ made from has changed since the frame last handed over (lv_inputs),
 \ objects_frame makes the faces in rs_*'s arrays, and raster_frame draws
 \ them, between frame_begin and frame_end, with the crosshair over them;
-\ the text when the beam allows, and the figures (live_measure) from the
-\ clock round each. If nothing has, nothing is drawn (live_idle).
+\ the text when the beam allows, and the figures (live_measure). If
+\ nothing has, nothing is drawn (live_idle).
 .live_loop
 IF LIVE_LOGIC
     JSR read_counters
@@ -555,14 +546,10 @@ ENDIF
 .camera
     LDA lv_cam,X : STA cam_x,X
     DEX : BPL camera
-    JSR clock : LDX #T_FRONT : JSR clock_from
     PAGE_IN BANK_OBJ
     LDA #ACCCON_X : TRB acccon                  ; (main RAM's &3000 on: the cache)
     JSR objects_frame
 .live_front_done                                ; (tools/livecheck.mjs times objects_frame to here)
-    JSR clock
-    PAGE_IN BANK_GLUE
-    LDX #T_FRONT : JSR clock_to
     LDA out_nf : STA rs_nfaces
     \ stages 8-10
     PAGE_IN BANK_DATA
@@ -572,12 +559,9 @@ IF LIVE_LOGIC
     JSR lv_cross_off                            ; (the crosshair this buffer had, off: BANK_DATA's)
 ENDIF
     PAGE_IN BANK_RASTER
-    JSR clock : LDX #T_FILL : JSR clock_from
     JSR raster_frame
 .live_fill_done                                 ; (... and raster_frame to here)
-    JSR clock
     PAGE_IN BANK_GLUE
-    LDX #T_FILL : JSR clock_to
 IF LIVE_LOGIC
     LDX draw_buffer : LDA vw_view : STA lv_bview,X
 .live_cross_on
@@ -1248,111 +1232,15 @@ ASSERT PN_MESSAGE = 14
 ENDIF
 
 \ ---------------------------------------------------------------------------
-\ The clock: User VIA T2 counting down at 1MHz, round from 0 to &FFFF and
-\ on, and the fields counted. A span's length in microseconds is its T2
-\ difference modulo 65536, and the fields it saw say which: a span with
-\ n fields flagged in it is more than (n - 1) fields long and less than
-\ n + 1, a window narrower than T2's wrap.
-T_FRONT = 0                     ; spans: stages 1-7's ...
-T_FILL  = 4                     ; ... and 8-10's (clock_from's and clock_to's X)
+\ The figures' window: frames a second from the flips and fields counted.
+\ (The halves were timed on the BBC by User VIA T2 for the check, which
+\ times them itself: decision 180 took that out of the frame.)
 
 SECTION Work
-.clk_t          SKIP 2      ; clock's: T2 ...
-.clk_f          SKIP 2      ; ... and the fields, counting a sync flagged and not yet taken
-.span_t         SKIP 8      ; each span's start, then its length in microseconds (low 16 bits)
-.span_us        SKIP 8      ; each span's length: microseconds, 24-bit, then a spare byte
 .win_n          SKIP 1      ; frames since the figures
 .win_f0         SKIP 2      ; fields and frames shown when the figures were last drawn
 .win_s0         SKIP 2
 ENDSECTION
-
-\ clock_init: T2 started, one-shot (so free-running down), its interrupt
-\ left off. (Run once, with start, in page &0D.)
-SECTION LiveBoot
-.clock_init
-    LDA usrvia_acr : AND #&DF : STA usrvia_acr
-    LDA #&FF : STA usrvia_t2cl : STA usrvia_t2ch
-    RTS
-ENDSECTION
-
-\ clock: the time now in clk_t and clk_f. Keeps X.
-.clock
-{
-    PHP : SEI
-.again
-    LDA usrvia_t2ch : STA clk_t+1
-    LDA usrvia_t2cl : STA clk_t
-    LDA usrvia_t2ch : CMP clk_t+1 : BNE again   ; (the low byte wrapped between)
-    LDA fields : STA clk_f
-    LDA fields+1 : STA clk_f+1
-    LDA sysvia_ifr : AND #2 : BEQ counted       ; a sync flagged, not yet counted
-    INCW clk_f
-.counted
-    PLP
-    RTS
-}
-
-\ clock_from: span X starts now (clk_*): its start's T2 and fields kept.
-.clock_from
-    LDA clk_t : STA span_t,X
-    LDA clk_t+1 : STA span_t+1,X
-    LDA clk_f : STA span_us,X
-    LDA clk_f+1 : STA span_us+1,X
-    RTS
-
-\ clock_to: span X ends now: its length in microseconds into span_us,X
-\ (24 bits). With n the fields seen and d the T2 difference, the length is
-\ lo + ((d - lo) AND &FFFF), lo = (n - 1) FIELD_US.
-\ In BANK_GLUE (main RAM is the front end's): called with it paged, after
-\ the clock's read in main RAM.
-ASSERT FIELD_US = 78 * 256      ; ((n - 1) FIELD_US: (n - 1) 78, a byte up)
-SECTION LiveGlue
-.clock_to
-{
-    ZA_AUTO 3, lo
-    ZA_AUTO2 d
-    \ d = T2's fall
-    LDA span_t,X : SEC : SBC clk_t : STA d
-    LDA span_t+1,X : SBC clk_t+1 : STA d+1
-    \ n - 1, then lo = (n - 1) 78 256, 24-bit signed
-    LDA clk_f : SEC : SBC span_us,X : STA lo+1
-    LDA clk_f+1 : SBC span_us+1,X : STA lo+2
-    LDA lo+1 : SEC : SBC #1 : STA lo+1
-    LDA lo+2 : SBC #0 : STA lo+2
-    STZ lo
-    \ (n of 1 or 0, the commonest, without the product)
-    LDA lo+1 : ORA lo+2 : BEQ timed
-    LDA lo+1 : AND lo+2 : CMP #&FF : BNE general
-    LDA #LO(-78) : STA lo+1                     ; (lo+2 is &FF already)
-    BRA timed
-.general
-    JSR times78
-.timed
-    \ the length: lo + ((d - lo) AND &FFFF)
-    LDA d : SEC : SBC lo : STA d
-    LDA d+1 : SBC lo+1 : STA d+1
-    LDA lo : CLC : ADC d : STA span_us,X
-    LDA lo+1 : ADC d+1 : STA span_us+1,X
-    LDA lo+2 : ADC #0 : STA span_us+2,X
-    RTS
-\ times78: lo+1..lo+2, a signed 16-bit count of fields, times 78 in place.
-.times78
-    ZA_AUTO2 m
-    LDA lo+1 : STA m : LDA lo+2 : STA m+1
-    \ 78 = 64 + 8 + 4 + 2: m 2 (1 + 2 + 4 + 32)
-    ASL m : ROL m+1                             ; 2m
-    LDA m : STA lo+1 : LDA m+1 : STA lo+2
-    ASL m : ROL m+1                             ; 4m
-    JSR add_m
-    ASL m : ROL m+1                             ; 8m
-    JSR add_m
-    ASL m : ROL m+1 : ASL m : ROL m+1 : ASL m : ROL m+1   ; 64m
-.add_m
-    LDA lo+1 : CLC : ADC m : STA lo+1 : LDA lo+2 : ADC m+1 : STA lo+2
-    RTS
-}
-ENDSECTION
-ASSERT 78 = 2 + 4 + 8 + 64
 
 \ read_counters: fields and frames (src/zp.6502), which the interrupt
 \ changes, read whole.
