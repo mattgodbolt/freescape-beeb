@@ -2173,3 +2173,15 @@ The whole frame, the check's runs, fields, median / p90 / max: walking
 1.65 / 4.7 / 147.81 to 1.65 / 4.7 / 147.82, turning 2.21 / 5.72 / 127.66
 to 2.2 / 5.77 / 127.65, entrances 8.66 / 14.72 / 18.24 to 8.66 / 14.69 /
 18.24.
+
+**The wipe after the information screen** (decision 193: not built). The
+original's way back from the information screen (`$C7F7`) is its view
+copy with a wipe (`$AB25`), the same copy `$9841` makes whenever `Wipe` is
+set: four sweeps, each a quarter of the view's bytes in the order of a
+four-by-four dither (`$AB15`). Measured on the original (`tools/zx.py`: I,
+then SPACE held, the interrupt's frame count at `$C7F7` and after the
+call), it takes four frames, a dissolve over about a twelfth of a
+second. The disc can't make that from its two buffers without four frames
+of copying between them, and the original dissolves in every object it
+shows or hides the same way, so the disc keeps drawing the view whole;
+the decision has the cost of the dissolve, for Matt.

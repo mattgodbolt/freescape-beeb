@@ -1201,3 +1201,28 @@ The options, for Matt: as built; or every pass that may redraw inside
 itself waiting for the frame of the last pass's end, which only a rig's
 parts or a sensor in the area can make matter, at a frame's wait each such
 pass (held keys a frame slower a pass, where a sensor is).
+
+## 193. No dissolve: a view that comes back after the information screen, or after an object is shown or hidden, is drawn whole (2026-11-10, autonomous, proposed for Matt)
+
+The original copies its view buffer to the screen at the end of each
+redraw, and when the pass asks for a wipe (`Wipe`, `$8BF0`: set by the
+FCL's showing and hiding of objects, `$B424`, by a rig's redraw, and by
+the information screen's way back, `$C7F7`) the copy is a dissolve
+(`$AB25`): four sweeps over the view, each copying a quarter of its bytes
+in a dither's order (the table at `$AB15`), each about a frame of the
+original's (the journal's 2026-11-10 entry). The disc draws each view
+whole into the buffer not shown and flips to it (decision 21), so a view
+replaces the last at once, the information screen's way back included.
+
+Why not: the dissolve mixes the old view and the new one, and the disc
+holds them in its two buffers, the old one in the buffer shown, which
+only the flip may change without tearing. A dissolve would be four frames
+of their own, each the new view with a quarter more of the old one's
+bytes taken out of it, made by copying between the buffers a page at a
+time through main RAM (ACCCON selects one buffer at a time): four extra
+frames' copying and flips for every wipe the original does, not only the
+information screen's. The information screen's is the only wipe where the
+whole view changes; elsewhere it dissolves in an object or a rig's parts.
+
+The options, for Matt: as built; or the dissolve, as four frames of
+copying a wipe, everywhere the original wipes (a layer of its own).

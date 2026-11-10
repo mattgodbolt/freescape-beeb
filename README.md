@@ -26,8 +26,10 @@ the drilling rigs, the laser, the guard sensors, the clock, the end and a
 new game, the information screen, and Driller's own demo. Not in: the
 title screen (the tape's loading screen, which the disc doesn't have), the
 panel's rig animation (the Atari ST version's only; the Spectrum's, which
-is the specification, has none) and save and load (the Spectrum's go to tape;
-decision 153). The sections below are how each layer landed, dated.
+is the specification, has none), save and load (the Spectrum's go to tape;
+decision 153), and the Spectrum's dissolve as a changed view comes in, which
+the disc draws whole (decision 193). The sections below are how each layer
+landed, dated.
 
 ![Driller on the disc through a PAL television: its start in Amethyst, a rig set down with the panel saying RIG POSITIONED, and the laser's four beams firing at the scenery](docs/images/disc_game.png)
 

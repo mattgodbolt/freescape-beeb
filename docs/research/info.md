@@ -82,5 +82,6 @@ ZX's 1 now (ESCAPE was alone), for ABORT.
 ## What's left
 
 - Save and load (decision 153).
-- The original wipes the view back in ($AB25); the disc draws the next
-  frame whole.
+- The original wipes the view back in ($AB25, a dissolve in four sweeps);
+  the disc draws the next frame whole (decision 193 says why, and
+  what a dissolve would take).
