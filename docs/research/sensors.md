@@ -157,7 +157,8 @@ rig, whose collided script costs a unit of shield).
   redraw the pass has made, and a REDRAW in a collided script or an
   area's condition in a pass taken while the last pass's frames showed
   is from the frame then shown (decision 192).
-- The border's flash (decision 133).
+- The border's flash (decision 133; decision 194 weighs the picture's own
+  colours as a stand-in, and builds none).
 - The test's walk to a sensor in range far off can hold the next pass for
   several fields (the journal's figures), as the original's holds its
   game.

@@ -2185,3 +2185,12 @@ second. The disc can't make that from its two buffers without four frames
 of copying between them, and the original dissolves in every object it
 shows or hides the same way, so the disc keeps drawing the view whole;
 the decision has the cost of the dissolve, for Matt.
+
+**The sensors' border flash** (decision 194: not built). The original's
+shot sets the border to the screen's second colour with one `OUT` and
+back a frame or two later. The BBC's CRTC picture has nothing round it to
+colour, so any stand-in is a change to the picture: logical colour 0 in
+the palette (the view's black flashes too), a colour kept back for the
+panel (every area loses one), or the row above the view redrawn and put
+back (a character row into both buffers, twice a shot). None is the
+original's flash, so none is built and the three are left to Matt.

@@ -1226,3 +1226,33 @@ whole view changes; elsewhere it dissolves in an object or a rig's parts.
 
 The options, for Matt: as built; or the dissolve, as four frames of
 copying a wipe, everywhere the original wipes (a layer of its own).
+
+## 194. No flash for a sensor's shot (2026-11-10, autonomous, proposed for Matt; follows 133)
+
+The original flashes the ZX's border in the screen's second colour for a
+frame as a sensor fires (`$BC0F`, `OUT ($FE)`), the shot's lines drawn
+over the view and sound 2 played. The BBC has no border colour: what's
+round the CRTC's picture is blank (decision 133), so the disc shows the
+lines and plays the sound and leaves the border as it is.
+
+A flash would have to be in the picture itself, for a field or two: some
+of its colours changed in the video ULA's palette and changed back (a
+write each way, from the main loop's shot or the vertical sync's
+interrupt), or some of its bytes redrawn. The candidates:
+
+- **The panel's black**: logical colour 0 flashed to the area's second
+  colour. Cheap (two palette writes), but colour 0 is in the view too,
+  its sky and its dithers' dark halves, so the view would flash as well,
+  which the original's doesn't.
+- **A colour of the panel's alone**: the console's patterns use logical
+  colours the view's patterns may share (`tools/colour/patterns.py`
+  chooses both from the same eight), so no colour is the panel's alone
+  without a palette entry kept back from the view's patterns, which costs
+  every area a colour.
+- **The row above the view**: its black redrawn in the area's second
+  colour for the shot's fields and back (the credit's and the clock's row,
+  a whole character row of bytes), into both buffers in the beam's window,
+  twice a shot.
+
+None is as cheap as the original's one `OUT` and as plainly a border, so
+none is built. The options, for Matt: as built; or one of the three.
