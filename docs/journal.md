@@ -2083,3 +2083,45 @@ whole frame over the check's runs, fields, median / p90 / max: walking
 14.42 / 18.11 (where flips fall; the halves are unchanged), `panel_values`
 1,138 to 1,492 cycles at the median (the clock's eight cells looked at
 each pass).
+
+**The message line's highlight** (decision 191). The original's `$BCA6`
+inverts the eight lines of each of the message line's character cells
+(from a line above the text). Its callers: a refusal's message on for
+its 50 frames and off (`$C0EB`-`$C0FF`); a rig's PROCESSING on
+(`$C270`), each message after it off, printed, on (`$C29A`), and the last
+off as the action ends (`$C245`); the end's on as it's printed (`$9AF3`)
+and off again after the end's redraw, sensors' test and panel (`$9B40`).
+Run on the original (`tools/zx.py`, `GameOver` poked, shots at `$9B34`,
+`$9B43` and three seconds into the wait), the end's message is inverted
+through the redraw and plain through the wait: 55 frames between `$9AF6`
+and `$9B40`, most of them sound 20, which the beeper plays in place. So
+on the disc a pass's message is highlighted while it shows, and the end's
+until the end's scene is drawn (area 127 entered, `lv_switch` done, and
+its first frame's lines, `lv_named`), then plain till a new game.
+
+Inverting the panel's five-line glyphs alone left a band the letters' own
+edges cut into, which read badly (a preview through `tools/mkpanel.py`'s
+render); the message's cells now have a blank line above and below
+(`fontpad`, a padded kind: `pk_pad`), the message a line higher in its
+box, and highlighted they make a seven-line band round the text, as the
+original's. `panel_draw` builds a padded cell's lines in `pad_lines`
+once, so the other cells pay one test. `lv_messages` moved to `LiveData`
+(main RAM's gap before `ObjMore`'s page was 20 bytes).
+
+The check found a fault older than this: the information screen's frame
+marked its buffer's view as `&80` (`lv_bview`), and `vw_view`, a byte that
+counts the views, comes round to `&80` in a long run, so once the change's
+timing put an information screen there, a frame after it was taken for the
+crosshair alone over the information screen. The mark is now `vw_view` with its top bit changed, half its count
+away.
+
+Checked: `make panel`, `make live` (120 values with a pass's message, 105
+highlighted; the rest the end's after its scene). Room, logic disc:
+`BANK_DATA` 327 to 145 (the padded kind and the highlight in the panel's
+code and tables, and `lv_messages`), main RAM before `ObjMore`'s page 20
+to 79, `Work` 11 to 10. Fields a frame, median / p90 / max: walking 1.66
+/ 4.69 / 150.83 to 1.65 / 4.7 / 147.81, turning 2.21 / 5.76 / 127.67 to
+2.21 / 5.72 / 127.66, entrances 8.54 / 14.42 / 18.11 to 8.66 / 14.72 /
+18.24 (the message's 14 cells two lines taller, which a new area's first
+frame waits for: "the rest" of an entrance 2.28 to 2.35 fields); a glyph
+cell 687 / 873 / 910 cycles to 709 / 999 / 1,041, inside `PANEL_CELL_US`.

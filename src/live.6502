@@ -592,13 +592,14 @@ IF LIVE_LOGIC
 \ live_info: the information screen's frame (src/info.6502): the view
 \ cleared and the screen's text drawn into the buffer frame_begin gives;
 \ what that buffer held over its view (the crosshair, the lines) goes with
-\ it, its view is none (lv_bview: its next is drawn whole), and neither
-\ screen holds what the rasteriser last drew (raster_forget).
+\ it, its view is none (lv_bview: its next is drawn whole: half vw_view's
+\ count away, which it can't reach before then), and neither screen holds
+\ what the rasteriser last drew (raster_forget).
 .live_info                                      ; (tools/livecheck.mjs: the information screen's frame)
     JSR frame_begin
     LDX draw_buffer
     STZ lv_xon,X : STZ lv_lon,X
-    LDA #&80 : STA lv_bview,X
+    LDA vw_view : EOR #&80 : STA lv_bview,X
     PAGE_IN BANK_DATA
     STZ sb_n,X
     PAGE_IN BANK_RASTER
@@ -724,6 +725,7 @@ SECTION Work
 .lv_rigged      SKIP 1      ; non-zero: a rig's redraw moved its parts
 .lv_msg_n       SKIP 1      ; the messages the pass showed (the rigs': lv_hook_message), at most LV_MSGS ...
 .lv_msg_on      SKIP 1      ; ... the one the panel shows, its index + 1, or 0 for none ...
+.lv_msg_lit     SKIP 1      ; ... non-zero while it's highlighted (decision 191) ...
 .lv_msg_t0      SKIP 2      ; ... and fields when the first showed, each RIG_SHOWN after the last
     \ the animation (lv_setup, lv_camera)
 .an_on          SKIP 1      ; non-zero: the frames show a pass
@@ -1003,7 +1005,7 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     \ parts moved, so the area's working copy built again (its globals' slots
     \ from their records), as the original redraws there and then
     LDA lv_msg_n : BEQ no_messages
-    LDA #1 : STA lv_msg_on
+    LDA #1 : STA lv_msg_on : STA lv_msg_lit
     LDA lv_now : STA lv_msg_t0
     LDA lv_now+1 : STA lv_msg_t0+1
 .no_messages
@@ -1056,6 +1058,45 @@ SECTION LiveData
 .none
     RTS
 }
+
+\ lv_messages (each loop while a pass's messages show, lv_msg_on): the
+\ panel's message the one whose RIG_SHOWN fields these are, highlighted, as
+\ the original shows each while it waits; then the area's again. The end's
+\ stays till a new game, highlighted until the end's scene is drawn (its
+\ area entered, lv_switch done, and its first frame's lines, lv_named), as
+\ the original takes the highlight off after its redraw ($9B40; decision
+\ 191).
+.lv_messages
+{
+    LDA lv_over : BEQ playing
+    LDA lv_msg_lit : BEQ done
+    LDA lv_switch : BNE done
+    LDA lv_named : BEQ done
+    STZ lv_msg_lit
+    JMP panel_values
+.playing
+    LDA lv_now : SEC : SBC lv_msg_t0 : TAX
+    LDA lv_now+1 : SBC lv_msg_t0+1 : BNE ended
+    TXA
+    LDY #1
+.k
+    CMP #RIG_SHOWN : BCC got
+    SBC #RIG_SHOWN
+    INY
+    BRA k
+.got
+    CPY lv_msg_on : BEQ done
+    TYA : CMP lv_msg_n : BEQ show : BCS ended
+.show
+    STY lv_msg_on
+    JMP panel_values
+.ended
+    STZ lv_msg_on
+    JMP panel_values
+.done
+    RTS
+}
+ASSERT LV_MSGS * RIG_SHOWN < 256
 
 \ lv_waited (lv_pass's, during the end's wait, $9B43-$9B5B): no key is
 \ read for END_DEAF fields; then any held or gone down answers it (C set,
@@ -1183,35 +1224,6 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     RTS
 }
 
-\ lv_messages, while a rig's messages show (lv_msg_on): the panel's message
-\ the one whose RIG_SHOWN fields these are, then the area's again.
-.lv_messages
-{
-    LDA lv_over : BNE done                      ; (the end's stays till a new game)
-    LDA lv_now : SEC : SBC lv_msg_t0 : TAX
-    LDA lv_now+1 : SBC lv_msg_t0+1 : BNE ended
-    TXA
-    LDY #1
-.k
-    CMP #RIG_SHOWN : BCC got
-    SBC #RIG_SHOWN
-    INY
-    BRA k
-.got
-    CPY lv_msg_on : BEQ done
-    TYA : CMP lv_msg_n : BEQ show : BCS ended
-.show
-    STY lv_msg_on
-    BRA valued
-.ended
-    STZ lv_msg_on
-.valued
-    PAGE_IN BANK_DATA
-    JMP panel_values
-.done
-    RTS
-}
-ASSERT LV_MSGS * RIG_SHOWN < 256
 \ the messages' characters, as the original's (lv_msg_n; in main RAM, for
 \ panel_values too), and where each starts
 .lv_msgs

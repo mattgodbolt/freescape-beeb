@@ -107,7 +107,9 @@ BBC hasn't; on the disc they go back to the game.)
 
 *2026-11-09.* **The last small gaps.** The four-hour clock counts down
 above the view, at the right, where the original shows it (the credit
-beside it is a little shorter: decision 190).
+beside it is a little shorter: decision 190). The panel's message line
+lights up as the original's does, inverted, while a rig's message or the
+end's shows (decision 191).
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the

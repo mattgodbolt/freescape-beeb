@@ -81,6 +81,7 @@ ASSERT HI(SAFE_T1) < HI(PANEL_T1_TOP) AND HI(PANEL_T1_TOP) < HI(T1_PERIOD)
 \ and the lead before its end)
 ASSERT (FLIP_LINE + FIELD_LINES - FLAG_LINE) * LINE_US > PANEL_T1_MIN * 256 + PANEL_CELL_US
 ASSERT PANEL_CELLS < 128 AND PANEL_GLYPHS <= PANEL_ABOVE AND PANEL_ABOVE <= PANEL_CELLS
+ASSERT LEN(PANEL_FONT) DIV PANEL_FONT_H < 128   ; (a glyph's bit 7 is its highlight: panel_draw)
 ASSERT PANEL_MAX_H <= 8
 \ The cells above the view (from PANEL_ABOVE, after the tiles: the clock,
 \ decision 190) are in the screen's first character row (tools/mkpanel.py
@@ -275,11 +276,15 @@ ASSERT LO(SCREEN) = 0
 \ was. A glyph cell: each line's nibble (bit 3 the leftmost pixel) as two
 \ bytes, each pixel the kind's ink for the line where it's lit, else its
 \ paper: paper EOR ((paper EOR ink) AND mask), the kind keeping paper and
-\ paper EOR ink a line; a tile: its eight bytes.
+\ paper EOR ink a line. A padded kind's (pk_pad: the message's) first and
+\ last lines are blank, its glyph's between; and with the value's bit 7
+\ set (highlighted, as the original's $BCA6 inverts its message line:
+\ decision 191) each line inverted, so ink and paper change places in a
+\ band round the text. A tile: its eight bytes.
 .panel_draw
 {
     ZA_AUTO2 at, right, g, diff, paper
-    ZA_AUTO1 h, was, v
+    ZA_AUTO1 h, was, v, inv, pad
     LDA pc_lo,X : STA at
     LDA pc_hi,X : STA at+1
     LDA panel_want,X : STA v
@@ -309,6 +314,12 @@ ASSERT LO(SCREEN) = 0
     LDA pk_dlo,Y : STA diff : LDA pk_dhi,Y : STA diff+1
     LDA pk_plo,Y : STA paper : LDA pk_phi,Y : STA paper+1
     LDA pk_tlo,Y : STA g : LDA pk_thi,Y : STA g+1
+    STZ inv
+    LDA pk_pad,Y : STA pad : BPL plain          ; (only a padded kind is highlighted)
+    LDA v : BPL plain
+    AND #&7F : STA v
+    LDA #&0F : STA inv
+.plain
     LDX pk_stride,Y                             ; g + v stride
 .stride
     LDA g : CLC : ADC v : STA g
@@ -316,6 +327,16 @@ ASSERT LO(SCREEN) = 0
     INC g+1
 .next_stride
     DEX : BNE stride
+    \ a padded kind's lines: a blank one, the glyph's, a blank one, each
+    \ inverted if highlighted, from pad_lines
+    BIT pad : BPL lined
+    LDY #PANEL_FONT_H - 1
+.pad_line
+    LDA (g),Y : EOR inv : STA pad_lines + 1,Y
+    DEY : BPL pad_line
+    LDA inv : STA pad_lines : STA pad_lines + PANEL_PAD_LAST
+    LDA #LO(pad_lines) : STA g : LDA #HI(pad_lines) : STA g+1
+.lined
     \ the right column's address
     LDA at : CLC : ADC #8 : STA right
     LDA at+1 : ADC #0 : STA right+1
@@ -368,7 +389,11 @@ ASSERT LO(SCREEN) = 0
     FOR n = 0..15
         EQUB WHERE((n AND 2) <> 0, PIX_LEFT, 0) OR WHERE((n AND 1) <> 0, PIX_RIGHT, 0)
     NEXT
+\ a padded cell's lines (this bank is RAM)
+.pad_lines
+    SKIP PANEL_PAD_LAST + 1
 }
+ASSERT PANEL_PAD_LAST + 1 <= PANEL_MAX_H
 
 \ ---------------------------------------------------------------------------
 \ The values (tools/model/panel.py's values_of and cells(), from the
@@ -530,10 +555,15 @@ ENDIF
 .no_name
 IF NOT(PANEL_FREE)
     \ the message: one of a rig's while it shows (src/live.6502's
-    \ lv_messages: ASCII, as the original's, into the font's places) ...
+    \ lv_messages: ASCII, as the original's, into the font's places),
+    \ highlighted while lv_msg_lit says (decision 191) ...
     LDA lv_msg_on : BEQ no_rig
     LDY #&FF : STY panel_cache + PC_MESSAGE     ; (the next of the others drawn whole)
     TAY : LDA panel_msg_at - 1,Y : TAY
+    LDA lv_msg_lit : BEQ shade
+    LDA #&80
+.shade
+    STA t
     LDX #PF_MESSAGE
 .rig_cell
     LDA lv_msgs,Y
@@ -551,6 +581,7 @@ IF NOT(PANEL_FREE)
 .rig_space
     LDA #PC_SPACE
 .rig_glyph
+    ORA t
     JSR panel_set
     INY : INX : CPX #PF_MESSAGE + PN_MESSAGE : BNE rig_cell
     JMP valued

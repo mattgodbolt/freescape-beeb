@@ -36,7 +36,7 @@ save and load buttons were:
 | Field | What | From ($B72B's) |
 |---|---|---|
 | score | seven digits, leading zeros, the low seven of the 24 bits | `Score` |
-| message | the area's gas: none past area 18, the rig's sector cleared, or building up; the game's end | `AreaId`, `RigPlaced`, the disc's end |
+| message | the area's gas: none past area 18, the rig's sector cleared, or building up; the game's end; a pass's messages (the rigs', the refusals) and the end's, highlighted as the original's (`$BCA6`, decision 191) | `AreaId`, `RigPlaced`, the disc's end, `lv_msgs` |
 | name | the area's, centred | the area shown (the view's) |
 | shield, energy | bars of six cells, `(min(v, 63) 3 + 7) >> 3` pixels lit, the ST's colours | `Shield`, `Energy` |
 | heading | a tape a pixel to a 5° step, N E S W a quarter apart, three cells | `Yaw` (not turned in areas 13 and 18, as the original's) |
@@ -150,6 +150,12 @@ differ: below), and names the vehicle under them in its font.
   `FLIP_LINE` without passing it). A glyph cell writes the buffer selected
   as it makes each line and copies the lines into the other, counting
   down.
+- **The highlight** (2026-11-09, decision 191): a cell's value with bit 7
+  set is drawn with its ink and paper changed over, in the message's cells
+  only, whose kind is padded (`pk_pad`: a blank line above and below the
+  font's five), so a highlighted message is a band round the text, as the
+  original's inverted line. `panel_draw` makes a padded cell's lines in
+  `pad_lines` first, so no other cell pays for it.
 - **The clock's cells**, above the view (2026-11-09, decision 190): the
   beam scans their row as the field begins, inside that window, so they're
   begun only between the screen's last line and a cell's time before the

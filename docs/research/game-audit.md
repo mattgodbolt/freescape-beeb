@@ -30,7 +30,7 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | Refusals | `$C0EB` | **yes** | **yes** | **yes** | AREA NEUTRAL, ALREADY PLACED, NO RIG PLACED, NOT IN PROBE, ENERGY TOO LOW, POS UNSUITABLE | **`rigs`** | nothing |
 | The rig's parts as areas load | `$CD3B` | yes | yes | yes | view | `rigs` (back to area 1, into its legs) | nothing |
 | The rig's animation, the drill's depth | none on the ZX: the rig stands still; the ST animates a rig in its panel | - | - | - | - | - | the ST's panel animation, if wanted (decision 47 left it out) |
-| The panel's area message | `$B76E` | - (the panel's model) | - | yes | GAS BUILD UP, SECTOR CLEARED, AREA NEUTRAL | `make panel` | the 50-frame highlight (inverted line) |
+| The panel's area message | `$B76E` | - (the panel's model) | - | yes | GAS BUILD UP, SECTOR CLEARED, AREA NEUTRAL; **a pass's messages and the end's highlighted as the original's `$BCA6` (decision 191)** | `make panel`, `make live` | nothing |
 | **The laser and shooting mode** | `$A95C`, `$AA50`-`$AA8C` | the keys, the crosshair, shooting mode; the lines the disc's (the model's `laser`) | crosshair, shooting mode | **yes**: the four lines at half width, for sound 1's fields (decision 130) | **the lines, in frames of their own** | `crosshair`, **`shoot`** (the frames, byte for byte) | nothing |
 | **The shot's pick** | `$B153`, the draw list `$8A9D` | **the BBC's frame's** (`tools/logic/view.py`, decision 131) | the hook (the check build: hits nothing) | **yes** (`lv_pick`, from the front end's draw list) | - | **`shoot`, against the original's own pick** | nothing |
 | **Shot scripts** | FCL bit 7, `ShotFlag` | yes | yes | **yes** | the objects hidden, destroyed | `fcl`'s `shot` steps, **`shoot`** | nothing |

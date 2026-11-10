@@ -604,7 +604,7 @@ const valued = [];
 // the rigs' messages: the last pass's, as the transcription showed them
 // (its trace's "messages"), which the panel shows in turn, each
 // RIG_SHOWN fields from the pass (src/live.6502's lv_messages)
-let passMessages = [], passMessagesT = 0, messagesShown = 0;
+let passMessages = [], passMessagesT = 0, messagesShown = 0, messagesLit = 0;
 const LV_MSG_ON = syms.lv_msg_on, LV_MSGS_AT = syms.lv_msgs, LV_MSG_T0 = syms.lv_msg_t0;
 function onValued() {
     const v = { want: panelCells(PANEL_WANT), mem: panelMem(), area: ram[PANEL_AREA], over: ram[PANEL_OVER], script };
@@ -621,6 +621,11 @@ function onValued() {
             fail(`${script}: message ${on} shown ${e} fields into the pass's messages`);
         else messagesShown++;
         v.msg = text;
+        // highlighted while it shows (decision 191): a pass's always; the
+        // end's until its scene is drawn (src/live.6502's lv_messages)
+        v.lit = ram[syms.lv_msg_lit];
+        if (!ram[syms.lv_over] && !v.lit) fail(`${script}: message ${on} "${text}" shown, not highlighted`);
+        if (v.lit) messagesLit++;
     }
     if (FREE) {
         const c = camera();
@@ -1535,7 +1540,8 @@ for (const { frame, rows } of shown) {
         if (rows[y] !== want[y]) {
             wrong++;
             const c = [...Array(VIEW_BYTES).keys()].find((c) => rows[y].slice(2 * c, 2 * c + 2) !== want[y].slice(2 * c, 2 * c + 2));
-            fail(`frame ${frame.n} (${frame.script}, area ${frame.area}, camera ${frame.camera}${frame.cross ? `, cross ${frame.cross}` : ""}) shown with line ${y}, ` +
+            fail(`frame ${frame.n} (${frame.script}, area ${frame.area}, camera ${frame.camera}${frame.cross ? `, cross ${frame.cross}` : ""}` +
+                `${frame.info ? ", the information screen" : ""}${frame.crossOnly ? ", the crosshair alone" : ""}) shown with line ${y}, ` +
                 `byte ${c} &${rows[y].slice(2 * c, 2 * c + 2)}, not the model's &${want[y].slice(2 * c, 2 * c + 2)}`);
             break;
         }
@@ -1595,7 +1601,8 @@ const cyc = (xs) => {
 };
 console.log(`${NAME}: the panel: ${panelFlips} flips showed ${states.length} sets of cells, ${statesOk} the model's ` +
     `outside the view; its values set ${valued.length} times, ${valuedOk} as the model's ` +
-    `(${messagesShown} with a rig's message, the transcription's in its turn); drawn as wanted when settled ` +
+    `(${messagesShown} with a rig's message, the transcription's in its turn, ${messagesLit} of them highlighted); ` +
+    `drawn as wanted when settled ` +
     `${panelSettled} times; ${linesChecked} frames with their area's name and message; ${panelWaits} waits for the beam`);
 console.log(`${NAME}: the panel's cycles (median / p90 / most): panel_values ${cyc(valuesCycles)} (${valuesCycles.length}); ` +
     `a glyph cell drawn ${cyc(glyphCycles)} (${glyphCycles.length}), a tile ${cyc(tileCycles)} (${tileCycles.length}); ` +

@@ -890,7 +890,10 @@ now); or count `SecondFrames` from the fields (`lv_now` mod 50, a few
 cycles a pass) and have `tools/livecheck.mjs` write the trace's value into
 the disc before the pass that picks, as it writes the minute.
 
-## 121. A rig's messages show in the panel's message line while the game goes on (2026-11-08, autonomous, proposed for Matt)
+## 121. A rig's messages show in the panel's message line while the game goes on (2026-11-08, autonomous, proposed for Matt; amended by 191)
+
+*Amended by decision 191: the messages are highlighted while they show, as
+the original's.*
 
 The original shows each of a rig's messages (PROCESSING, RIG POSITIONED,
 the yield, the percentage, or why not) in its message line, highlighted,
@@ -993,7 +996,10 @@ and one more (`SENSOR_LINES`), in frames of their own as the laser's
 a line below the view's bottom (where the original's row table puts it),
 isn't drawn.
 
-## 150. The end's wait takes any key, and the frames go on through it (2026-11-08, autonomous, proposed for Matt)
+## 150. The end's wait takes any key, and the frames go on through it (2026-11-08, autonomous, proposed for Matt; amended by 191)
+
+*Amended by decision 191: the end's message is highlighted until the end's
+scene is drawn, as the original's.*
 
 The original's end ($9AB7) shows its message highlighted, enters area 127
 and redraws, and holds the game in a wait: no key read for 75 frames, then
@@ -1132,3 +1138,28 @@ The options, for Matt: as built; the credit whole and the clock in the
 bottom strip's right, after "TECH DEMO" and the frames a second (over the
 ST's console there, and not where the original has it); or no clock, as
 before.
+
+## 191. The message line highlighted as the original's, in a band of the panel's font (2026-11-09, autonomous, proposed for Matt; amends 121 and 150)
+
+The original highlights its message line by inverting it (`$BCA6`: the
+eight lines of each character cell, a line above the text and those below
+it): a rig's messages and the refusals while each shows (`$C0EB`,
+`$C266`, `$C29A`: on as each is printed, off as the next is or the
+action ends, `$C245`), and the end's message from its printing through the
+end's redraw of area 127 (`$9AF3` on, `$9B40` off; the journal's
+2026-11-09 entry has how long). The disc showed them plain (decisions 121 and
+150: "the ST's console has no inverse line"). Now the panel inverts its
+message line as the original does: while a pass's message shows (its
+`RIG_SHOWN` fields each) and, for the end's, until the end's scene is drawn
+(area 127 entered and its first frame's lines drawn, `lv_messages`), where
+the original takes it off after its redraw; the message stays, plain,
+until a new game. The inversion is the cells' ink and paper changed over
+(`panel_draw`); so that it's a band round the text, as the original's,
+not letters cut out of their own edges, the message's cells have a blank
+line above and below the panel's font (`tools/model/panel.py`'s
+`fontpad`), which moves the message up a line in its box. The area's own
+messages (GAS BUILD UP and the rest) stay plain, as the original's.
+
+The options, for Matt: as built; the band without its blank lines (the
+message where it was, the letters touching the band's edges); or plain,
+as before.

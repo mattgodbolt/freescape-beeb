@@ -583,7 +583,9 @@ def assembly(build, packed):
         f"PANEL_NO_COMPASS = {{{', '.join(str(a) for a in panel.NO_COMPASS)}}}",
         f"PANEL_JET = {panel.JET}",
         f"PANEL_MAX_H = {max(panel.TABLES[t][0] for t, _i, _p in kinds)}",
+        f"PANEL_PAD_LAST = {panel.FONT_H + 1}     \\ (a padded kind's last line: pk_pad)",
     ]
+    assert all(p == 1 and panel.TABLES[t][0] == panel.FONT_H + 2 for t, p in panel.PADS.items())
     for f in fields:
         L.append(f"PF_{f[0].upper()} = {first[f[0]]} : PN_{f[0].upper()} = {f[3]}")
     L.append(f"PF_PICTURE = {glyphs} : PN_PICTURE = {len(build['tile_places'])}")
@@ -607,10 +609,13 @@ def assembly(build, packed):
     L += equb("pc_kind", (k for _a, k in cells[:glyphs] + cells[above:]))
     L += equb("pk_h", (panel.TABLES[t][0] for t, _i, _p in kinds))
     L += equb("pk_stride", (panel.TABLES[t][1] for t, _i, _p in kinds))
+    # (a padded table's first and last lines blank, its glyph's between:
+    # panel_draw)
+    L += equb("pk_pad", (0x80 if panel.PADS.get(t) else 0 for t, _i, _p in kinds))
     L.append(".pk_tlo")
-    L += [f"    EQUB LO(pt_{t})" for t, _i, _p in kinds]
+    L += [f"    EQUB LO(pt_{panel.ALIASES.get(t, t)})" for t, _i, _p in kinds]
     L.append(".pk_thi")
-    L += [f"    EQUB HI(pt_{t})" for t, _i, _p in kinds]
+    L += [f"    EQUB HI(pt_{panel.ALIASES.get(t, t)})" for t, _i, _p in kinds]
     # each kind's paper by line, and its paper EOR its ink (what a lit
     # pixel changes), shared where alike
     runs = [(paper, tuple(i ^ p for i, p in zip(ink, paper))) for _t, ink, paper in kinds]
@@ -627,7 +632,8 @@ def assembly(build, packed):
     for i, run in enumerate(lines):
         L += equb(f"pl_{i}", run)
     for t in panel.TABLES:
-        L += equb(f"pt_{t}", build["tables"][t])
+        if t not in panel.ALIASES:
+            L += equb(f"pt_{t}", build["tables"][t])
     L += equb("pv_data", (b for t in build["tiles"] for b in bytes.fromhex(t)))
     L += equb("pv_jet", build["pictures"][panel.JET])
     L += equb("pv_probe", build["pictures"][panel.PROBE])
@@ -692,6 +698,7 @@ def check(req):
         values = panel.values_of(mem, name, bool(v["over"]))
         if v.get("msg"):
             values["message_text"] = v["msg"]       # (a rig's message, as the original's)
+            values["lit"] = bool(v.get("lit"))      # (... highlighted while it is: decision 191)
         if v.get("cam"):
             scale = mem[panel.ZX["AreaScale"]] or 1
             x, y, z, yaw, pitch = v["cam"]
@@ -737,7 +744,7 @@ def main(argv):
     end_area = [a["id"] for a in layout["areas"]].index(END_AREA)
     build = {
         "picture": screen.hex(), "inks": inks(pattern_of), "papers": papers(screen),
-        "tables": {name: panel.table_lines(name) for name in panel.TABLES},
+        "tables": {name: panel.table_lines(name) for name in panel.TABLES if name not in panel.ALIASES},
         "tile_places": places, "tiles": [t.hex() for t in tile_list],
         "pictures": [tiles_of(jet), tiles_of(screen)], "messages": messages(snap),
         "names": names, "charset": panel.CHARSET, "end_area": end_area,

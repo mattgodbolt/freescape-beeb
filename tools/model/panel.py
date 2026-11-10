@@ -318,13 +318,30 @@ TABLES = {
     "pitch0": (PITCH_H, 1, pitch0_table),
     "pitch1": (PITCH_H, 1, pitch1_table),
     "light": (LIGHT_H, LIGHT_H, light_table),
+    # the font with a blank line above and below each glyph: the message's,
+    # whose highlight (decision 191) is a band round the text, as the
+    # original's inverted line is. The font's own lines (ALIASES), the
+    # blank lines PADS of them.
+    "fontpad": (FONT_H + 2, FONT_H, font_table),
 }
+ALIASES = {"fontpad": "font"}       # tables whose lines are another's
+PADS = {"fontpad": 1}               # tables whose first and last lines are blank
 
 
 def table_lines(name):
     """A table as one run of line nibbles: glyph g's lines start at g * stride."""
     _h, _stride, make = TABLES[name]
     return [v for g in make() for v in g]
+
+
+def glyph_line(lines, table, g, k):
+    """Line k of glyph g of table (its lines, table_lines'): a padded table's
+    first and last are blank, its others the glyph's lines from the first."""
+    h, stride, _make = TABLES[table]
+    pad = PADS.get(table, 0)
+    if pad and (k < pad or k >= h - pad):
+        return 0
+    return lines[g * stride + k - pad]
 
 
 # --- The fields ---------------------------------------------------------------
@@ -341,7 +358,7 @@ YELLOW, RED, GREEN, WHITE, BLACK = 3, 1, 2, 7, 0
 FIELDS = [
     # name       x    y    n  across  table      ink
     ("score",    88, 123,  7, True,  "font",    YELLOW),
-    ("message",  62, 171, 14, True,  "font",    YELLOW),
+    ("message",  62, 169, 14, True,  "fontpad", YELLOW),
     ("name",     62, 178, 14, True,  "font",    YELLOW),
     ("shield",    6, 170,  6, True,  "bar",     None),
     ("energy",    6, 178,  6, True,  "bar",     None),
@@ -504,16 +521,24 @@ def bar_cells(v):
     return [max(0, min(4, lit - 4 * i)) for i in range(BAR_CELLS)]
 
 
+# A glyph cell's value with this bit set shows its glyph highlighted: each
+# line's pixels inverted, the field's ink where the glyph is unlit and the
+# picture where it's lit, as the original's $BCA6 inverts its message line
+# while a pass's message shows (decision 191).
+HIGHLIGHT = 0x80
+
+
 def cells(values, before=None, build=None):
     """Each field's cells, from the panel's values (values_of), and the
     cells shown before (for the heading, which stays as it was where the
-    original's compass doesn't turn; none before: it turns anyway)."""
+    original's compass doesn't turn; none before: it turns anyway). With
+    "lit", the message's cells are highlighted."""
     v = values
     build = build or load_build()
     message = v.get("message_text") or centred(build["messages"][v["message"]], 14)
     out = {
         "score": text_cells(number(v["score"], 7), 7),
-        "message": text_cells(message, 14),
+        "message": [c | HIGHLIGHT if v.get("lit") else c for c in text_cells(message, 14)],
         "name": text_cells(name_text(v["name"] or ""), 14),
         "shield": bar_cells(v["shield"]),
         "energy": bar_cells(v["energy"]),
@@ -579,18 +604,21 @@ def masks(nibble):
 def render(cell_values, build=None):
     """The screen's bytes, SCREEN to &7FFF, with each field's cells drawn
     over the picture: each pixel the field's ink where its glyph is lit,
-    else the picture's; and the vehicle's tiles."""
+    else the picture's (the other way round where it's highlighted); and the
+    vehicle's tiles."""
     build = build or load_build()
     out = bytearray(bytes.fromhex(build["picture"]))
     for f in FIELDS:
         name, table = f[0], f[5]
-        h, stride, _make = TABLES[table]
-        lines = build["tables"][table]
+        lines = build["tables"][ALIASES.get(table, table)]
         for i, place in enumerate(cell_bytes(f)):
             g = cell_values[name][i]
+            inv = 0xF if g & HIGHLIGHT else 0
+            assert not inv or table in PADS, "only a padded field is highlighted (src/panel.6502's panel_draw)"
+            g &= ~HIGHLIGHT
             ink = build["inks"][name][i]
             for k, pair in enumerate(place):
-                for a, m in zip(pair, masks(lines[g * stride + k])):
+                for a, m in zip(pair, masks(glyph_line(lines, table, g, k) ^ inv)):
                     out[a] ^= (out[a] ^ ink[k]) & m
     for place, t in zip(build["tile_places"], cell_values["picture"]):
         for a, b in zip(tile_bytes(place), bytes.fromhex(build["tiles"][t])):
