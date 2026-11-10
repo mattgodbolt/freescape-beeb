@@ -138,6 +138,24 @@ SECTION RigCode
     LSR A : ROR sn_m
     RTS
 
+\ sn_inside (lv_hook_redraw's): the test inside a pass, after its redraw
+\ there and then (a rig's, $C289; the FCL's REDRAW, $B6D7): the projection
+\ if that redraw re-projects (GameFlags bit 2), the line of sight always,
+\ from the frame last drawn, which is the one the pass began with (lv_pass
+\ waits for it where it can: decision 192); then the screen's colours if
+\ the area changed, as $9841 ends; the logic's bank put back as it was.
+.sn_inside
+{
+    LDA logic_paged : PHA
+    LDA GameFlags : AND #4 : STA sn_proj
+    JSR sn_redraw
+    LDA AreaChanged : BEQ same
+    JSR logic_go_colours
+.same
+    PLA : STA logic_paged : STA romsel
+    RTS
+}
+
 \ sn_redraw: the projection's list if the pass re-projected (sn_proj), then
 \ the line of sight and the interrupt's list. Pages LOGIC_CODE_BANK in last.
 .sn_redraw
@@ -236,7 +254,10 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
 \ interval, and its state: 0 hidden, with the camera on none of the sides
 \ its mask (byte &0D) names, or |x| + |y| + |z| (16-bit) not short of its
 \ range (bytes &0B, &0C); else 1 if the frame drew its pixel (lv_spot),
-\ which is its point, else 2.
+\ which is its point, else 2. Then the list's end (the original's address
+\ of its next entry), and, if the last object is a sensor (the globals'
+\ last is), FoundId its id, as the original's projection leaves it
+\ ($6C0F: it takes a sensor whatever its state).
 .sn_project
 {
     ZA_AUTO1 i, k, e
@@ -279,8 +300,17 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     INC i
     LDA i : CMP ix_ns : BNE object
 .done
+    LDA e : CLC : ADC #LO(ZX_FOUND) : STA SN_END
+    LDA #HI(ZX_FOUND) : ADC #0 : STA SN_END + 1
+    LDY ix_ns : BEQ last_not
+    LDA ix_sn - 1,Y : INC A : CMP ix_n : BNE last_not
+    TAX : LDA ix_id - 1,X : STA FoundId
+.last_not
     RTS
 }
+ZX_FOUND = &8A26                                ; (the original's address of the redraw's list)
+SN_END = SensorList + &3E                       ; ... and of the place for its next entry, &8A62
+ASSERT SN_FOUND = SensorList + 2 AND SL_FOUND = 2
 SENSOR_TYPE = 2
 ASSERT SENSOR_TYPE = IX_SENSOR AND ZX_SENSORS_MOST <= SL_ENTRIES
 ZA_AUTO2 sn_lo, sn_hi, sn_rec

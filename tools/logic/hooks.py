@@ -45,8 +45,11 @@ class Hooks:
         self._note("screen_colours")
 
     def redraw(self, s):
-        """FCL REDRAW: the redraw ($6B12), the copy and the sensors
-        ($9841) and the panel ($B72B), there and then."""
+        """FCL REDRAW and a rig's: the redraw ($6B12), the copy and the
+        sensors ($9841) and the panel ($B72B), there and then. The sensors'
+        test needs the renderer's frame, so the hooks that have one run it
+        (tools/logic/sensors.py's inside); the default, as the 6502 logic's
+        own build, has none and runs nothing."""
         self._note("redraw")
 
     def undraw(self, s, obj_id):

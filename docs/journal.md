@@ -2125,3 +2125,51 @@ to 79, `Work` 11 to 10. Fields a frame, median / p90 / max: walking 1.66
 18.24 (the message's 14 cells two lines taller, which a new area's first
 frame waits for: "the rest" of an entrance 2.28 to 2.35 fields); a glyph
 cell 687 / 873 / 910 cycles to 709 / 999 / 1,041, inside `PANEL_CELL_US`.
+
+## 2026-11-10: the last small gaps, continued
+
+**The sensors' test inside a pass** (decision 192). The original calls
+`$9841` from six places: the pass's end (`$9815`), a game's start
+(`$97EB`), the end's scene (`$9B37`), the information screen's way out
+(`$C7E2`), and inside a pass, a rig's redraw (`$C289`) and the FCL's
+REDRAW (`$B6D7`). The last two were what was missing. REDRAW is in more of
+Driller's scripts than the rigs: a scan of the database's FCL (by the
+original's instruction lengths, `$8939`) finds it in collided scripts in
+areas 16 and 18 and the rig's first part's (global 255, so wherever a rig
+stands), shot scripts in areas 10, 12, 19 and 21, area 18's conditions
+(seven REDRAWs, an animation) and a global condition (the minute that
+shows globals 248 to 250, 248 a sensor).
+
+The transcription runs the test from the hooks' redraw, which has the
+renderer's frame (`tools/logic/sensors.py`'s `inside`); the plain hooks,
+which the 6502 logic's own build is checked against, run nothing, as its
+`hook_redraw` does nothing. The check's hooks run it on the BBC's frame of
+the state as it stands. Its first run against the original, with the
+crutch for `rig-sensor` gone, differed in seven scenarios, in three ways:
+the points of sensors on the screen (each renderer's own, decision 132,
+which the test after a pass's end never compared: they're now taken from
+the original after a pass that redraws inside itself); the projection's
+list end (`$8A62`, which the transcription didn't write); and `FoundId`,
+which the original's projection leaves the id of the last object it takes
+(`$6C0F`: the globals' last, sensor 248, which it takes whatever its
+state). The projection now writes both, on the disc too. Then all 34
+scenarios (2,702 passes, 31 tests inside a pass among them) and a fuzz of
+120 walks (8,835 passes, 26 tests inside a pass) are the original's,
+`rig-sensor`'s shield included.
+
+On the disc `lv_hook_redraw` runs `sn_inside` (in `RigCode`: a pass runs
+with ACCCON's X set), which runs `sn_redraw` from the frame last drawn and
+the screen's colours after an area's change, and puts the logic's bank
+back. A pass that may fire, set down or collect a rig, or take a minute,
+waits while the last pass's frames show (as the shot alone did), so the
+frame is the one the pass began with, which `tools/mklive.py`'s hooks
+give the transcription the disc is checked against. `make live` passes
+with it: every pass's state the transcription's, the rigs' among them.
+
+Room, logic disc, before and after: shadow RAM past `RigCode` 126 to 59
+(`sn_inside`, the list's end and `FoundId`), main RAM before `ObjMore`'s
+page 79 to 49 (the hook's jump and the pass's waits), the rest unchanged.
+The whole frame, the check's runs, fields, median / p90 / max: walking
+1.65 / 4.7 / 147.81 to 1.65 / 4.7 / 147.82, turning 2.21 / 5.72 / 127.66
+to 2.2 / 5.77 / 127.65, entrances 8.66 / 14.72 / 18.24 to 8.66 / 14.69 /
+18.24.

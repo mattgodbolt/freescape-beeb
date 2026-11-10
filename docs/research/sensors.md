@@ -71,7 +71,8 @@ the BBC's (`tools/model/pick.py`, decision 131).
 `src/sensors.6502`, `src/live.6502`:
 
 - **The redraw's part** (`sn_redraw`: `sn_project`, `sn_sight`, in shadow
-  RAM with the rigs' code, run with ACCCON's X set): after a pass that
+  RAM with the rigs' code, run with ACCCON's X set; inside a pass,
+  `sn_inside`: "Inside a pass", below): after a pass that
   redraws, if the area or the globals have a sensor (`sn_any`), once the
   frame of the pass's end is drawn: in `live_idle`, the loop that finds
   nothing new to draw, with no pass's frames showing; and the next pass
@@ -121,12 +122,41 @@ the BBC's (`tools/model/pick.py`, decision 131).
   sounds asked for its; every frame with a shot's lines is the model's
   render with them (`tools/mklive.py`'s `slines`).
 
+## Inside a pass
+
+*2026-11-10, decision 192.* A rig's redraw (`$C286`-`$C289`) and the FCL's
+`REDRAW` (`$B6D4`-`$B6D7`) redraw there and then and run the test on that
+redraw, inside the pass: the projection if the redraw re-projects
+(`GameFlags` bit 2: a rig's sets `$0404`), the line of sight always, and
+the screen's colours if the area changed, as `$9841` ends. Its pick and
+walk leave `Collided` for the pass's events (`tests/logic/rig-sensor.txt`:
+a rig set down in a sensor's sight, the walk to the sensor reaching the
+rig, whose collided script costs a unit of shield).
+
+- **Transcribed**: `tools/logic/sensors.py`'s `inside`, run by the hooks'
+  redraw with the renderer's frame; the default hooks (the 6502 logic's
+  own build) have no frame and run nothing. The projection now also leaves
+  the list's end (`$8A62`) and `FoundId` the last object's id, as the
+  original's (`$6C0F`: the globals' last, a sensor, taken whatever its
+  state), which a test inside a pass can show.
+- **Checked against the original** (`make logic`): the check's hooks run it
+  on the BBC's frame of the state as it stands, and after a pass that
+  redrew inside itself take the renderer's other outputs from the original
+  but keep the test's (`SIGHT_KEPT`: the lists but their points, which are
+  each renderer's, `Collided`, `FoundId`, the walk's scratch, the screen's
+  colours). `rig-sensor` needs the original's `Collided` no more.
+- **On the disc**: `lv_hook_redraw` runs `sn_inside` (shadow RAM, as a
+  pass runs with ACCCON's X set), `sn_redraw` from the frame last drawn,
+  which a pass that may fire, set down or collect a rig or take a minute
+  waits for (`lv_pass`); the trace (`tools/mklive.py`'s `LiveHooks`) takes
+  the frame the pass began with, and `make live` holds the disc to it.
+
 ## What's left
 
-- A rig's redraw and the FCL's `REDRAW` run the test inside their pass on
-  the original; the disc runs it after a pass that redraws only, so after
-  those it keeps the lists it had (`tests/logic/rig-sensor.txt` still
-  takes the original's `Collided` there).
+- The test inside a pass is from the frame the pass began with, not the
+  redraw the pass has made, and a REDRAW in a collided script or an
+  area's condition in a pass taken while the last pass's frames showed
+  is from the frame then shown (decision 192).
 - The border's flash (decision 133).
 - The test's walk to a sensor in range far off can hold the next pass for
   several fields (the journal's figures), as the original's holds its

@@ -289,16 +289,22 @@ def trace(snap, out_path, paths):
     seen = {"walks": [], "loaded": False, "first": False}
 
     class LiveHooks(Hooks):
-        """The disc's hooks, as far as they change the logic's state: the
-        FCL's REDRAW copies the screen there and then, which plays Sound
-        and clears it (src/live.6502's lv_hook_redraw); and the messages a
-        pass shows (lv_hook_message), as their text then."""
+        """The disc's hooks, as far as they change the logic's state: a
+        redraw inside the pass (the FCL's REDRAW, a rig's) copies the
+        screen there and then, which plays Sound and clears it, and runs
+        the sensors' test on the frame the disc last drew, the one the pass
+        began with (src/live.6502's lv_hook_redraw, src/sensors.6502's
+        sn_inside; decision 192); and the messages a pass shows
+        (lv_hook_message), as their text then."""
 
         def redraw(self, s):
             super().redraw(s)
             if s.Sound:
                 self.sound(s, s.Sound)
                 s.Sound = 0
+            lsensors.inside(s, lview.frame(self.start), self)
+            if s.AreaChanged:
+                lfcl.screen_update(s, Hooks())
 
         def message(self, s, addr):
             super().message(s, addr)
@@ -402,6 +408,7 @@ def trace(snap, out_path, paths):
                 rec.update(restart=True, demo=st.demo, keys=logictrace.rows(keys), names=list(keys), tick=False)
                 hooks = LiveHooks()
                 hooks.messages = []
+                hooks.start = s.copy()
                 lend.restart(s, hooks, keys, demo=st.demo)
                 rec.update(result=3, walks=seen["walks"], loaded=seen["loaded"],
                            sounds=[args[0] for name, args in hooks.log if name == "sound"])

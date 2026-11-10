@@ -109,7 +109,9 @@ BBC hasn't; on the disc they go back to the game.)
 above the view, at the right, where the original shows it (the credit
 beside it is a little shorter: decision 190). The panel's message line
 lights up as the original's does, inverted, while a rig's message or the
-end's shows (decision 191).
+end's shows (decision 191). The guard sensors look again whenever the
+original redraws in the middle of a move, as when a rig goes down in a
+sensor's sight (decision 192).
 
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the

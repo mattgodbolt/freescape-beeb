@@ -21,7 +21,7 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 |---|---|---|---|---|---|---|---|
 | The pass, keys, actions | `$9825`, `$9990`, `$943C`, `$A279` | yes | yes | yes | camera, panel | every scenario, the fuzz | nothing |
 | Moving: walk, climb, fall, margin, doorways, edges | `$9F42`, `$9DCF`, `$A597`, `$BCCB`, `$9D1C` | yes | yes | yes | view, frames between passes (decision 36) | `walls`, `climb`, `fall`, `doors`, `edge`, `rise`, `jet`, fuzz | nothing |
-| The FCL, the events, the global and area conditions | `$9B6E`, `$B320` | yes, every opcode | yes | yes | view (shown/hidden objects), panel | `fcl` and every scenario | REDRAW's own redraw is the frame's next (`hook_redraw` plays the copy's sound only) |
+| The FCL, the events, the global and area conditions | `$9B6E`, `$B320` | yes, every opcode | yes | yes | view (shown/hidden objects), panel | `fcl` and every scenario | REDRAW's own redraw is the frame's next (`hook_redraw` plays the copy's sound and runs the sensors' test, decision 192) |
 | **The clock**, energy spent | `$BAE6`-`$BB90`, `$BB27` | **yes, a frame at a time** (`passes.clock_frame`) | **yes** (`logic_clock`) | **yes**, a frame a field (`lv_clock`, decision 152) | energy bar; **the clock's text above the view, at its right, as the original's (decision 190)** | `ticks`, `minutes`, **`clock`** (the text, OUT OF TIME) | nothing |
 | Score | FCL 1, the rigs | yes | yes | yes | panel, seven digits | `fcl`, `rigs` | nothing |
 | **Rigs: placing (D)** | `$BEFA`, `$BF9E`, `$C009`-`$C10D` | **yes** (`tools/logic/rig.py`) | **yes** (`src/logic/rig.6502`, `rigdb.6502`) | **yes** | the rig's five parts in the view, where the original puts them; the panel's messages in turn | **`rigs`, `rig-win`, `rig-sensor`, the fuzz (D and C now among its keys)** | nothing: the yields' rotation is the clock's frame's, as the original's, since the clock (decision 152 amends 120) |
@@ -34,9 +34,9 @@ scenario. The rigs' row is as this round leaves it (the journal's entry of
 | **The laser and shooting mode** | `$A95C`, `$AA50`-`$AA8C` | the keys, the crosshair, shooting mode; the lines the disc's (the model's `laser`) | crosshair, shooting mode | **yes**: the four lines at half width, for sound 1's fields (decision 130) | **the lines, in frames of their own** | `crosshair`, **`shoot`** (the frames, byte for byte) | nothing |
 | **The shot's pick** | `$B153`, the draw list `$8A9D` | **the BBC's frame's** (`tools/logic/view.py`, decision 131) | the hook (the check build: hits nothing) | **yes** (`lv_pick`, from the front end's draw list) | - | **`shoot`, against the original's own pick** | nothing |
 | **Shot scripts** | FCL bit 7, `ShotFlag` | yes | yes | **yes** | the objects hidden, destroyed | `fcl`'s `shot` steps, **`shoot`** | nothing |
-| **Guard sensors: the list, line of sight** | `$7592`, `$9841` (state 1 by the pick, state 2 by a walk with `Margin` 0) | **yes** (`tools/logic/sensors.py`, on the BBC's frame: decision 132) | the hide's stop (`$B467`) | **yes** (`src/sensors.6502`, after a pass that redraws) | - | **every redraw against the original's (`sensors`, the fuzz)** | inside a rig's redraw or the FCL's `REDRAW` |
+| **Guard sensors: the list, line of sight** | `$7592`, `$9841` (state 1 by the pick, state 2 by a walk with `Margin` 0) | **yes** (`tools/logic/sensors.py`, on the BBC's frame: decision 132) | the hide's stop (`$B467`) | **yes** (`src/sensors.6502`, after a pass that redraws) | - | **every redraw against the original's (`sensors`, the fuzz)**; **inside a rig's redraw and the FCL's `REDRAW` too (`rig-sensor`, `rigs`, the fuzz)** | nothing: inside a pass, from the frame the pass began with (decision 192) |
 | **Sensors' shots, shield** | `$BAE6`'s list, `$BB93`-`$BC94` | **yes** (`tick`; the harness lets them fire in a `sensors` step) | - | **yes**: counted by the main loop (decision 133), sound 2, `Shield`, `GameOver` 1 | **the lines to the sensor (decision 134), the shield's bar** | **`sensors`** | the border's flash (decision 133) |
-| A rig redraw's line of sight | `$9841` inside `$C259` leaves `Collided` | the oracle's `Collided` (`tests/logic/rig-sensor.txt`) | no | no | - | `rig-sensor` | the test inside the pass |
+| A rig redraw's line of sight | `$9841` inside `$C259` leaves `Collided` | **yes** (`sensors.inside`, from the hooks' redraw) | **yes** (`sn_inside`) | **yes** (`lv_hook_redraw`) | - | **`rig-sensor`, against the original's own `Collided`** | nothing (decision 192) |
 | Energy, the jet and the probe | FCL 2, `$15`, the minute | yes | yes | yes | bars, vehicle | `fcl`, `jet` | nothing |
 | **Game over** | `$9AB7`: the message (SHIELD OUT, OUT OF TIME, ENERGY OUT, NASTY FALL, TASK COMPLETED, TERMINATED), sound 20, area 127 with the safe sectors in its name, a wait for a key | **yes** (`tools/logic/end.py`) | **yes** (`src/logic/end.6502`, `logic_go_end`) | **yes**: with the pass that finds it; the wait (decision 150) | **area 127 at its entrance; the message till a new game; the name with the safe sectors** | **`end`, `clock` (each cause but TERMINATED), the scene and the new game against the original's** | TERMINATED (the information screen's 1) |
 | **New game** | `$9C36`, `$BD74`, `$97CD`: the header's values, the objects' flags from bit 7, the control menu | **yes** | **yes** (`logic_go_restart`, `new_game_due`) | **yes** (RETURN, or the wait run out) | the start's area, the crosshair | **`end`, `demo`** | the control menu (decision 150) |
@@ -51,7 +51,9 @@ Two harness changes came with the rigs (`tools/logic/oracle.py`,
 (its interrupt's read of the fire list answers none), since a rig's
 redraw inside its pass fills the list again and its 200 frames of waits
 let the interrupt fire mid-pass; and a rig's pass takes the original's
-`Collided` at the redraw, which the sensors' line of sight leaves there.
+`Collided` at the redraw, which the sensors' line of sight leaves there
+(since 2026-11-10 the transcription runs that test itself and the check
+holds it to the original's: decision 192).
 Before, the oracle emptied the list only at each pass's start. A first
 check of the disc's frames with the rigs also found a fault in
 `tools/livecheck.mjs` that predates them: a poke or a GOTO right after a

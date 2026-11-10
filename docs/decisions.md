@@ -1163,3 +1163,41 @@ messages (GAS BUILD UP and the rest) stay plain, as the original's.
 The options, for Matt: as built; the band without its blank lines (the
 message where it was, the letters touching the band's edges); or plain,
 as before.
+
+## 192. The sensors' test inside a pass is from the frame the pass began with (2026-11-10, autonomous, proposed for Matt; follows 131 and 132)
+
+The original runs its sensors' test (`$9841`) inside a pass wherever the
+pass redraws there and then: a rig's redraw (`$C289`) and the FCL's
+REDRAW (`$B6D7`), each on the redraw it has just made; the test's pick
+and walk leave `Collided` for the pass's events, so a rig set down in a
+sensor's sight can run that sensor's collided script in the same pass
+(`tests/logic/rig-sensor.txt`). The disc ran the test only after a pass
+that redraws at its end, so after these it kept the lists it had, and
+the rig's quirk didn't happen. Now the transcription runs the test there
+(`tools/logic/sensors.py`'s `inside`, from the hooks' redraw) and so does
+the disc (`src/sensors.6502`'s `sn_inside`, from `lv_hook_redraw`), and
+the check holds the transcription to the original inside those passes,
+on the BBC's frame of the state as it stands (`tools/logic/check.py`).
+
+The disc draws its view only between passes, so its test inside a pass
+is from the frame it last drew: which sensors that frame drew and where,
+and the pick at each one's point, as the shot's pick is (decision 131);
+the range, the sides and the walk are the logic's state as it stands. A
+pass that may fire (0), set down or collect a rig (D, C) or take a minute
+(whose global conditions show three globals and redraw at minute 8)
+waits while the last pass's frames show, so the frame last drawn is the
+one it began with; the transcription the disc is checked against
+(`tools/mklive.py`) takes that frame. So where the pass changes the view
+before the test (a rig's parts set down or taken up in front of a
+sensor's point, objects shown or hidden by the script before its REDRAW,
+or the camera moved by the pass's walk), the disc's test sees the view the
+pass began with, where the original's sees its own redraw. And a REDRAW
+in a collided script (a rig's parts' own, area 16's, area 18's) or an
+area's condition, in a pass taken while the last pass's frames still
+showed, sees the frame then on the screen, which the check's runs don't
+reach.
+
+The options, for Matt: as built; or every pass that may redraw inside
+itself waiting for the frame of the last pass's end, which only a rig's
+parts or a sensor in the area can make matter, at a frame's wait each such
+pass (held keys a frame slower a pass, where a sensor is).

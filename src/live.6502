@@ -867,10 +867,19 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     \ The shot's pick is from the frame last drawn (src/laser.6502), which
     \ must be the logic's camera, as the original's is its last redraw: so a
     \ pass that may fire waits while the last pass's frames show, until the
-    \ frame of its end is drawn (the loop after: lv_camera ends them).
+    \ frame of its end is drawn (the loop after: lv_camera ends them). So
+    \ does one that may redraw inside itself where it's known it may, whose
+    \ sensors' test is from that frame too (sn_inside, decision 192): a rig
+    \ set down or collected, and a minute's, whose global conditions redraw.
     LDA an_on : BEQ ready
     LDA keys + K_0 DIV 8 : ORA keys_made + K_0 DIV 8
-    AND #1 << (K_0 AND 7) : BEQ ready
+    AND #1 << (K_0 AND 7) : BNE framed
+    LDA keys + K_D DIV 8 : ORA keys_made + K_D DIV 8
+    AND #1 << (K_D AND 7) : BNE framed
+    LDA keys + K_C DIV 8 : ORA keys_made + K_C DIV 8
+    AND #1 << (K_C AND 7) : BNE framed
+    LDA MinuteSeen : CMP MinuteCount : BEQ ready
+.framed
     RTS
 .ready
     \ Likewise the sensors' test after the last pass's redraw comes first,
@@ -1190,15 +1199,17 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     LDA #1 : STA lv_loaded
     RTS
 
-\ lv_hook_redraw (hook_redraw, the FCL's REDRAW): of the original's redraw
-\ there and then, its copy's sound: Sound played, and cleared.
+\ lv_hook_redraw (hook_redraw: the FCL's REDRAW, a rig's): of the
+\ original's redraw there and then, its copy's sound (Sound played, and
+\ cleared) and the sensors' test (src/sensors.6502's sn_inside, in shadow
+\ RAM: a pass runs with ACCCON's X set).
 .lv_hook_redraw
 {
     LDA Sound : BEQ quiet
     JSR snd_ask
     STZ Sound
 .quiet
-    RTS
+    JMP sn_inside
 }
 
 \ lv_hook_message (hook_message): the 14 characters at Y X (the logic's

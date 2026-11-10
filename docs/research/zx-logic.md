@@ -441,9 +441,11 @@ scenarios and a fuzz, comparing all of RAM outside the screen, the view
 buffer and the stack]. Since the rigs (2026-11-08) the harness also keeps
 every sensor from firing (`SENSOR_SHOTS`: the interrupt's read of the fire
 list answers none), as a rig's pass redraws inside itself and waits 200
-frames; and a rig's pass takes the original's `Collided` as its redraw
-leaves it (`tools/logic/check.py`), and keeps its own energy, shield and
-end through the sync after the redraw. Since the sensors (the same day)
+frames; and a rig's pass took the original's `Collided` as its redraw
+leaves it (since 2026-11-10 the transcription runs the sensors' test
+inside the pass itself, `tools/logic/sensors.py`'s `inside`, and the
+check keeps what it leaves through the sync after the redraw: decision
+192), and keeps its own energy, shield and end through that sync. Since the sensors (the same day)
 the list is no longer emptied before each pass (hiding a sensor takes it
 out of the list as it stands); a scenario's `sensors N` step runs the
 original's input, waiting, for a frame and then its interrupt N times

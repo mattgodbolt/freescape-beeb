@@ -46,10 +46,9 @@ class OracleHooks(Hooks):
     state the pass began with (tools/logic/view.py, decision 131), which the
     original's own pick must agree with."""
 
-    def __init__(self, drawn, after=None, start=None):
+    def __init__(self, drawn, start=None):
         super().__init__()
         self.drawn = drawn
-        self.after = after
         self.start = start
 
     def undraw(self, s, obj_id):
@@ -66,12 +65,16 @@ class OracleHooks(Hooks):
             SHOTS["missed"] += 1
 
     def redraw(self, s):
-        """A rig's redraw inside its pass runs the sensors' line of sight
-        ($9841), whose walk leaves Collided for the pass's events: the
-        original's, from after the pass (nothing after the redraw writes it)."""
+        """A redraw inside the pass (a rig's, the FCL's REDRAW) runs the
+        sensors' test there and then ($9841), on the BBC's frame of the
+        state as it stands, as the original's on its own redraw; its pick
+        and walk leave Collided for the pass's events. Then the screen's
+        colours if the area changed ($9841's end)."""
         super().redraw(s)
-        if self.after is not None:
-            s.Collided = self.after[0x8A69]
+        REDRAW_TESTS[0] += 1
+        lsensors.inside(s, lview.frame(s.copy()), self)
+        if s.AreaChanged:
+            fcl.screen_update(s, self)
 
 
 def expected(s, name):
@@ -100,6 +103,7 @@ class Mismatch(Exception):
 
 
 REDRAWN = [0]   # passes in which the FCL's REDRAW ran the renderer
+REDRAW_TESTS = [0]  # the sensors' tests inside them
 FROZE = [0]     # scenarios that end where the original hangs
 SEEN = collections.Counter()   # what the original did in the passes compared
 SHOTS = collections.Counter()  # the shots' picks: hit or missed
@@ -193,6 +197,13 @@ def sight_check(st, s, projected, redrawn):
     if bad:
         raise Mismatch(f"{st.line}: the redraw's sensors differ (original, transcription): " + ", ".join(bad))
 
+
+# What the sensors' test inside a pass leaves (its lists, the pick's and
+# the walk's Collided, FoundId and scratch, the screen's colours after an
+# area's change): kept from the transcription when the renderer's other
+# outputs are taken from the original after a redraw inside the pass.
+SIGHT_KEPT = ("SensorList", "Collided", "FoundId", "TargetX", "TargetY", "TargetZ",
+              "CellX", "CellY", "CellZ", "ScreenColours", "AreaChanged")
 
 ENDS = collections.Counter()   # the ends and new games compared, by how
 INFO = collections.Counter()   # the information screens compared, by the key that answered
@@ -293,7 +304,6 @@ def run(steps, snap, verbose=False):
             s.ShotFlag = 1 if st.shot else 0
             fcl.run(s, SCRIPT, len(st.code), hooks)
         else:
-            s0 = s.copy()
             info_keys = getattr(st, "info_keys", None)
             try:
                 alive = run_pass(s, st.keys, st.tick, hooks, info_keys=info_keys)
@@ -324,11 +334,6 @@ def run(steps, snap, verbose=False):
                 ENDS["the demo's new games"] += 1
                 last = after
                 continue
-            if any(n == "message" for n, _ in hooks.log) and any(n == "redraw" for n, _ in hooks.log):
-                # a rig's redraw: the pass again, with the original's Collided
-                s = s0
-                hooks = OracleHooks(orig_drawn, after, start=s0.copy())
-                alive = run_pass(s, st.keys, st.tick, hooks)
             passes += 1
             note(start, after, st.keys)
             if alive != "over" and not any(n == "redraw" for n, _ in hooks.log):
@@ -336,16 +341,25 @@ def run(steps, snap, verbose=False):
         last = after
         o = State(after)
         if any(name == "redraw" for name, _ in hooks.log):
-            # The FCL's REDRAW, or a rig's, ran the renderer, the copy and
-            # the sensors ($6B12, $9841) inside the pass: their outputs are
-            # the original's, as at the start of a pass. A rig's pass keeps
-            # its own energy, shield and end, which the rig changes and
-            # the renderer doesn't.
-            keep = ("Energy", "Shield", "GameOver") if any(n == "message" for n, _ in hooks.log) else ()
+            # The FCL's REDRAW, or a rig's, ran the renderer and the copy
+            # ($6B12) inside the pass: their outputs are the original's, as
+            # at the start of a pass, but what the sensors' test there leaves
+            # (transcribed: OracleHooks.redraw), which must be the
+            # original's. A rig's pass keeps its own energy, shield and end,
+            # which the rig changes and the renderer doesn't.
+            keep = SIGHT_KEPT
+            if any(n == "message" for n, _ in hooks.log):
+                keep += ("Energy", "Shield", "GameOver")
             kept = {k: getattr(s, k) for k in keep}
             s.sync_from(after)
             for k, v in kept.items():
                 setattr(s, k, v)
+            # (a sensor's point on the screen is each renderer's own:
+            # decision 132)
+            for base in (lsensors.FOUND, lsensors.FIRING):
+                for i in range(lsensors.ENTRIES):
+                    a = base + lsensors.ENTRY * i + 4
+                    s.mem[a:a + 2] = after[a:a + 2]
             REDRAWN[0] += 1
         diffs = differences(o.snapshot(), s.snapshot())
         if verbose:
@@ -473,7 +487,8 @@ def main():
         print("the information screens, their text the original's, by the key that answered: " +
               ", ".join(f"{k} {v}" for k, v in sorted(INFO.items())))
     if REDRAWN[0]:
-        print(f"{REDRAWN[0]} steps ran the FCL's REDRAW: the renderer's outputs taken from the original")
+        print(f"{REDRAWN[0]} steps redrew inside the pass (a rig's, the FCL's REDRAW): the renderer's outputs "
+              f"taken from the original, the sensors' {REDRAW_TESTS[0]} tests there the transcription's")
     if FROZE[0]:
         print(f"{FROZE[0]} ended where the original hangs, and the transcription knew it would")
     return 1 if bad else 0

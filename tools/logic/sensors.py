@@ -92,15 +92,24 @@ def pixel_of(v, obj_id):
     return None
 
 
+FOUND_END = 0x8A62  # the projection's place for its next entry
+FOUND_ID = 0x8916   # FoundId, which the projection leaves the last object's ($6C0F)
+
+
 def project(s, view_of):
     """$6B33 and $7592 for each sensor of the area and the globals, as the
-    redraw re-projects: the list at $8A26 and its count. view_of() gives
-    the BBC's view of the state, made only if a sensor needs it."""
+    redraw re-projects: the list at $8A26, its count and its end. view_of()
+    gives the BBC's view of the state, made only if a sensor needs it. The
+    projection leaves FoundId the id of the last object it takes ($6C0F):
+    the globals' last, which in Driller is a sensor, taken whatever its
+    state."""
     m = s.mem
     m[FOUND_N] = 0
     p = FOUND
     v = None
+    last = None
     for rec in _records(s):
+        last = rec
         if m[rec] & 0x0F != SENSOR:
             continue
         m[FOUND_N] = (m[FOUND_N] + 1) & 0xFF
@@ -118,6 +127,9 @@ def project(s, view_of):
                 m[p + 4], m[p + 5] = at
                 m[p + 3] = 1
         p += ENTRY
+    m[FOUND_END], m[FOUND_END + 1] = p & 0xFF, p >> 8
+    if last is not None and m[last] & 0x0F == SENSOR:
+        m[FOUND_ID] = m[last + 7]
 
 
 def sight(s, shot, hooks=None):
@@ -226,6 +238,20 @@ def off(s, obj_id):
             m[p - 0x1B] = 0         # (IY - $1B: the redraw's entry's state)
             return
         p += ENTRY
+
+
+def inside(s, frame, hooks=None):
+    """$9841 inside a pass, after the redraw there and then ($6B12: a rig's,
+    $C286, and the FCL's REDRAW, $B6D4): the projection if that redraw
+    re-projects (GameFlags bit 2), then the line of sight, always. frame is
+    (view_of, shot) of the renderer's frame (tools/logic/view.py's frame):
+    the hooks' redraw gives it (the check's, the state as it stands; the
+    disc's, the frame the pass began with: decision 192). The screen's
+    colours if the area changed ($9841's end, $A77A) are the caller's."""
+    view_of, shot = frame
+    if s.GameFlags & 0x04:
+        project(s, view_of)
+    sight(s, shot, hooks)
 
 
 def redraw(s, shot, view_of, hooks=None):
