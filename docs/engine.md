@@ -264,7 +264,9 @@ The panel sets a cell's value only when what decides it changes (each
 number, bar, tape's first line and message is kept as last set), and the
 crosshair's EORs are code made where it last moved, so a frame's work
 round the view is little more than the cells that change (the journal's
-2026-11-09 entry, "the sixteenth round").
+2026-11-09 entry, "the sixteenth round"). The clock's cells, above the
+view, change as its seconds go and are drawn in a window of their own,
+between the screen's last line and the vertical sync (decision 190).
 
 ## 5. Checking
 

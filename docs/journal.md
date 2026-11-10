@@ -2037,3 +2037,49 @@ and `disc_screens.png` (the information screen, the end's scene), through
 PAL. The older pictures are still true and stay. "How fast" is the
 sixteenth round's table (walking 1.69, turning 2.18, entrances 8.5 over
 every run the check makes).
+
+## 2026-11-09: the last small gaps
+
+The coordinator asked for the small gaps the audit leaves against the
+original, each a commit of its own.
+
+**The clock on the panel** (decision 190). Read from the original, not
+the docs: the interrupt prints the clock's text as each second goes
+(`$BB85`-`$BB8D`: `IX` the text at `$88A4`, `HL` the field `$CFC8`, the
+print `$93C4`), and `$CFC8` is `$4033` and eight characters, the screen's
+first character row at column 19: above the view, at its right (a
+screenshot of the original, `tools/zx.py`, shows 03:59:59 there). The
+ST's console (`tools/mkpanel.py`'s picture, drawn whole) has a black box
+of eight of its characters' width in the same place, over its view's
+right. So the clock is shown, there: eight cells of the panel's font at
+the right of the row above the view, the credit shortened beside it to
+"DRILLER (C) INCENTIVE 1987" (decision 190 has the options).
+
+That row is the first the beam scans as a field begins, inside the
+window the panel's cells are drawn in, and the check's rule for the
+buffer shown (no write with the beam at or past the row and on the
+screen) leaves it only the vertical blank. The clock's cells are begun
+there alone, from the screen's last line to a cell's time before the
+sync's flag (`PANEL_T1_ROW0`), and are the last cells of all, after the
+vehicle's tiles, so `panel_catch_up` (which waits for the beam when the
+panel's behind) waits only for those before them: no frame waits for the
+clock. `panel_clock` sets the cells from the text; `panel_values` calls it,
+and `lv_clock` when the seconds' units have changed after its frames (a
+loop counts at most 255 fields, under ten seconds). The model has the
+field (`tools/model/panel.py`: the clock from the original's `$88A4`,
+the above-view fields last in `flat()`), `tools/livecheck.mjs` gives it
+the text with each pass's values, and `tools/panelcheck.mjs` writes a
+clock's text into each of its sets of values. The free camera's disc
+leaves the cells blank, as the model does for it.
+
+Checked: `make panel` (656 sets of values, the model's), `make live` (both
+discs: every flip's panel the model's, every pass's values, every cell
+drawn in its window), `make frames`. Room, logic disc, before and after:
+`BANK_DATA` 415 to 327 (the code, and the eight cells' places and kind),
+`Work` 27 to 11 (the cells' wanted and shown); the rest unchanged. The
+whole frame over the check's runs, fields, median / p90 / max: walking
+1.69 / 4.68 / 149.82 to 1.66 / 4.69 / 150.83, turning 2.18 / 5.75 /
+128.66 to 2.21 / 5.76 / 127.67, entrances 8.51 / 14.39 / 18.08 to 8.54 /
+14.42 / 18.11 (where flips fall; the halves are unchanged), `panel_values`
+1,138 to 1,492 cycles at the median (the clock's eight cells looked at
+each pass).

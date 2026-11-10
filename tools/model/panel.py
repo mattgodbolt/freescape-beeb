@@ -2,7 +2,7 @@
 for MODE 2's 128 pixels (docs/research/panel.md).
 
 The screen is Driller's 192 lines (decision 43): the view's 104 lines, a
-character row above it and ten below. Everything outside the view is the
+character row above it (the credit and the clock) and ten below. Everything outside the view is the
 panel: a picture that never changes (tools/mkpanel.py makes it from the
 ST's console at build time: Driller's art is never committed) and, over
 it, cells that the logic's values choose.
@@ -26,8 +26,9 @@ The values (values_of) are the logic's variables the original's panel
 shows ($B72B, docs/research/zx-logic.md): the score, the energy and
 shield, the step and the turn, the position over the area's scale, the
 heading and pitch, the vehicle, the area's name and its message, whether
-the crosshair is up and whether it's shooting mode; and the frames a
-second the disc measures itself. tools/livecheck.mjs holds the disc's
+the crosshair is up and whether it's shooting mode, and the clock's text
+(the interrupt's, $BB86); and the frames a second the disc measures
+itself. tools/livecheck.mjs holds the disc's
 cells to cells() of the transcription's state after every pass, and its
 screen to render() of the cells it shows.
 """
@@ -356,7 +357,19 @@ FIELDS = [
     ("fps",      38, 187,  4, True,  "font",    YELLOW),
     ("cross",    80, 115,  1, True,  "light",   YELLOW),
     ("shoot",    86, 115,  1, True,  "light",   WHITE),
+    ("clock",    96,   1,  8, True,  "font",    YELLOW),
 ]
+# The clock (hh:mm:ss, the original's text) is where the original has it:
+# above the view, at its right (the ZX's $CFC8, the ST's box there), in the
+# row the credit shares (decision 190). Its cells are the disc's last, after
+# the vehicle's tiles (flat()), and are drawn only while the beam is past
+# the screen's last line and short of the vertical sync (src/panel.6502).
+CLOCK_LEN = 8
+
+
+def above(f):
+    """Whether field f is above the view (its cells drawn in another window)."""
+    return f[2] < VIEW_TOP
 # The bars' inks by line are the ST's (tools/mkpanel.py's BAR_RED and
 # BAR_YELLOW): the first BAR_RED cells its red end's, the rest its yellow's.
 BAR_RED = 1
@@ -411,7 +424,7 @@ ZX = {"Score": 0x8872, "Energy": 0x8875, "Shield": 0x8878, "Step": 0x876A,
       "Turn": 0x876F, "PlayerX": 0x8762, "PlayerY": 0x8764, "PlayerZ": 0x8766,
       "Pitch": 0x876C, "Yaw": 0x876D, "InJet": 0x877A, "ExtLevel": 0x8772,
       "AreaScale": 0x8779, "AreaId": 0x8862, "RigPlaced": 0x877B,
-      "CrossOn": 0x88A2, "ShootMode": 0x88AC}
+      "CrossOn": 0x88A2, "ShootMode": 0x88AC, "Clock": 0x88A4}
 NEUTRAL_FROM = 19           # areas from this id have no gas ($B773)
 CLEARED = 3                 # RigPlaced's value for a rig that's drilled ($B787)
 NO_COMPASS = (13, 18)       # areas whose compass the original doesn't turn ($B83E)
@@ -444,6 +457,7 @@ def values_of(mem, area_name, over=False):
         "vehicle": JET if mem[ZX["InJet"]] else min(max(mem[ZX["ExtLevel"]], 1), 4),
         "message": message, "name": area_name,
         "cross": mem[ZX["CrossOn"]] != 0, "shoot": mem[ZX["ShootMode"]] != 0,
+        "clock": bytes(mem[ZX["Clock"] + i] for i in range(CLOCK_LEN)).decode("ascii"),
     }
 
 
@@ -514,6 +528,7 @@ def cells(values, before=None, build=None):
         "fps": text_cells(v.get("fps", "    "), 4),
         "cross": [1 if v["cross"] else 0],
         "shoot": [1 if v["shoot"] else 0],
+        "clock": text_cells(v.get("clock") or "", CLOCK_LEN),
     }
     if not v.get("compass", True) and before:
         out["heading"] = before["heading"]
@@ -525,19 +540,24 @@ def cells(values, before=None, build=None):
     return out
 
 
-# The order of the cells on the disc: the fields' in FIELDS's order, then
-# the picture's tiles.
-def flat(cell_values):
-    return [g for f in FIELDS for g in cell_values[f[0]]] + list(cell_values["picture"])
+# The order of the cells on the disc: the fields' below the view in FIELDS's
+# order, then the picture's tiles, then the fields' above the view.
+def flat_fields(build=None):
+    """(name, cells) in the disc's order."""
+    build = build or load_build()
+    return ([(f[0], f[3]) for f in FIELDS if not above(f)] + [("picture", len(build["tile_places"]))] +
+            [(f[0], f[3]) for f in FIELDS if above(f)])
+
+
+def flat(cell_values, build=None):
+    return [g for name, _n in flat_fields(build) for g in cell_values[name]]
 
 
 def unflat(values, build=None):
-    build = build or load_build()
     out, i = {}, 0
-    for f in FIELDS:
-        out[f[0]] = list(values[i:i + f[3]])
-        i += f[3]
-    out["picture"] = list(values[i:i + len(build["tile_places"])])
+    for name, n in flat_fields(build):
+        out[name] = list(values[i:i + n])
+        i += n
     return out
 
 

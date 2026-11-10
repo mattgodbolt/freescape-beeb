@@ -1024,7 +1024,10 @@ the disc shows each pass over its fields whatever drives it, and the
 original's pace is its renderer's, which the BBC's differs from. Against:
 the original's demo runs faster where its views are simple.
 
-## 152. The disc counts the original's clock a frame a field (2026-11-08, autonomous, proposed for Matt; amends 120)
+## 152. The disc counts the original's clock a frame a field (2026-11-08, autonomous, proposed for Matt; amends 120; amended by 190)
+
+*Amended by decision 190: the panel shows the clock's text now, where the
+original shows it.*
 
 The original's interrupt counts its clock every frame ($BAFA-$BB90): 50
 frames to a second, the text from 04:00:00 down, at each minute's end the
@@ -1099,3 +1102,33 @@ round", has the cycles and the bytes). It's gone, and the check times the
 halves itself, as it always did; nothing on the screen changes. The
 option, for Matt: put it back, for a disc that could show its own halves'
 cycles again.
+
+## 190. The clock in the row above the view, beside a shorter credit (2026-11-09, autonomous, proposed for Matt; amends 152, and 47's layout)
+
+The original prints its clock's text, hh:mm:ss counting down from
+04:00:00, as each second goes (`$BB86`) and as a game starts (`$97D9`), at
+the panel's field `$CFC8`: eight characters at the right of the screen's
+first character row, above the view. The ST's console has a box of eight
+of its characters in the same place. The disc kept the clock (decision
+152) but showed nothing of it. Now the panel shows the text there: eight
+cells of the panel's font at the right of the row above the view, in the
+values' yellow (`tools/model/panel.py`'s field `clock`), set from the
+logic's text with every pass's values and by the main loop's clock as a
+second goes (`lv_clock`), so its digits change only on seconds. The row's
+credit is shortened to fit beside it, from "DRILLER (C) INCENTIVE
+SOFTWARE 1987" to "DRILLER (C) INCENTIVE 1987", at the row's left: the
+disc still says whose Driller is (decision 6).
+
+The row above the view is the first the beam scans in a field, inside the
+window the panel's other cells are drawn in, so its cells are drawn in a
+window of their own: begun only once the beam is past the screen's last
+line and a cell's time short of the vertical sync (`PANEL_T1_ROW0`), done
+before the beam meets the row again. They come after every other cell,
+so no frame waits for them (`panel_catch_up`): the loops find their
+window, once a field. The free camera's disc keeps no time and
+leaves the cells blank.
+
+The options, for Matt: as built; the credit whole and the clock in the
+bottom strip's right, after "TECH DEMO" and the frames a second (over the
+ST's console there, and not where the original has it); or no clock, as
+before.

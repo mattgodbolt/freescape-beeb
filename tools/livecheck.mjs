@@ -417,7 +417,7 @@ cpu.debugInstruction.add((addr, opcode) => {
         irqFrom = null;
         (irqSync ? syncIrqCycles : t1IrqCycles).push(c);
     } else if (addr === PANEL_DRAW && bank === BANK_DATA) {
-        drawFrom = { t: now(), irq: irqCycles, tile: cpu.x >= PANEL_GLYPHS, line: beamLine() };
+        drawFrom = { t: now(), irq: irqCycles, tile: cpu.x >= PANEL_GLYPHS && cpu.x < PANEL_ABOVE, line: beamLine() };
     } else if (addr === PANEL_DRAWN && bank === BANK_DATA && drawFrom) {
         // (its own cycles: the interrupts' it met left out, as the vertical
         // sync's may come in the window, far from its end)
@@ -518,7 +518,7 @@ const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over"), PANEL_VALU
 // each cell's draw (panel_draw, from its call to panel_sync's .drawn)
 const PANEL_VALUES = sym("panel_values"), PANEL_DRAW = sym("panel_draw"), PANEL_DRAWN = sym("panel_sync.drawn");
 const IRQ_HANDLER = sym("irq_handler"), IRQ_SYNC = sym("irq_handler.sync");
-const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_CELL_US = sym("PANEL_CELL_US");
+const PANEL_GLYPHS = sym("PANEL_GLYPHS"), PANEL_ABOVE = sym("PANEL_ABOVE"), PANEL_CELL_US = sym("PANEL_CELL_US");
 const valuesCycles = [], glyphCycles = [], tileCycles = [];
 let valuesFrom = null, drawFrom = null, cellsInWindow = 0;
 const FLIP_LINE_ = sym("FLIP_LINE"), FIELDS_AT = sym("fields");
@@ -590,7 +590,7 @@ function recordPanel(buffer, flip) {
 const ZXV_ = sym("zxv");
 const PANEL_ZX = { Score: [0x8872, 3], Energy: [0x8875, 1], Shield: [0x8878, 1], Step: [0x876a, 1], Turn: [0x876f, 1],
     Player: [0x8762, 6], Pitch: [0x876c, 2], InJet: [0x877a, 1], ExtLevel: [0x8772, 1], AreaScale: [0x8779, 1],
-    AreaId: [0x8862, 1], CrossOn: [0x88a2, 1], ShootMode: [0x88ac, 1] };
+    AreaId: [0x8862, 1], CrossOn: [0x88a2, 1], ShootMode: [0x88ac, 1], Clock: [0x88a4, 8] };
 const RIG_PLACED = 0x877b;
 const memOf = (byte) => {
     const out = [];

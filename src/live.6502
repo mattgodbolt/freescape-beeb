@@ -1030,7 +1030,10 @@ SECTION LiveData
 
 \ lv_clock (each loop): the original's interrupt's clock, a frame a field,
 \ for the fields counted since the last loop (decision 152): its seconds,
-\ a minute's end (which the next pass takes), the time out. Held by
+\ a minute's end (which the next pass takes), the time out; and its text's
+\ cells in the panel when a second has gone, as the interrupt prints it
+\ ($BB86; decision 190). (A loop counts at most 255 fields, fewer than ten
+\ seconds', so a second gone changes the seconds' units.) Held by
 \ tools/livecheck.mjs (cl_hold): only the fields it asks for (cl_more).
 .lv_clock
 {
@@ -1045,7 +1048,11 @@ SECTION LiveData
     STZ cl_more
 .counted
     TXA : BEQ none
-    JMP logic_go_clock
+    LDA Clock + 7 : PHA
+    TXA
+    JSR logic_go_clock
+    PLA : CMP Clock + 7 : BEQ none
+    JMP panel_clock
 .none
     RTS
 }

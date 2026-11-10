@@ -105,6 +105,10 @@ view, in the original's words; any key goes back to the game, and 1
 abandons it. (Its S and L save and load to the Spectrum's tape, which the
 BBC hasn't; on the disc they go back to the game.)
 
+*2026-11-09.* **The last small gaps.** The four-hour clock counts down
+above the view, at the right, where the original shows it (the credit
+beside it is a little shorter: decision 190).
+
 Every frame, the Master works out the view from the camera alone (the
 visible objects, the rotation, the projection, the clipping and the
 order) and fills it into MODE 2, double-buffered, flipping as soon as the

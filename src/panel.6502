@@ -14,9 +14,10 @@
 \   under it), a line at a time; or a tile, eight bytes down a byte column
 \   of a character row (the vehicle's picture). Fields of cells show the
 \   score, the energy and shield, the step and turn, the position, the
-\   heading and pitch, the vehicle, the area and its message, two lights
-\   and the frames a second (tools/model/panel.py, which is the panel's
-\   specification: its FIELDS, its tables, cells() and render()).
+\   heading and pitch, the vehicle, the area and its message, two lights,
+\   the frames a second and, above the view, the clock (tools/model/
+\   panel.py, which is the panel's specification: its FIELDS, its tables,
+\   cells() and render()).
 \
 \ The caller says what a cell is to show with panel_set (panel_values does
 \ every field the logic's variables give; the frames a second come from
@@ -26,9 +27,10 @@
 \ goes into both buffers, begun only while the beam is past the screen's
 \ last line or in the view's lines (User VIA T1's high byte from
 \ PANEL_T1_MIN up to HI(PANEL_T1_TOP)) with time to finish before
-\ FLIP_LINE, and every cell is below the view (ASSERTed): so no flip that
-\ waits for T1 comes while a cell is half drawn, and the beam reaches the
-\ shown buffer's copy only once it's whole. panel_sync draws what the beam allows, anywhere once
+\ FLIP_LINE, and every cell is below the view (ASSERTed) but the clock's,
+\ which has a window of its own (PANEL_T1_ROW0): so no flip that waits for
+\ T1 comes while a cell is half drawn, and the beam reaches the shown
+\ buffer's copy only once it's whole. panel_sync draws what the beam allows, anywhere once
 \ the interrupt is on; panel_catch_up waits for the beam once the panel has
 \ been behind for PANEL_PATIENCE calls; panel_wait until a range of cells
 \ is drawn; panel_flush draws everything, beam or not, before the
@@ -78,8 +80,18 @@ ASSERT HI(SAFE_T1) < HI(PANEL_T1_TOP) AND HI(PANEL_T1_TOP) < HI(T1_PERIOD)
 \ (the vertical sync's flag, inside the window, is more than a cell's time
 \ and the lead before its end)
 ASSERT (FLIP_LINE + FIELD_LINES - FLAG_LINE) * LINE_US > PANEL_T1_MIN * 256 + PANEL_CELL_US
-ASSERT PANEL_CELLS < 128 AND PANEL_GLYPHS <= PANEL_CELLS
+ASSERT PANEL_CELLS < 128 AND PANEL_GLYPHS <= PANEL_ABOVE AND PANEL_ABOVE <= PANEL_CELLS
 ASSERT PANEL_MAX_H <= 8
+\ The cells above the view (from PANEL_ABOVE, after the tiles: the clock,
+\ decision 190) are in the screen's first character row (tools/mkpanel.py
+\ checks), which the beam scans as a field begins, inside that window. So
+\ one is begun only once the beam is past the screen's last line, as the
+\ window opens, and PANEL_CELL_US short of the vertical sync's flag
+\ (PANEL_T1_ROW0): it's done before the sync's interrupt, and long before
+\ the beam meets its row again. They're last, so a frame's panel_catch_up
+\ never waits for them: the loops find their window.
+PANEL_T1_ROW0  = CEIL(((FLIP_LINE + FIELD_LINES - FLAG_LINE) * LINE_US + PANEL_CELL_US) / 256)
+ASSERT PANEL_T1_ROW0 < HI(PANEL_T1_TOP) AND FLAG_LINE >= SCREEN_ROWS * (CRTC_R9 + 1)
 
 SECTION Work
 .panel_want     SKIP PANEL_CELLS    ; what each cell should show
@@ -198,7 +210,12 @@ ASSERT LO(SCREEN) = 0
     LDA panel_want,X : CMP panel_shown,X : BEQ same
     LDA panel_free : BNE draw
     LDA usrvia_t1ch                             ; (its high byte only: the low acknowledges)
+    CPX #PANEL_ABOVE : BCC below
+    CMP #PANEL_T1_ROW0 : BCC stop               ; (above the view: past the last line, short of the sync)
+    BRA bounded
+.below
     CMP #PANEL_T1_MIN : BCC stop
+.bounded
     CMP #HI(PANEL_T1_TOP) : BCS stop
 .draw
     PHX
@@ -230,16 +247,16 @@ ASSERT LO(SCREEN) = 0
     RTS
 }
 
-\ panel_catch_up: panel_sync, or panel_wait for every cell once the panel
-\ has been behind for PANEL_PATIENCE calls.
+\ panel_catch_up: panel_sync, or panel_wait for every cell below the view
+\ once the panel has been behind for PANEL_PATIENCE calls.
 .panel_catch_up
 {
     JSR panel_sync
-    LDA panel_left : CMP #PANEL_CELLS : BEQ caught
+    LDA panel_left : CMP #PANEL_ABOVE : BCS caught
     INC panel_behind
     LDA panel_behind : CMP #PANEL_PATIENCE : BCC behind
 .waiting                                        ; (tools/livecheck.mjs counts these)
-    LDA #PANEL_CELLS : JSR panel_wait
+    LDA #PANEL_ABOVE : JSR panel_wait
 .caught
     STZ panel_behind
 .behind
@@ -268,6 +285,10 @@ ASSERT LO(SCREEN) = 0
     LDA panel_want,X : STA v
     LDA acccon : AND #ACCCON_X : STA was
     CPX #PANEL_GLYPHS : BCC glyph
+    CPX #PANEL_ABOVE : BCC tile_cell
+    LDY pc_kind + PANEL_GLYPHS - PANEL_ABOVE,X  ; (above the view: pc_kind's after those below)
+    BRA kind
+.tile_cell
     \ a tile: pv_data + 8 v
     STZ g+1
     LDA v : ASL A : ROL g+1 : ASL A : ROL g+1 : ASL A : ROL g+1
@@ -283,6 +304,7 @@ ASSERT LO(SCREEN) = 0
     RTS
 .glyph
     LDY pc_kind,X
+.kind
     LDA pk_h,Y : STA h
     LDA pk_dlo,Y : STA diff : LDA pk_dhi,Y : STA diff+1
     LDA pk_plo,Y : STA paper : LDA pk_phi,Y : STA paper+1
@@ -364,6 +386,9 @@ ENDSECTION
 {
     ZA_AUTO1 t
     ZA_AUTO2 nm
+IF NOT(PANEL_FREE)
+    JSR panel_clock
+ENDIF
     \ the score: 24 bits, seven digits
     LDA Score : STA panel_num : LDA Score+1 : STA panel_num+1 : LDA Score+2 : STA panel_num+2
     LDX #PF_SCORE : LDY #PC_SCORE : LDA #PN_SCORE : JSR panel_number
@@ -589,6 +614,30 @@ ASSERT pm_over - pm_neutral < 256 AND pm_build - pm_neutral < 256 AND pm_cleared
 ASSERT PN_MESSAGE = PANEL_MESSAGE AND PN_NAME = PANEL_MESSAGE AND PN_X = 4 AND PN_Y = 4 AND PN_Z = 4
 ASSERT 2 * PANEL_PITCH0_PERIOD = PANEL_PITCH_LINES AND PANEL_PITCH_LINES MOD PANEL_PITCH1_PERIOD = 0
 ASSERT PN_PITCH0 = PN_PITCH1 AND PF_PITCH1 > PF_PITCH0 AND PN_VEHICLE = 5
+
+IF NOT(PANEL_FREE)
+\ panel_clock: the clock's cells from its text (the original's hh:mm:ss in
+\ ASCII, Clock, as $BB86 prints it): with every pass's values, and from
+\ src/live.6502's lv_clock as a second goes, so its digits change only
+\ then (panel_set leaves a cell as wanted already alone).
+.panel_clock
+{
+    LDX #PF_CLOCK + PN_CLOCK - 1
+    LDY #PN_CLOCK - 1
+.cell
+    LDA Clock,Y
+    SEC : SBC #'0' : CMP #10 : BCS colon
+    ADC #PC_DIGIT0                              ; (C clear)
+    BRA set
+.colon
+    LDA #PC_COLON
+.set
+    JSR panel_set
+    DEX : DEY : BPL cell
+    RTS
+}
+ASSERT PN_CLOCK = 8 AND PF_CLOCK >= PANEL_ABOVE
+ENDIF
 
 \ mod_turn: A mod STEPS_TURN. Keeps X and Y.
 .mod_turn

@@ -72,7 +72,10 @@ const VARS = { Score: [0x8872, 3], Energy: [0x8875, 1], Shield: [0x8878, 1], Ste
     PlayerX: [0x8762, 2], PlayerY: [0x8764, 2], PlayerZ: [0x8766, 2], Pitch: [0x876c, 1], Yaw: [0x876d, 1],
     InJet: [0x877a, 1], ExtLevel: [0x8772, 1], AreaScale: [0x8779, 1], AreaId: [0x8862, 1],
     CrossOn: [0x88a2, 1], ShootMode: [0x88ac, 1] };
-const RIG_PLACED = 0x877b;
+const RIG_PLACED = 0x877b, CLOCK = 0x88a4;
+// a clock's text from a number of seconds (the original's counts from
+// 04:00:00 down)
+const clockOf = (t) => [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((n) => String(n).padStart(2, "0")).join(":");
 const PANEL_WANT = sym("panel_want"), PANEL_CELLS = sym("PANEL_CELLS");
 const PANEL_AREA = sym("panel_area"), PANEL_OVER = sym("panel_over");
 const PF_FPS = sym("PF_FPS"), PN_FPS = sym("PN_FPS");
@@ -89,6 +92,7 @@ for (let i = 0; i < 256; i++) {
         Yaw: i, Pitch: 255 - i, InJet: i % 9 === 8 ? 1 : 0, ExtLevel: i % 9,
         AreaId: i, rig: i & 1 ? 3 : (i >> 1) & 3, CrossOn: i & 2 ? 0xff : 0, ShootMode: i & 4 ? 0xff : 0,
         area: i % 32 === 31 ? 255 : i % 31, over: i % 17 === 0 ? 1 : 0,
+        clock: clockOf(pick([14400, 14399, 14340, 3600, 3599, 600, 599, 60, 59, 10, 9, 1, 0], i)),
     });
 }
 const rnd = (n) => {
@@ -101,6 +105,7 @@ for (let i = 0; i < fuzz; i++) {
         PlayerX: rnd(65536), PlayerY: rnd(65536), PlayerZ: rnd(65536), AreaScale: rnd(6),
         Yaw: rnd(256), Pitch: rnd(256), InJet: rnd(2), ExtLevel: rnd(8), AreaId: rnd(256), rig: rnd(5),
         CrossOn: rnd(2) * 0xff, ShootMode: rnd(2) * 0xff, area: rnd(40), over: rnd(2),
+        clock: clockOf(rnd(14401)),
     });
 }
 
@@ -117,6 +122,11 @@ for (const v of vectors) {
     const rig = RIG_PLACED + ((v.AreaId - 1) & 0xff);
     if (!at.has(rig)) ram[zx(rig)] = v.rig;
     at.add(rig);
+    // the clock's text, hh:mm:ss
+    for (let k = 0; k < 8; k++) {
+        ram[zx(CLOCK + k)] = v.clock.charCodeAt(k);
+        at.add(CLOCK + k);
+    }
     ram[PANEL_AREA] = v.area;
     ram[PANEL_OVER] = v.over;
     cpu.pc = STUB;

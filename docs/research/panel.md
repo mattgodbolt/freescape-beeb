@@ -46,11 +46,12 @@ save and load buttons were:
 | X, Y, Z | four digits each, over the area's scale: x, z and y, as the ZX and the ST order them | `PlayerX`, `PlayerZ`, `PlayerY`, `AreaScale` |
 | vehicle | the ST's picture of the jet or the probe, and a name: JET, PROBE, EXT 1 to 3 | `InJet`, `ExtLevel` |
 | lights | the crosshair up; shooting mode | `CrossOn`, `ShootMode` |
+| clock | hh:mm:ss, the original's text, above the view at the right, as the ZX's (`$CFC8`) and the ST's | `Clock` (`$88A4`, the interrupt's: `$BB86`) |
 | FPS | the frames a second, the disc's own measure | `live_figures` |
 
-The row above the view carries the credit, "DRILLER (C) INCENTIVE
-SOFTWARE 1987", and the strip along the panel's foot "TECH DEMO" beside
-the frames a second (decision 6). With the free camera the message is the
+The row above the view carries the credit, "DRILLER (C) INCENTIVE 1987",
+at its left and the clock at its right (decision 190), and the strip along
+the panel's foot "TECH DEMO" beside the frames a second (decision 6). With the free camera the message is the
 entrance (and DEMO while the demo turns), and the position, heading and
 pitch are the camera's.
 
@@ -149,6 +150,15 @@ differ: below), and names the vehicle under them in its font.
   `FLIP_LINE` without passing it). A glyph cell writes the buffer selected
   as it makes each line and copies the lines into the other, counting
   down.
+- **The clock's cells**, above the view (2026-11-09, decision 190): the
+  beam scans their row as the field begins, inside that window, so they're
+  begun only between the screen's last line and a cell's time before the
+  vertical sync's flag (`PANEL_T1_ROW0`), done before the sync's interrupt
+  and long before the beam meets the row again. They're the last cells
+  (`PANEL_ABOVE` on, after the vehicle's tiles), and a frame's
+  `panel_catch_up` waits only for those before them, so no frame waits for
+  the clock. Its cells are set from the logic's text (`panel_clock`) with
+  every pass's values, and by `lv_clock` when a second has gone.
 
 ## The check
 
@@ -198,7 +208,8 @@ The text (`src/text.6502`) stays the slideshow's.
   at half the resolution; scaling the ST's art would lose its text and
   shapes.
 - **What it shows**: the original's panel (`$B72B`) less its clock (the
-  interrupt's countdown, which the disc doesn't keep), its seismograph,
+  interrupt's countdown, which the disc didn't keep; since 2026-11-09 it
+  shows, decision 190), its seismograph,
   its quit indicator and the rig's animation (the rigs aren't in the
   disc's logic yet); the vehicle as two pictures and a name rather than
   five pictures. All fields are set from the logic's variables after each
@@ -216,9 +227,6 @@ The text (`src/text.6502`) stays the slideshow's.
 
 ## What's left
 
-- The clock (hh:mm:ss): the disc keeps the original's countdown text
-  since 2026-11-08 (decision 152), but the panel has no field for it; it
-  would want drawing a second at a time.
 - The rig's animation in its slot (the ST's; the ZX has none). The end's
   messages by cause show in the message line till a new game, and area
   127's name the safe sectors, since 2026-11-08 (`docs/research/end.md`;
