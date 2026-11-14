@@ -14,8 +14,10 @@
 #                   camera, byte for byte, the frames between passes on the
 #                   segments the moves walked; on the second, every entrance
 #                   by SPACE, walks and turns, and the demo. Fields a frame
-#                   into build/live/check.json and check-free.json. One of
-#                   make check's
+#                   into build/live/check.json and check-free.json. Then
+#                   tools/waitcheck.mjs: a key tapped inside the end's deaf
+#                   period or the information screen's frames is lost, as
+#                   the original's waits lose it. One of make check's
 #   make live-run   screenshots of the entrances LIVE_SHOTS names (their
 #                   numbers from 0) on the free camera's disc, on an RGB
 #                   monitor and through PAL (tools/pal.py), into shots/
@@ -104,6 +106,7 @@ live: $(LIVE_DISC) $(LIVE_FREE) $(LIVE_GEN) $(LIVE_TRACE)
 	    --json $(LIVE_DIR)/check.json
 	node tools/livecheck.mjs --free --disc $(LIVE_FREE) --live $(LIVE_DIR)/live.json \
 	    --json $(LIVE_DIR)/check-free.json
+	node tools/waitcheck.mjs --disc $(LIVE_DISC)
 
 .PHONY: game-shots
 # The game in play on the live disc, through PAL, for the README

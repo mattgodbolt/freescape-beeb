@@ -168,8 +168,9 @@ ends.
   from the interrupt after the one playing, and the logic waits only if
   one is waiting already (decision 110); after a pass, `lv_copy_sound` asks
   for the copy's sound (`Sound`) by the original's rule. `hook_redraw` (the
-  FCL's `REDRAW`) is, for now, its copy's sound alone: `Sound` asked for and
-  cleared (a rig's redraw too). `hook_message` (the rigs' messages,
+  FCL's `REDRAW`, a rig's redraw) is its copy's sound (`Sound` asked for and
+  cleared) and the sensors' test inside the pass (`sn_inside`, decision
+  192). `hook_message` (the rigs' messages,
 2026-11-08) keeps up to `LV_MSGS` of a pass's messages' characters
 (`lv_msgs`); the panel shows each in its message line for `RIG_SHOWN`
 fields in turn from the pass (`lv_messages`, decision 121), and a pass
@@ -659,6 +660,13 @@ flip); over every frame and by what the frame did: an area's first frame,
 standing (the camera as the last frame's), walking (moved: the transform's
 cache kept), turning (the angles changed: the cache refilled), and the free
 disc's demo.
+
+The live check holds each key until a pass takes it, so it never taps a
+key inside a wait. `tools/waitcheck.mjs` (in `make live` too, 2026-11-14)
+does: it brings the end and taps Q inside the deaf period, shows the
+information screen and taps Q inside its frames; neither tap may answer
+the wait (the original's waits read no key, so the disc drops the keys
+gone down meanwhile, `lv_discard`), and RETURN held after each must.
 
 ## What it needs from the other tracks
 

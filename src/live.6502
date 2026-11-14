@@ -855,9 +855,24 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
 \ first repeat (the pace, decision 48). The clock (lv_clock) counts in
 \ each loop before it, so a minute's end is the next pass's, as the
 \ original's interrupt would count it in its input's wait.
+\
+\ The original's waits that read no key (the end's first END_DEAF frames,
+\ $9B43; the information screen's INFO_SHOW frames, $C59C) lose a key that
+\ goes down and up meanwhile; so the keys gone down since the last take
+\ are dropped (lv_discard) in each loop of those waits, and what answers
+\ them is a key held then or gone down after (keys, keys_made).
+.lv_discard
+{
+    LDX #KEYS_BYTES - 1
+.key
+    JSR key_take
+    DEX : BPL key
+    RTS
+}
 .lv_pass
 {
     LDA lv_now : CMP lv_until : LDA lv_now+1 : SBC lv_until+1 : BPL due
+    LDA lv_info : BNE lv_discard                ; (the information screen's frames)
     RTS
 .due
     LDA lv_switch : BEQ here
@@ -872,7 +887,7 @@ ASSERT LIVE_AREA_IDS = 128 AND LIVE_AREAS < 128
     INC A : STA lv_call
     JMP timed
 .waiting
-    RTS
+    JMP lv_discard                              ; (the end's deaf period; after it, keys it read as none)
 .alive
     LDA lv_info : BEQ playing
     \ The information screen's wait ($C59C-$C5A2): its frames (the pass's
@@ -1313,11 +1328,14 @@ ENDSECTION
 \ paging nothing.
 SECTION LiveData
 
-\ live_init: the background; no area yet, the game not over, no figures.
+\ live_init: the background; no area yet, the game not over, no figures,
+\ and their window from the counters' start (Work is the OS's pages as the
+\ loader left them, not cleared: frame_init starts the counters at 0).
 .live_init
     STZ rs_sky : STZ rs_ground : STZ rs_horizon
     LDA #&FF : STA lv_area : STA vw_none : STA vw_flags : STA panel_area
     STZ lv_entered : STZ panel_over
+    STZ win_n : STZ win_f0 : STZ win_f0+1 : STZ win_s0 : STZ win_s0+1
     \ (no buffer's view is any vw_view's for a long while: each is drawn
     \ every other frame, and vw_view moves on at most once a frame)
     STZ vw_view

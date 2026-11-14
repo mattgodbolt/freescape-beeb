@@ -2234,3 +2234,36 @@ after the fill's scratch 80 to 45. The frame's cycles are as before
 within where flips fall: walking 1.65 / 4.7 / 147.82 to 1.66 / 4.69 /
 147.82 fields (median / p90 / max), turning 2.2 / 5.77 / 127.65 to 2.21 /
 5.74 / 128.69, entrances 8.66 / 14.69 / 18.24 unchanged.
+
+**The review's finds.** The glue was read for races between the interrupt
+and the loop, for the banks paged at each call, for state left over after
+the end, a new game and the information screen, and for what's read before
+it's written. Two things, both outside what the checks reach:
+
+- *Keys tapped inside a wait that reads none.* The original's end waits
+  `END_DEAF` frames reading no key (`$9B43`), and the information screen
+  shows for `INFO_SHOW` frames reading none (`$C59C`): a key that goes down
+  and up inside either is lost. The disc's `keys_made` kept such a key, so
+  it answered the wait as it ended: a tap in the end's first second and a
+  half restarted the game at the deaf period's end, where the original
+  sits on. The live check never saw it, as it holds every key until a pass
+  takes it. Now `lv_pass` drops the keys gone down in each loop of those
+  waits (`lv_discard`), so what answers them is a key held when they end
+  or pressed after, as the original's. `tools/waitcheck.mjs`, in `make
+  live`, taps a key inside each wait and holds one after.
+- *The figures' window read before it was written.* `win_n`, `win_f0` and
+  `win_s0` are in `Work`, the OS's pages, which nothing clears at the
+  start; the first frame's `live_measure` read them as the OS left them.
+  On jsbeeb from power on they're zero, so no figure was wrong there; on a
+  machine that ran something else first, the first frames a second shown
+  could have been anything. `live_init` zeroes them now.
+
+Looked at and found sound: `acccon` is changed only by `TSB`/`TRB` where
+the interrupt's flip may land, and whole only where no flip can
+(`raster_forget` inside a frame, the interrupt's own `snd_segment`); each
+hook that pages puts `logic_paged` back; `sn_sight`'s walk to a sensor
+(`Margin` 0) never reaches `hook_walked`, so the frames between passes
+keep the pass's own walk; a new game and the end leave no stale line,
+message or animation state that a later read trusts. Room, logic disc: main
+RAM before `ObjMore`'s page 56 to 40 (`lv_discard` and its calls),
+`BANK_DATA` 1,150 to 1,135 (the window's zeroes).

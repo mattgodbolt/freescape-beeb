@@ -95,9 +95,10 @@ aren't written again.
   pass's frames are an area's change (area 127, at its entrance), the
   message is the panel's (`lv_hook_message`, shown till a new game), sound
   20 the sound driver's; the sensors' test after its redraw as after any.
-- The wait (`lv_waited`): no key read for `END_DEAF` fields, then any held
-  or gone down (RETURN is the ZX's ENTER now), until `END_FIELDS`, when it
-  has run out. Either way the next pass's call is `logic_go_restart`
+- The wait (`lv_waited`): no key read for `END_DEAF` fields (the keys gone
+  down meanwhile are dropped, `lv_discard`, as the original's wait never
+  sees them: 2026-11-14, `tools/waitcheck.mjs`), then any held or gone down
+  (RETURN is the ZX's ENTER now), until `END_FIELDS`, when it has run out. Either way the next pass's call is `logic_go_restart`
   (`lv_call`), answered as 3: the area entered, the clock's minute from
   now. The start's waits (40 and 9 frames) are the next pass's.
 - The demo's passes come with no key, a pass each `PASS_FIELDS` with the

@@ -60,9 +60,11 @@ into the buffer being drawn, in yellow on black, four pixels a character
 as the panel's; that buffer's crosshair and lines go with the view, and
 neither buffer holds what the rasteriser last drew (`raster_forget`).
 The sensors' clock stops while it shows (`sn_clock`), as does the clock
-(`GameOver` 6). Its 25 frames are the pass's waits; then any key held or
-gone down is the next pass's call (`lv_call` 3, `logic_go_info`), and its
-11 frames that one's. The next frame is drawn whole. The BBC's 1 is the
+(`GameOver` 6). Its 25 frames are the pass's waits, in which the keys gone
+down are dropped (`lv_discard`), as the original's wait reads none
+(2026-11-14, `tools/waitcheck.mjs`); then any key held or gone down since
+is the next pass's call (`lv_call` 3, `logic_go_info`), and its 11 frames
+that one's. The next frame is drawn whole. The BBC's 1 is the
 ZX's 1 now (ESCAPE was alone), for ABORT.
 
 ## The checks

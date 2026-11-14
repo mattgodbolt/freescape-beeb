@@ -288,12 +288,14 @@ between the screen's last line and the vertical sync (decision 190).
 
 ## 6. Measuring
 
-`make bench`: every entrance view and a scripted walk through each area,
-headless, with jsbeeb's cycles a frame as a distribution and each stage's
-share (cycles between the stages' labels), and a sampling profile on
-request. It's the proof of the engine, so every optimisation round reports
-against it. The model's counts (vertices, faces, face-rows, runs, bytes)
-come with it, to see where the cycles go.
+The stages' checks measure as they check (`tools/objectcheck.mjs`,
+`tools/rastercheck.mjs`, in `make check`): every entrance view and
+scripted walks and turns, headless, with jsbeeb's cycles a frame as a
+distribution and each stage's share, and a profile by routine on request
+(`--profile`, `--profile-walks`, `--profile-turns`). Every optimisation round reports
+against them. The model's counts (vertices, faces, face-rows, runs, bytes)
+come with them, to see where the cycles go. (There is no `make bench`: the
+checks are the benchmark.)
 
 On the live disc the measure is `tools/livecheck.mjs` (`make live`, in
 `make check`): the whole frame, flip to flip, and each half and the rest,
