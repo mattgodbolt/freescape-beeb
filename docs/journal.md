@@ -2194,3 +2194,43 @@ the palette (the view's black flashes too), a colour kept back for the
 panel (every area loses one), or the row above the view redrawn and put
 back (a character row into both buffers, twice a shot). None is the
 original's flash, so none is built and the three are left to Matt.
+
+## 2026-11-14: a fresh-eyes review, and the lines into the fill's bank
+
+Matt asked for a review of the whole disc with fresh eyes, then for more
+speed and more room. The profile first (`tools/livecheck.mjs
+--profile-all` over the check's runs): a walking frame's largest routine
+is under 5% of it and the next twenty are each 1-4%, the fill's row runs,
+line loops and backgrounds about a quarter together, the cone about a
+tenth, the object pass and the transform under 3% each; a turning frame
+adds the bounds and the cache's refill, each under 4%. The one item above
+5% is `snd_ask` (4.9% of a walking frame's mean, 22% of a standing one's),
+which is the logic waiting for the sound queue (decision 110) in a few
+runs that go on into the end while sound 20 plays: a mean, not a median,
+and not the frame's. So nothing of a frame's cost stands out to take, and
+the round went to room first.
+
+**The lines into the fill's bank.** The crosshair's EORs (`lv_cross_off`,
+`lv_cross_on`, `cross_make` and its made code), the laser's lines
+(`lz_eor`, `lz_line`, `lz_plot`) and the sensors' (`sl_eor`) ran from
+`BANK_DATA`'s `LiveData`, the tightest bank, paged in round `raster_frame`
+on purpose; the fill's bank had its room after the code unused since round
+6. They're now a section after the fill's code (`LinesCode`, the loader's
+`LINES`), paged with the fill: the loop pages `BANK_RASTER` once for
+`lv_cross_off`, `raster_frame` and `lv_cross_on` where it paged twice. The
+sensors' lines' bytes (`sl_*`, `sb_*`), which their clock in `BANK_DATA`
+writes and the EORs read, went to main RAM after the fill's scratch bytes
+in the OS's pages (`LinesWork`). And `lv_spot`, the drawn sensor's pixel,
+went from `LiveData` to `LiveGlue` (`LOGIC_BANK`), beside the pick: its
+one caller, `sn_project`, has that bank paged for the records, so its two
+pagings round the call went too. `make live`: every frame the model's byte
+for byte, every pass the transcription's, on both discs.
+
+Room, logic disc, before and after: `BANK_DATA` 145 to 1,150; `LOGIC_BANK`
+482 to 292; shadow RAM past `RigCode` 59 to 75; main RAM before
+`ObjMore`'s page 49 to 56; the fill's bank after its work 1,024 to 256
+(and 116 more before its work's page alignment); the OS's pages' spare
+after the fill's scratch 80 to 45. The frame's cycles are as before
+within where flips fall: walking 1.65 / 4.7 / 147.82 to 1.66 / 4.69 /
+147.82 fields (median / p90 / max), turning 2.2 / 5.77 / 127.65 to 2.21 /
+5.74 / 128.69, entrances 8.66 / 14.69 / 18.24 unchanged.
