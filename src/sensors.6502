@@ -10,7 +10,8 @@
 \ sight if the shot's pick at its pixel hits it (lv_pick), one off the
 \ screen if the logic's walk to it with Margin 0 gets there (move); then the
 \ interrupt's list from the redraw's. It runs with ACCCON's X set, from
-\ shadow RAM (RigCode), and pages the logic's banks itself.
+\ shadow RAM (RigCode), and pages the logic's banks itself (lv_spot and
+\ lv_pick are LOGIC_BANK's, in LiveGlue beside the records).
 \
 \ The original's interrupt counts each listed sensor's frames and fires at
 \ the shield ($BB93); on the disc the main loop counts them, a field at a
@@ -282,18 +283,15 @@ ASSERT TargetY = TargetX + 2 AND TargetZ = TargetX + 4
     LDA #0
     BRA state
 .in_range
-    \ in range: drawn?
-    LOGIC_PAGE A, LOGIC_CODE_BANK               ; (lv_spot, BANK_DATA's)
+    \ in range: drawn? (lv_spot is this bank's, LiveGlue's)
     LDA k : JSR lv_spot
     LDX e
     BCC unseen
     STA SN_FOUND + 4,X
     TYA : STA SN_FOUND + 5,X
-    LDA #1 : BRA seen
+    LDA #1 : BRA state
 .unseen
     LDA #2
-.seen
-    LOGIC_PAGE Y, LOGIC_BANK                    ; (the next records)
 .state
     STA SN_FOUND + 3,X
     TXA : CLC : ADC #SL_ENTRY : STA e
@@ -319,9 +317,10 @@ ENDSECTION
 ASSERT PlayerY = PlayerX + 2 AND PlayerZ = PlayerX + 4
 
 \ ---------------------------------------------------------------------------
-\ The drawn sensor's pixel, in LiveData (BANK_DATA, the logic's
-\ LOGIC_CODE_BANK).
-SECTION LiveData
+\ The drawn sensor's pixel, in LiveGlue (BANK_GLUE, the logic's LOGIC_BANK,
+\ which sn_project has paged for the records).
+ASSERT BANK_GLUE = LOGIC_BANK
+SECTION LiveGlue
 
 \ lv_spot: whether the frame drew the indexed object A (the draw list's
 \ objects, by their slot's ob_ix): C set if so, and its face's pixel (the
@@ -381,14 +380,13 @@ ASSERT SUB = 16
 ENDSECTION
 
 \ ---------------------------------------------------------------------------
-\ The interrupt's part, in LiveData with the lines: the main loop counts the
-\ fields.
-SECTION LiveData
-
-\ The lines of the sensors that fired on the screen ($BC0F), while they
-\ show: their points (as the crosshair's) and when they go (sl_gen, in
+\ The interrupt's part, in LiveData (BANK_DATA): the main loop counts the
+\ fields. The lines of the sensors that fired on the screen ($BC0F), while
+\ they show: their points (as the crosshair's) and when they go (sl_gen, in
 \ Work, moves on as they change: lv_inputs); and in each buffer, those it
-\ has.
+\ has. In main RAM (LinesWork, src/live.6502), as this writes them and the
+\ lines' code in the fill's bank (sl_eor, below) reads them.
+SECTION LinesWork
 .sl_n       SKIP 1
 .sl_x       SKIP SL_ENTRIES
 .sl_y       SKIP SL_ENTRIES
@@ -396,6 +394,8 @@ SECTION LiveData
 .sb_n       SKIP 2
 .sb_x       SKIP 2 * SL_ENTRIES
 .sb_y       SKIP 2 * SL_ENTRIES
+ENDSECTION
+SECTION LiveData
 
 \ lv_lines_init (lv_start's): no crosshair, laser or sensors' lines in
 \ either buffer, the sensors' test not due, their fields counted from now.
@@ -499,10 +499,14 @@ SECTION LiveData
     RTS
 }
 
+ENDSECTION
+
 \ sl_eor: the lines of each sensor in this buffer's set (sb_*, X its
 \ index: draw_buffer) EORed into it: from each one's point to the view's
 \ top and bottom by its centre ($BC1B: (cx - 3, 0), (cx + 3, 0), (cx + 3,
-\ 2 cy), (cx - 3, 2 cy)), by the laser's line.
+\ 2 cy), (cx - 3, 2 cy)), by the laser's line. In LinesCode (the fill's
+\ bank) with the crosshair and the laser's lines, which call it.
+SECTION LinesCode
 .sl_eor
 {
     ZA_AUTO1 j, k, sx0, sy0

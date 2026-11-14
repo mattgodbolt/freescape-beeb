@@ -90,7 +90,10 @@ ENDIF
 \                code calls through trampolines in ObjMore
 \                (src/transform.6502's ANDY_CALL); the loader puts it in
 \                once the OS is gone (LIVE_LATE)
-\   BANK_RASTER  the rasteriser's row runs, code and work (decision 20)
+\   BANK_RASTER  the rasteriser's row runs and code (decision 20), then the
+\                lines drawn over the view by EOR round raster_frame (the
+\                crosshair, the laser's and the sensors': LinesCode), then
+\                the rasteriser's work
 \ HAZEL (ACCCON's Y, set for good once the OS is gone):
 \   the maths' tables (the logic's multiplies share their quarter squares)
 \   and the transform's f64 table (ObjTables), which the loader unpacks once
@@ -104,7 +107,9 @@ ENDIF
 \   clip's), to &3000
 \   Work (src/zp.6502), then RasterIn, the rasteriser's input, where it ends
 \   at RASTER_IN_END: the object pipeline's output (ObjOut) is laid over it,
-\   array for array, so no copy goes between them
+\   array for array, so no copy goes between them; in its last page's spare
+\   bytes, the fill's line heads and scratch and the sensors' lines
+\   (LinesWork)
 \   page &0D: the start (LiveBoot), which runs once
 \ Main RAM's &3000 up to SCREEN: the front end's data, which only
 \   objects_frame and area_enter read and write: the transform's cache
@@ -273,7 +278,20 @@ SECTION RasterRuns, org = &8000, guard = &C000, filename = "RRUNS", cmos = TRUE
 ENDSECTION
 SECTION RasterCode, org = raster_runs_end, guard = &C000, filename = "RCODE", cmos = TRUE
 ENDSECTION
-SECTION RasterWork, org = raster_code_end, guard = &C000, virtual = TRUE
+\ After the fill's code in its bank, the lines drawn over the view by EOR
+\ round raster_frame, with that bank paged: the crosshair (below), the
+\ laser's lines (src/laser.6502) and the sensors' (src/sensors.6502's
+\ sl_eor). Their data (the sensors' lines, which the sensors' clock in
+\ BANK_DATA writes) is main RAM's, after the fill's scratch bytes
+\ (LinesWork, below). Then the fill's work.
+IF LIVE_LOGIC
+SECTION LinesCode, org = raster_code_end, guard = &C000, filename = "LINES", cmos = TRUE
+ENDSECTION
+RASTER_WORK_ORG = lines_code_end
+ELSE
+RASTER_WORK_ORG = raster_code_end
+ENDIF
+SECTION RasterWork, org = RASTER_WORK_ORG, guard = &C000, virtual = TRUE
 ENDSECTION
 SECTION LiveData, org = logic_code_end, guard = &C000, filename = "LDATA", cmos = TRUE
 ENDSECTION
@@ -329,6 +347,13 @@ RASTER_SCRATCH = RASTER_HEAD + VIEW_H
 ASSERT RASTER_SCRATCH + 8 <= RASTER_IN_END
 SECTION RasterIn, org = RASTER_IN_ORG, guard = RASTER_IN_END, virtual = TRUE
 ENDSECTION
+\ ... and after them the sensors' lines (src/sensors.6502's sl_*, sb_*),
+\ which their clock in BANK_DATA writes and the lines' code in the fill's
+\ bank reads (LinesCode, above).
+IF LIVE_LOGIC
+SECTION LinesWork, org = RASTER_SCRATCH + 8, guard = RASTER_IN_END, virtual = TRUE
+ENDSECTION
+ENDIF
 \ The globals' records their slots were built from (src/area.6502), after
 \ Work in the OS's pages.
 SECTION AreaKeep, org = work_end, guard = RASTER_IN_ORG, virtual = TRUE
@@ -555,17 +580,17 @@ ENDIF
     PAGE_IN BANK_DATA
     JSR panel_sync
     JSR frame_begin
-IF LIVE_LOGIC
-    JSR lv_cross_off                            ; (the crosshair this buffer had, off: BANK_DATA's)
-ENDIF
     PAGE_IN BANK_RASTER
+IF LIVE_LOGIC
+    JSR lv_cross_off                            ; (the crosshair this buffer had, off: the fill's bank's)
+ENDIF
     JSR raster_frame
 .live_fill_done                                 ; (... and raster_frame to here)
     PAGE_IN BANK_GLUE
 IF LIVE_LOGIC
     LDX draw_buffer : LDA vw_view : STA lv_bview,X
 .live_cross_on
-    PAGE_IN BANK_DATA
+    PAGE_IN BANK_RASTER
     JSR lv_cross_on                             ; (and the crosshair now, if it's shown)
     PAGE_IN BANK_GLUE
 .live_info_done
@@ -586,7 +611,7 @@ IF LIVE_LOGIC
 \ holds what the rasteriser would draw, and then its crosshair.
 .live_cross_only                                ; (tools/livecheck.mjs: a frame of the crosshair alone)
     JSR frame_begin
-    PAGE_IN BANK_DATA
+    PAGE_IN BANK_RASTER
     JSR lv_cross_off
     JMP live_cross_on
 \ live_info: the information screen's frame (src/info.6502): the view
@@ -598,10 +623,8 @@ IF LIVE_LOGIC
 .live_info                                      ; (tools/livecheck.mjs: the information screen's frame)
     JSR frame_begin
     LDX draw_buffer
-    STZ lv_xon,X : STZ lv_lon,X
+    STZ lv_xon,X : STZ lv_lon,X : STZ sb_n,X
     LDA vw_view : EOR #&80 : STA lv_bview,X
-    PAGE_IN BANK_DATA
-    STZ sb_n,X
     PAGE_IN BANK_RASTER
     JSR raster_forget
     JSR info_draw                               ; (it pages its bank in)
@@ -1936,8 +1959,9 @@ IF LIVE_LOGIC
 \ rasteriser next draws there (lv_cross_off), so the buffer holds what the
 \ rasteriser drew, which it relies on (raster_forget's note). Likewise the
 \ laser's lines (src/laser.6502) and the sensors' (src/sensors.6502). In
-\ LiveData (BANK_DATA), with the lines' code.
-SECTION LiveData
+\ LinesCode (the fill's bank, BANK_RASTER, which the frame loop pages round
+\ raster_frame), with the lines' code.
+SECTION LinesCode
 .lv_cross_off
 {
     LDX draw_buffer
@@ -2410,6 +2434,14 @@ ENDSECTION
 SECTION RasterWork
 .raster_work_end
 ENDSECTION
+IF LIVE_LOGIC
+SECTION LinesCode
+.lines_code_end
+ENDSECTION
+SECTION LinesWork
+.lines_work_end
+ENDSECTION
+ENDIF
 SECTION RasterEnds
 .raster_ends_end
 ENDSECTION
@@ -2472,7 +2504,14 @@ ASSERT obj_work_end <= &E000
 \ The f64 table on a page boundary (src/transform.6502), and in HAZEL.
 ASSERT LO(fq0) = 0 AND fq0 >= &C000 AND obj_tables_end <= &E000
 \ The banks: each section after the last in its bank, below &C000.
-ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= raster_work_end AND raster_work_end <= &C000
+ASSERT raster_runs_end <= raster_code_end AND raster_code_end <= RASTER_WORK_ORG
+ASSERT RASTER_WORK_ORG <= raster_work_end AND raster_work_end <= &C000
+IF LIVE_LOGIC
+    \ (the lines' code after the fill's, and their data in the OS's pages
+    \ after the fill's scratch bytes, before the NMI's page)
+    ASSERT raster_code_end <= lines_code_end AND lines_code_end <= RASTER_WORK_ORG
+    ASSERT RASTER_SCRATCH + 8 <= sl_n AND lines_work_end <= RASTER_IN_END
+ENDIF
 ASSERT live_data_end <= panel_data_end AND panel_data_end <= area_conv_end AND area_conv_end <= &C000
 \ The panel's packed picture where nothing is till clear_work clears it,
 \ after panel_init: the transform's cache (which is virtual: !BOOT loads
@@ -2526,7 +2565,7 @@ ASSERT BANK_DATA <> BANK_OBJ AND BANK_DATA <> BANK_RASTER AND BANK_OBJ <> BANK_R
 \ over the gap in LOGIC), and LIVE_LATE, HAZEL's, ANDY's (the MOS's until
 \ then) and page &0D's, once it's gone; then it starts this at start. It runs from SCREEN, which
 \ screen_init clears.
-LIVE_PARTS = {
+LIVE_MAIN_PARTS = {
     {"LOGIC", BANK_DB, &8000, &C000},
     {"LGLUE", BANK_DB, logic_db_code_end, live_glue_end},
     {"LOGICC", BANK_DATA, &8000, logic_code_end},
@@ -2547,6 +2586,12 @@ LIVE_PARTS = {
     {"SDATA", -1, SOUND_DATA_ORG, sound_data_end},
     {"RIGC", -1, sound_data_end, rig_code_end}
 }
+\ (and with the logic, the lines' code after the fill's in its bank)
+IF LIVE_LOGIC
+    LIVE_PARTS = CONCAT(LIVE_MAIN_PARTS, {{"LINES", BANK_RASTER, raster_code_end, lines_code_end}})
+ELSE
+    LIVE_PARTS = LIVE_MAIN_PARTS
+ENDIF
 LIVE_LATE = {
     {"HAZEL", -1, &C000, hazel_tables_end},
     {"OTABLE", -1, hazel_tables_end, obj_tables_end},

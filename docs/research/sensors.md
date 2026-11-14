@@ -78,8 +78,9 @@ the BBC's (`tools/model/pick.py`, decision 131).
   nothing new to draw, with no pass's frames showing; and the next pass
   waits for it (`sn_due`), as the original's comes after its test. With no
   sensor there, at once (the lists' copy alone). A sensor's pixel is its
-  face's in the draw list (`lv_spot`), the pick at it `lv_pick`, the walk
-  the logic's own `move`. The screen's colours after an area's change wait
+  face's in the draw list (`lv_spot`, in `LOGIC_BANK`'s `LiveGlue` beside
+  the pick, so `sn_project` pages nothing for it), the pick at it
+  `lv_pick`, the walk the logic's own `move`. The screen's colours after an area's change wait
   for the test too, as the original takes them after it.
 - **The shots** (`sn_clock`, each loop, in `BANK_DATA`): the fields counted
   since the last loop, each a frame of the interrupt's (`sn_field`)
@@ -88,8 +89,10 @@ the BBC's (`tools/model/pick.py`, decision 131).
   or ends the game, and the panel's values are set again for the shield's
   bar. A sensor on the screen's lines show for `SENSOR_LINES` fields (sound
   2's and the frame the original takes them off in, decision 134), in
-  frames of their own as the laser's (`sl_eor`, each buffer's set
-  `sb_*`). No border: the BBC's is blank (decision 133). None once the
+  frames of their own as the laser's (`sl_eor`, in the fill's bank with
+  the crosshair's and the laser's EORs, `LinesCode`; each buffer's set
+  `sb_*`, in main RAM's `LinesWork`, which this clock writes). No border:
+  the BBC's is blank (decision 133). None once the
   game's over (`lv_over`) or while the information screen shows
   (`lv_info`), as the original's stop then.
 - **Hiding a sensor**: the logic's own (`src/logic/fcl.6502`'s

@@ -384,10 +384,11 @@ the trimmed mean and per-routine cycles beside it (the journal's
   spends some of that room writing out the line loop's and the
   background's ends (`RASTER_ENDS_INLINE`; `docs/research/raster.md`,
   "Round 8"); the room it has is from `raster_work_end` to `&C000`
-  (`docs/research/raster.md`, "Round 6" to "Round 8"); the 96 bytes after
-  each row's run in the row runs' pages are room besides. The fill's
-  check build keeps the horizon and writes the ends out too, so its work
-  is in main RAM.
+  (`docs/research/raster.md`, "Round 6" to "Round 8"), less what the
+  lines' code takes after `raster_code_end` (`LinesCode`, above); the 96
+  bytes after each row's run in the row runs' pages are room besides. The
+  fill's check build keeps the horizon and writes the ends out too, so its
+  work is in main RAM.
 - What each buffer holds of its lines' ends (`RasterEnds`, decision 100)
   is per-buffer data: the same addresses in main and shadow RAM, the last
   of main RAM's room before `SCREEN`, which shadow RAM has free past the
@@ -401,10 +402,14 @@ the trimmed mean and per-routine cycles beside it (the journal's
   a half turn, and the areas' ids searched for (`docs/journal.md`,
   2026-11-08, "room in the logic's banks"); and `next_crossing` and
   `move` walk the three axes by index. `LOGIC_CODE_BANK`'s room after the
-  logic's code (`LiveData`) holds the crosshair, the laser's and the
-  sensors' lines and the sensors' clock, and `LOGIC_BANK`'s (`LiveGlue`)
-  the shot's pick (2026-11-08, `docs/research/laser.md`,
-  `docs/research/sensors.md`). The pick and the sensors need no record of
+  logic's code (`LiveData`) holds the areas' patterns and the sensors'
+  clock, and `LOGIC_BANK`'s (`LiveGlue`) the shot's pick and the drawn
+  sensor's pixel (2026-11-08, `docs/research/laser.md`,
+  `docs/research/sensors.md`); the crosshair's, the laser's and the
+  sensors' lines' EORs are in the fill's bank after its code (`LinesCode`,
+  2026-11-14), which the frame loop pages round `raster_frame` anyway, and
+  the sensors' lines' bytes in the OS's pages after the fill's scratch
+  (`LinesWork`), where the clock and the EORs both reach them. The pick and the sensors need no record of
   the front end's beyond its frame's: its draw list (`dl_*`, `tf_*` in
   `ObjWork`) and polygons (`ObjOut`) stay until its next frame, and say
   which slot each face is.

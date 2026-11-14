@@ -61,7 +61,9 @@ look.
   fire (0 held or gone down) waits while the last pass's frames show, until
   the frame of its end is drawn (`lv_pass`): the original's last redraw is
   its camera.
-- **The lines** (`lz_eor`): the original's four, by its own DDA, at the
+- **The lines** (`lz_eor`, in the fill's bank after its code with the
+  crosshair's EORs, `LinesCode`, which the loop pages round
+  `raster_frame`): the original's four, by its own DDA, at the
   view's half width: each end's x halved as the crosshair's is (decision
   38), the DDA run in the BBC's pixels (decision 130), each pixel EORed
   with colour 7 as the crosshair's are. They're frames of their own, as the

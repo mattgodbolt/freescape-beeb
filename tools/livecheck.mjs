@@ -263,13 +263,11 @@ const hiddenOf = (flags) => flags.map((v) => v & 0x60).join(",");
 const inputsOf = (f) => `area ${f.area} (entered ${f.gen}), camera ${f.camera}` +
     (FREE ? "" : `, hidden ${f.hiddenAll}, crosshair ${f.cross ?? "off"}, laser ${f.laser ?? "off"}, ` +
         `sensors' lines ${f.slines ? f.slines.join(";") : "none"}`);
-// the sensors' lines (src/sensors.6502, in BANK_DATA's LiveData): the set
-// shown now, or a buffer's
-const BANK_DATA_ = sym("BANK_DATA");
-const dataByte = (a) => ram[bankAt(BANK_DATA_, a)];
+// the sensors' lines (src/sensors.6502, in main RAM: src/live.6502's
+// LinesWork): the set shown now, or a buffer's
 const SL_N = FREE ? 0 : sym("sl_n"), SL_X = FREE ? 0 : sym("sl_x"), SL_Y = FREE ? 0 : sym("sl_y");
 const SB_N = FREE ? 0 : sym("sb_n"), SB_X = FREE ? 0 : sym("sb_x"), SB_Y = FREE ? 0 : sym("sb_y");
-const linesOf = (n, xs, ys) => (n ? [...Array(n).keys()].map((i) => [dataByte(xs + i), dataByte(ys + i)]) : null);
+const linesOf = (n, xs, ys) => (n ? [...Array(n).keys()].map((i) => [ram[xs + i], ram[ys + i]]) : null);
 function inputsNow() {
     const f = { area: ram[LV_AREA], gen: genNow(), camera: camera() };
     if (!FREE) {
@@ -278,7 +276,7 @@ function inputsNow() {
         const info = ram[syms.lv_info];
         f.cross = ram[CROSS_ON] && !info ? [ram[CROSS_X], ram[CROSS_Y]] : null;
         f.laser = ram[LZ_ON] && !info ? [ram[LZ_X], ram[LZ_Y], ram[VIEW_CENTRE]] : null;
-        f.slines = info ? null : linesOf(dataByte(SL_N), SL_X, SL_Y);
+        f.slines = info ? null : linesOf(ram[SL_N], SL_X, SL_Y);
     }
     return inputsOf(f);
 }
@@ -317,6 +315,7 @@ if (profileRest) {
         Logic: sym("BANK_DB"), LiveGlue: sym("BANK_GLUE"), LogicCode: sym("BANK_DATA"), LiveData: sym("BANK_DATA"),
         PanelData: sym("BANK_DATA"), AreaConv: sym("BANK_DATA"), ObjCode: sym("BANK_OBJ"), ObjAndy: -1,
         RasterRuns: sym("BANK_RASTER"), RasterCode: sym("BANK_RASTER"), RasterWork: sym("BANK_RASTER"),
+        LinesCode: sym("BANK_RASTER"),
     };
     const all = JSON.parse(fs.readFileSync(disc.replace(/\.ssd$/, ".json"), "utf8"));
     for (const a of all.assemblies)
@@ -484,7 +483,7 @@ cpu.debugInstruction.add((addr, opcode) => {
             current.laser = ram[LV_LON + b] ? [ram[LV_LX + b], ram[LV_LY + b], ram[VIEW_CENTRE]] : null;
             if (current.laser) laserFrames++;
             // ... and the sensors' lines it has
-            current.slines = linesOf(dataByte(SB_N + b), SB_X + 5 * b, SB_Y + 5 * b);
+            current.slines = linesOf(ram[SB_N + b], SB_X + 5 * b, SB_Y + 5 * b);
             current.centre = [ram[VIEW_CENTRE], ram[VIEW_CENTRE + 1]];
             if (current.slines) sensorLineFrames++;
         }
