@@ -1202,7 +1202,7 @@ itself waiting for the frame of the last pass's end, which only a rig's
 parts or a sensor in the area can make matter, at a frame's wait each such
 pass (held keys a frame slower a pass, where a sensor is).
 
-## 193. No dissolve: a view that comes back after the information screen, or after an object is shown or hidden, is drawn whole (2026-11-10, autonomous, proposed for Matt)
+## 193. No dissolve: a view that comes back after the information screen, or after an object is shown or hidden, is drawn whole (2026-11-10, autonomous; accepted by Matt 2026-11-14)
 
 The original copies its view buffer to the screen at the end of each
 redraw, and when the pass asks for a wipe (`Wipe`, `$8BF0`: set by the
@@ -1227,7 +1227,7 @@ whole view changes; elsewhere it dissolves in an object or a rig's parts.
 The options, for Matt: as built; or the dissolve, as four frames of
 copying a wipe, everywhere the original wipes (a layer of its own).
 
-## 194. No flash for a sensor's shot (2026-11-10, autonomous, proposed for Matt; follows 133)
+## 194. No flash for a sensor's shot (2026-11-10, autonomous; accepted by Matt 2026-11-14: "No dissolve and no flash is fine (perhaps we need sound clues)"; follows 133)
 
 The original flashes the ZX's border in the screen's second colour for a
 frame as a sensor fires (`$BC0F`, `OUT ($FE)`), the shot's lines drawn
@@ -1256,3 +1256,7 @@ interrupt), or some of its bytes redrawn. The candidates:
 
 None is as cheap as the original's one `OUT` and as plainly a border, so
 none is built. The options, for Matt: as built; or one of the three.
+
+Matt accepted this as built, and suggested sound clues in place of the
+flash: a sensor's shot already plays sound 2, so any further cue would be
+a new sound, to be weighed as a decision of its own.
