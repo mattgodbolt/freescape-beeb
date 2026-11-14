@@ -2267,3 +2267,33 @@ keep the pass's own walk; a new game and the end leave no stale line,
 message or animation state that a later read trusts. Room, logic disc: main
 RAM before `ObjMore`'s page 56 to 40 (`lv_discard` and its calls),
 `BANK_DATA` 1,150 to 1,135 (the window's zeroes).
+
+**Speed: counted and not built.** With the profile flat (above) and
+decision 102 ruling out every picture-changing saving, what was left to
+count was small:
+
+- the object pass's candidates kept while the camera's cells, the matrix
+  and the objects' flags hold (most of a walk's frames, a step being under
+  a cell), the slanted planes' and the sensors' tests alone run again:
+  about 1,500 cycles of a walking frame's 93,000, against a cache that
+  every writer of the flags, the area and the cells would have to
+  invalidate, which the check would catch only where a scenario goes;
+- the vertical sync's column probes written out: about 50 cycles a field,
+  of an interrupt of about 830 while a key is held;
+- `object_pass`'s face loop with its bit from a table rather than `ASL`:
+  about 5 cycles a face tested, a few hundred a frame;
+- a sound queue two deep (decision 110's "a longer queue"), which would
+  take `snd_ask`'s waits out of the loop's means (4.9% of a walking frame's
+  mean, 22% of a standing one's, all in the runs that go on into the end
+  under sound 20) at the cost of sounds lagging further behind what made
+  them: Matt's call, not the frame's cost, so not built.
+
+The fill's design floor and the front end's rounds (`docs/research/
+raster.md`, "What's left"; `objects.md`, "What's left") stand: a walking
+frame is 1.66 fields at the median, of which the fill's row runs, line
+loops and backgrounds are about a quarter and the cone a tenth, and the
+rest is spread over twenty routines of 1-4% each. `make check` exits 0
+after the round; the whole frame, flip to flip, fields a frame, median /
+p90 / max over the check's runs: walking 1.65 / 4.68 / 147.81, turning
+2.2 / 5.75 / 127.66, entrances 8.66 / 14.68 / 18.25 (the round's start:
+1.65 / 4.7 / 147.82, 2.2 / 5.77 / 127.65, 8.66 / 14.69 / 18.24).
